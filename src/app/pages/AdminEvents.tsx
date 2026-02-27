@@ -39,6 +39,54 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+/**
+ * Comprime a imagem via Canvas antes de codificar em base64.
+ * Reduz dimensões para no máximo 2048px e qualidade progressiva
+ * até o resultado caber em ~1.2 MB de base64 (≈ 900 KB de imagem).
+ * Isso evita o erro de payload grande no Supabase Edge Function.
+ */
+async function compressToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+
+        // Reduz dimensões se necessário
+        const MAX_DIM = 2048;
+        if (width > MAX_DIM || height > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+          width  = Math.round(width  * ratio);
+          height = Math.round(height * ratio);
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width  = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Reduz qualidade progressivamente até ~1.2 MB de base64
+        const MAX_B64_BYTES = 1.2 * 1024 * 1024;
+        let quality = 0.88;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+        while (dataUrl.length > MAX_B64_BYTES && quality > 0.25) {
+          quality -= 0.08;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+
+        resolve(dataUrl.split(',')[1]);
+      };
+      img.onerror = () => reject(new Error(`Falha ao decodificar ${file.name}`));
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => reject(new Error(`Falha ao ler ${file.name}`));
+  });
+}
+
 /** Parse slug DDMMYYYYHHMM into readable "DD/MM/YYYY · HH:MM" */
 function formatSlug(slug: string): string {
   if (/^\d{12}$/.test(slug)) {
@@ -83,6 +131,7 @@ export function AdminEvents() {
   const navigate = useNavigate();
   const { isAdmin, loading: authLoading, getToken } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const viewerFileInputRef = useRef<HTMLInputElement>(null);
 
   const [events, setEvents] = useState<EventRecord[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
@@ -108,6 +157,14 @@ export function AdminEvents() {
 
   // Search
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Pagination — tours list
+  const EVENTS_PER_PAGE = 8;
+  const [eventsPage, setEventsPage] = useState(1);
+
+  // Pagination — photos grid
+  const PHOTOS_PER_PAGE = 12;
+  const [photosPage, setPhotosPage] = useState(1);
 
   // Photo price (dynamic)
   const [photoPrice, setPhotoPrice] = useState<number | null>(null);
@@ -161,6 +218,7 @@ export function AdminEvents() {
   useEffect(() => {
     if (!selectedEvent) { setEventPhotos([]); return; }
     setPhotosLoading(true);
+    setPhotosPage(1); // reset photo page when switching events
     api.getEventPhotos(selectedEvent.id)
       .then((res) => setEventPhotos(res.photos))
       .catch((err) => console.log('Erro ao buscar fotos:', err))
@@ -255,7 +313,7 @@ export function AdminEvents() {
 
       for (const file of Array.from(files)) {
         try {
-          const base64 = await fileToBase64(file);
+          const base64 = await compressToBase64(file);
           const res = await api.uploadPhoto(event.id, {
             base64,
             fileName: file.name,
@@ -308,6 +366,15 @@ export function AdminEvents() {
     const slugFull = e.slug?.includes(searchQuery);
     return slugMatch || nameMatch || slugFull;
   });
+
+  // Reset events page when search changes
+  useEffect(() => { setEventsPage(1); }, [searchQuery]);
+
+  const eventsTotalPages = Math.max(1, Math.ceil(filteredEvents.length / EVENTS_PER_PAGE));
+  const pagedEvents = filteredEvents.slice((eventsPage - 1) * EVENTS_PER_PAGE, eventsPage * EVENTS_PER_PAGE);
+
+  const photosTotalPages = Math.max(1, Math.ceil(eventPhotos.length / PHOTOS_PER_PAGE));
+  const pagedPhotos = eventPhotos.slice((photosPage - 1) * PHOTOS_PER_PAGE, photosPage * PHOTOS_PER_PAGE);
 
   const previewSlug = computeSlug(uploadDate, uploadTime);
 
@@ -461,7 +528,7 @@ export function AdminEvents() {
                   </p>
                 </div>
               )}
-              {filteredEvents.map((event) => (
+              {pagedEvents.map((event) => (
                 <motion.div
                   key={event.id}
                   layout
@@ -549,6 +616,35 @@ export function AdminEvents() {
                   </div>
                 </motion.div>
               ))}
+              {eventsTotalPages > 1 && (
+                <div className="flex items-center justify-center mt-4">
+                  <button
+                    onClick={() => setEventsPage((prev) => Math.max(1, prev - 1))}
+                    className="p-1.5 rounded-lg transition-colors"
+                    style={{
+                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                      color: eventsPage > 1 ? green : mutedText,
+                    }}
+                    disabled={eventsPage <= 1}
+                  >
+                    <ChevronRight className="w-3.5 h-3.5 rotate-180" />
+                  </button>
+                  <span className="mx-2 text-xs" style={{ color: mutedText }}>
+                    Página {eventsPage} de {eventsTotalPages}
+                  </span>
+                  <button
+                    onClick={() => setEventsPage((prev) => Math.min(eventsTotalPages, prev + 1))}
+                    className="p-1.5 rounded-lg transition-colors"
+                    style={{
+                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                      color: eventsPage < eventsTotalPages ? green : mutedText,
+                    }}
+                    disabled={eventsPage >= eventsTotalPages}
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
             </div>
           </motion.div>
 
@@ -748,7 +844,7 @@ export function AdminEvents() {
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <button
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => viewerFileInputRef.current?.click()}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
                         style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)', color: green, fontWeight: 700 }}
                       >
@@ -782,6 +878,18 @@ export function AdminEvents() {
                         {uploadSuccess > 0 ? `${uploadSuccess} enviada(s)` : 'enviando...'}
                       </span>
                     )}
+                    {!uploading && uploadSuccess > 0 && (
+                      <span className="flex items-center gap-1 text-xs" style={{ color: green }}>
+                        <CheckCircle2 className="w-3 h-3" />
+                        {uploadSuccess} foto{uploadSuccess > 1 ? 's' : ''} adicionada{uploadSuccess > 1 ? 's' : ''}!
+                      </span>
+                    )}
+                    {!uploading && uploadError && (
+                      <span className="flex items-center gap-1 text-xs" style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>
+                        <AlertCircle className="w-3 h-3" />
+                        {uploadError}
+                      </span>
+                    )}
                     <button
                       onClick={() => handleDeleteEvent(selectedEvent.id)}
                       className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
@@ -803,7 +911,7 @@ export function AdminEvents() {
                         style={{
                           borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
                         }}
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => viewerFileInputRef.current?.click()}
                       >
                         <ImageIcon className="w-8 h-8 mb-3" style={{ color: mutedText }} />
                         <p className="text-sm" style={{ color: mutedText }}>
@@ -812,7 +920,7 @@ export function AdminEvents() {
                       </div>
                     ) : (
                       <div className="grid grid-cols-3 gap-2">
-                        {eventPhotos.map((photo) => (
+                        {pagedPhotos.map((photo) => (
                           <div key={photo.id} className="relative group aspect-square rounded-xl overflow-hidden" style={{ border: `1px solid ${cardBorder}` }}>
                             <img
                               src={photo.url}
@@ -835,10 +943,39 @@ export function AdminEvents() {
                         ))}
                       </div>
                     )}
+                    {photosTotalPages > 1 && (
+                      <div className="flex items-center justify-center mt-4">
+                        <button
+                          onClick={() => setPhotosPage((prev) => Math.max(1, prev - 1))}
+                          className="p-1.5 rounded-lg transition-colors"
+                          style={{
+                            background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                            color: photosPage > 1 ? green : mutedText,
+                          }}
+                          disabled={photosPage <= 1}
+                        >
+                          <ChevronRight className="w-3.5 h-3.5 rotate-180" />
+                        </button>
+                        <span className="mx-2 text-xs" style={{ color: mutedText }}>
+                          Página {photosPage} de {photosTotalPages}
+                        </span>
+                        <button
+                          onClick={() => setPhotosPage((prev) => Math.min(photosTotalPages, prev + 1))}
+                          className="p-1.5 rounded-lg transition-colors"
+                          style={{
+                            background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                            color: photosPage < photosTotalPages ? green : mutedText,
+                          }}
+                          disabled={photosPage >= photosTotalPages}
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   <input
-                    ref={fileInputRef}
+                    ref={viewerFileInputRef}
                     type="file"
                     accept="image/*"
                     multiple
@@ -846,7 +983,7 @@ export function AdminEvents() {
                     onChange={(e) => {
                       // Passa o evento selecionado diretamente — sem depender de state de data/hora
                       handleFileUpload(e.target.files, selectedEvent ?? undefined);
-                      // Reset input para permitir re-selecionar o mesmo arquivo
+                      // Reset input para permitir re-selecionar os mesmos arquivos
                       e.target.value = '';
                     }}
                   />
