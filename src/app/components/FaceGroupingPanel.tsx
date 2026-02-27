@@ -3,8 +3,9 @@
  * Usa os descritores já armazenados no KV (processados no upload pelo admin)
  * e faz clusterização greedy client-side para montar os "grupos de pessoa".
  *
- * v2: Algoritmo melhorado com centroid médio real, threshold ajustável,
- *     merge de clusters similares, e UI refinada com avatar circular.
+ * v3: Single-linkage merge + threshold 0.65 para tolerar óculos/variações de pose
+ *     O merge passa a comparar TODOS os pares de descritores entre clusters,
+ *     não apenas os centroides — muito mais robusto para acessórios faciais.
  */
 import { useState, useEffect, useMemo } from 'react';
 import {
@@ -46,13 +47,45 @@ function euclidean(a: number[], b: number[]): number {
   return Math.sqrt(s);
 }
 
+// ── helpers de merge ──────────────────────────────────────────────────────
+
+function mergeClusters(
+  clusters: FaceCluster[],
+  rawDescs: number[][][],
+  i: number,
+  j: number,
+) {
+  const ci = clusters[i];
+  const cj = clusters[j];
+  // Consolidate photo IDs
+  for (const pid of cj.photoIds) {
+    if (!ci.photoIds.includes(pid)) ci.photoIds.push(pid);
+  }
+  // Weighted centroid
+  const ni = ci.descriptorCount;
+  const nj = cj.descriptorCount;
+  ci.centroid = ci.centroid.map((v, k) => (v * ni + cj.centroid[k] * nj) / (ni + nj));
+  ci.descriptorCount = ni + nj;
+  // Merge raw descriptor lists (for future single-linkage checks)
+  rawDescs[i] = rawDescs[i].concat(rawDescs[j]);
+  clusters.splice(j, 1);
+  rawDescs.splice(j, 1);
+}
+
 function clusterFaces(
   faces: { photoId: string; descriptors: number[][] }[],
   photoMap: Map<string, GroupPhoto>,
-  threshold = 0.55, // relaxed from 0.45 to handle glasses/beard/angle variations
+  /**
+   * Threshold principal. 0.65 é mais permissivo que o padrão 0.50–0.55
+   * e cobre variações por óculos (~0.08–0.15 de distância extra).
+   */
+  threshold = 0.65,
 ): FaceCluster[] {
   const clusters: FaceCluster[] = [];
+  // Guarda todos os descritores brutos por cluster — essencial para single-linkage
+  const rawDescs: number[][][] = [];
 
+  // ── Passo 1: Clustering greedy com centroide ──────────────────────────
   for (const { photoId, descriptors } of faces) {
     for (const descriptor of descriptors) {
       let bestIdx = -1;
@@ -64,14 +97,13 @@ function clusterFaces(
       }
 
       if (bestIdx >= 0 && bestDist < threshold) {
-        // Add to existing cluster — update centroid with proper running average
         const c = clusters[bestIdx];
         if (!c.photoIds.includes(photoId)) c.photoIds.push(photoId);
         const n = c.descriptorCount;
-        c.centroid = c.centroid.map((v, i) => (v * n + descriptor[i]) / (n + 1));
+        c.centroid = c.centroid.map((v, k) => (v * n + descriptor[k]) / (n + 1));
         c.descriptorCount = n + 1;
+        rawDescs[bestIdx].push(descriptor);
       } else {
-        // New cluster
         const photo = photoMap.get(photoId);
         clusters.push({
           id: `p${clusters.length}`,
@@ -80,37 +112,46 @@ function clusterFaces(
           photoIds: [photoId],
           coverSrc: photo?.src ?? '',
         });
+        rawDescs.push([[...descriptor]]);
       }
     }
   }
 
-  // Merge pass: merge clusters that are too close to each other (post-clustering cleanup)
-  // Multiple merge passes with progressively higher thresholds for robustness
-  const mergeThresholds = [threshold * 0.80, threshold * 0.90];
-  for (const mt of mergeThresholds) {
-    let merged = true;
-    while (merged) {
-      merged = false;
-      for (let i = 0; i < clusters.length; i++) {
-        for (let j = i + 1; j < clusters.length; j++) {
-          if (euclidean(clusters[i].centroid, clusters[j].centroid) < mt) {
-            // Merge j into i
-            const ci = clusters[i];
-            const cj = clusters[j];
-            for (const pid of cj.photoIds) {
-              if (!ci.photoIds.includes(pid)) ci.photoIds.push(pid);
+  // ── Passo 2: Single-linkage merge ─────────────────────────────────────
+  // Itera até não haver mais merges. Para cada par de clusters, verifica:
+  //   (a) distância entre centroides < threshold  — rápido
+  //   (b) distância entre QUALQUER par de descritores < threshold — robusto
+  // A abordagem (b) é crucial para óculos: o centroide pode estar longe,
+  // mas um descritor individual ainda reconhece a mesma pessoa.
+  let merged = true;
+  while (merged) {
+    merged = false;
+    outer: for (let i = 0; i < clusters.length; i++) {
+      for (let j = i + 1; j < clusters.length; j++) {
+
+        // (a) centroide rápido
+        if (euclidean(clusters[i].centroid, clusters[j].centroid) < threshold) {
+          mergeClusters(clusters, rawDescs, i, j);
+          merged = true;
+          break outer;
+        }
+
+        // (b) single-linkage: qualquer par de descritores brutos
+        let found = false;
+        checkLoop:
+        for (const di of rawDescs[i]) {
+          for (const dj of rawDescs[j]) {
+            if (euclidean(di, dj) < threshold) {
+              found = true;
+              break checkLoop;
             }
-            // Weighted average centroid
-            const ni = ci.descriptorCount;
-            const nj = cj.descriptorCount;
-            ci.centroid = ci.centroid.map((v, k) => (v * ni + cj.centroid[k] * nj) / (ni + nj));
-            ci.descriptorCount = ni + nj;
-            clusters.splice(j, 1);
-            merged = true;
-            break;
           }
         }
-        if (merged) break;
+        if (found) {
+          mergeClusters(clusters, rawDescs, i, j);
+          merged = true;
+          break outer;
+        }
       }
     }
   }
