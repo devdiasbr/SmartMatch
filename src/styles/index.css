@@ -7,3 +7,8 @@
 html {
   position: relative;
 }
+
+/* Hide scrollbar for carousels while keeping scroll functionality */
+.carousel-track::-webkit-scrollbar {
+  display: none;
+}

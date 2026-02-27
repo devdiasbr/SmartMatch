@@ -16,7 +16,6 @@ import {
   ImageIcon,
   Copy,
   DollarSign,
-  Scan,
   Store,
   ClipboardList,
   Settings,
@@ -26,6 +25,9 @@ import { useTheme } from '../components/ThemeProvider';
 import { TabNav } from '../components/TabNav';
 import { useAuth } from '../contexts/AuthContext';
 import { api, type EventRecord, type PhotoRecord, type AdminConfig } from '../lib/api';
+import { useBranding } from '../contexts/BrandingContext';
+import * as faceService from '../lib/faceService'; // import estático → pré-carrega modelos em background
+import { enqueue as faceQueueEnqueue } from '../lib/faceQueue';
 
 /* ─── helpers ─── */
 function fileToBase64(file: File): Promise<string> {
@@ -42,9 +44,9 @@ function fileToBase64(file: File): Promise<string> {
 
 /**
  * Comprime a imagem via Canvas antes de codificar em base64.
- * Reduz dimensões para no máximo 2048px e qualidade progressiva
- * até o resultado caber em ~1.2 MB de base64 (≈ 900 KB de imagem).
- * Isso evita o erro de payload grande no Supabase Edge Function.
+ * Reduz dimensões para no máximo 1600px e qualidade progressiva
+ * até o resultado caber em ~600 KB de base64 (≈ 440 KB de imagem).
+ * Fotos ficam disponíveis em menos de 1 minuto mesmo em lotes grandes.
  */
 async function compressToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -55,8 +57,8 @@ async function compressToBase64(file: File): Promise<string> {
       img.onload = () => {
         let { width, height } = img;
 
-        // Reduz dimensões se necessário
-        const MAX_DIM = 2048;
+        // Reduz dimensões — 1600px mantém boa qualidade e acelera upload
+        const MAX_DIM = 1600;
         if (width > MAX_DIM || height > MAX_DIM) {
           const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
           width  = Math.round(width  * ratio);
@@ -69,13 +71,13 @@ async function compressToBase64(file: File): Promise<string> {
         const ctx = canvas.getContext('2d')!;
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Reduz qualidade progressivamente até ~1.2 MB de base64
-        const MAX_B64_BYTES = 1.2 * 1024 * 1024;
-        let quality = 0.88;
+        // Reduz qualidade progressivamente até ~600 KB de base64
+        const MAX_B64_BYTES = 600 * 1024;
+        let quality = 0.75;
         let dataUrl = canvas.toDataURL('image/jpeg', quality);
 
-        while (dataUrl.length > MAX_B64_BYTES && quality > 0.25) {
-          quality -= 0.08;
+        while (dataUrl.length > MAX_B64_BYTES && quality > 0.2) {
+          quality -= 0.1;
           dataUrl = canvas.toDataURL('image/jpeg', quality);
         }
 
@@ -104,27 +106,9 @@ function computeSlug(date: string, time: string): string {
   return `${d}${m}${y}${h}${min}`;
 }
 
-/* ── Processa faces de uma foto em background ────────────────────── */
-async function processFacesForPhoto(
-  photoId: string,
-  eventId: string,
-  photoUrl: string,
-  token: string,
-): Promise<number> {
-  try {
-    const faceService = await import('../lib/faceService');
-    await faceService.loadModels();
-    const img = await faceService.loadImage(photoUrl);
-    const descriptors = await faceService.detectAllFaces(img);
-    if (descriptors.length > 0) {
-      await api.saveFaceDescriptors(eventId, photoId, descriptors, token);
-    }
-    return descriptors.length;
-  } catch (err) {
-    console.warn(`Face processing failed for photo ${photoId}:`, err);
-    return 0;
-  }
-}
+// faceService importado acima apenas para disparar pré-carregamento dos modelos em background.
+// O processamento real é feito pela fila global em faceQueue.ts.
+void faceService.loadModels; // evita "unused import" sem chamar loadModels aqui
 
 /* ─── ConfirmModal ─────────────────────────────────────────────────────────── */
 interface ConfirmModalProps {
@@ -317,6 +301,7 @@ export function AdminEvents() {
   const isDark = theme === 'dark';
   const navigate = useNavigate();
   const { isAdmin, loading: authLoading, getToken } = useAuth();
+  const { branding, refreshBranding } = useBranding();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewerFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -331,16 +316,11 @@ export function AdminEvents() {
   // Upload form
   const [uploadDate, setUploadDate] = useState('');
   const [uploadTime, setUploadTime] = useState('');
-  const [uploadTag, setUploadTag] = useState('Geral');
+  const [uploadSessionType, setUploadSessionType] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState(0);
   const [dragOver, setDragOver] = useState(false);
-
-  // Face processing status
-  const [faceProcessing, setFaceProcessing] = useState(false);
-  const [facesProcessed, setFacesProcessed] = useState(0);
-  const [facesTotal, setFacesTotal] = useState(0);
 
   // Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -367,9 +347,25 @@ export function AdminEvents() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Viewer — session type inline edit
+  const [viewerSessionTypeInput, setViewerSessionTypeInput] = useState('');
+
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 4000);
+  };
+
+  /** Persists a new session type to branding if it doesn't exist yet. */
+  const registerSessionTypeIfNew = async (sessionType: string, token: string) => {
+    if (!sessionType) return;
+    const existing = branding.eventSessionTypes ?? [];
+    if (existing.includes(sessionType)) return;
+    try {
+      await api.updateAdminBranding({ eventSessionTypes: [...existing, sessionType] }, token);
+      await refreshBranding();
+    } catch (err) {
+      console.warn('Não foi possível salvar o novo tipo de sessão no branding:', err);
+    }
   };
 
   const openConfirm = (opts: { title: string; description: string; detail?: string; confirmLabel?: string; successMsg?: string; action: () => Promise<void> }) => {
@@ -435,7 +431,8 @@ export function AdminEvents() {
     if (!selectedEvent) { setEventPhotos([]); return; }
     setPhotosLoading(true);
     setPhotosPage(1); // reset photo page when switching events
-    api.getEventPhotos(selectedEvent.id)
+    setViewerSessionTypeInput(selectedEvent.sessionType ?? '');
+    api.getEventPhotos(selectedEvent.id, 1, 500)
       .then((res) => setEventPhotos(res.photos))
       .catch((err) => console.log('Erro ao buscar fotos:', err))
       .finally(() => setPhotosLoading(false));
@@ -459,12 +456,13 @@ export function AdminEvents() {
 
   const handleDeleteEvent = (id: string) => {
     const event = events.find(e => e.id === id);
+    const typeLabel = event?.sessionType || 'evento';
     openConfirm({
-      title: 'Excluir este tour?',
-      description: 'Todas as fotos e dados deste tour serão permanentemente removidos.',
+      title: `Excluir este ${typeLabel.toLowerCase()}?`,
+      description: `Todas as fotos e dados deste ${typeLabel.toLowerCase()} serão permanentemente removidos.`,
       detail: event?.name ?? id,
-      confirmLabel: 'Sim, excluir tour',
-      successMsg: `Tour "${event?.name ?? id}" excluído com sucesso.`,
+      confirmLabel: `Sim, excluir ${typeLabel.toLowerCase()}`,
+      successMsg: `${typeLabel} "${event?.name ?? id}" excluído com sucesso.`,
       action: async () => {
         const token = await getToken();
         if (!token) { navigate('/admin/login'); return; }
@@ -494,6 +492,38 @@ export function AdminEvents() {
     });
   };
 
+  const [creatingEvent, setCreatingEvent] = useState(false);
+
+  /** Cria o evento vazio (sem fotos) e abre o viewer. */
+  const handleCreateEventOnly = async () => {
+    if (!uploadDate || !uploadTime) {
+      setUploadError('Selecione a data e horário do tour.');
+      return;
+    }
+    setCreatingEvent(true);
+    setUploadError('');
+    try {
+      const token = await getToken();
+      if (!token) { navigate('/admin/login'); return; }
+      const dateISO = `${uploadDate}T${uploadTime}:00`;
+      const resolvedSessionType = uploadSessionType || 'Tour';
+      const eventRes = await api.createEvent({ date: dateISO, sessionType: resolvedSessionType }, token);
+      const event = eventRes.event;
+      await registerSessionTypeIfNew(resolvedSessionType, token);
+      setEvents((prev) => {
+        const exists = prev.find((e) => e.id === event.id);
+        return exists
+          ? prev.map((e) => (e.id === event.id ? event : e))
+          : [event, ...prev];
+      });
+      setSelectedEvent(event);
+    } catch (err: any) {
+      setUploadError(err.message ?? 'Erro ao criar evento.');
+    } finally {
+      setCreatingEvent(false);
+    }
+  };
+
   const handleFileUpload = async (files: FileList | null, targetEvent?: EventRecord) => {
     if (!files || files.length === 0) return;
 
@@ -519,8 +549,12 @@ export function AdminEvents() {
       } else {
         // Step 1 — Find or create the event by date+time slug
         const dateISO = `${uploadDate}T${uploadTime}:00`;
-        const eventRes = await api.createEvent({ date: dateISO }, token);
+        const resolvedSessionType = uploadSessionType || 'Tour';
+        const eventRes = await api.createEvent({ date: dateISO, sessionType: resolvedSessionType }, token);
         event = eventRes.event;
+
+        // Auto-register new session type in branding
+        await registerSessionTypeIfNew(resolvedSessionType, token);
 
         // Sync local events list
         setEvents((prev) => {
@@ -532,49 +566,69 @@ export function AdminEvents() {
         setSelectedEvent(event);
       }
 
-      // Step 2 — Upload each file
+      // Step 2 — Compress all files first, then upload in parallel batches of 3
       let count = 0;
       const uploadedPhotos: { id: string; url: string }[] = [];
+      const fileArr = Array.from(files);
 
-      for (const file of Array.from(files)) {
-        try {
-          const base64 = await compressToBase64(file);
-          const res = await api.uploadPhoto(event.id, {
-            base64,
-            fileName: file.name,
-            mimeType: file.type || 'image/jpeg',
-            tag: uploadTag,
-          }, token);
-          setEventPhotos((prev) => [...prev, res.photo]);
-          setEvents((prev) => prev.map((e) =>
-            e.id === event.id ? { ...e, photoCount: e.photoCount + 1 } : e
-          ));
-          count++;
-          setUploadSuccess(count);
-          if (res.photo.url) {
-            uploadedPhotos.push({ id: res.photo.id, url: res.photo.url });
+      // Pre-compress all images concurrently (uses only CPU, no network)
+      const compressed = await Promise.all(
+        fileArr.map(async (file) => {
+          try {
+            const base64 = await compressToBase64(file);
+            return { base64, fileName: file.name, mimeType: file.type || 'image/jpeg' };
+          } catch (err: any) {
+            console.log('Erro ao comprimir foto:', err.message);
+            return null;
           }
-        } catch (err: any) {
-          console.log('Erro ao enviar foto:', err.message);
+        })
+      );
+      const validFiles = compressed.filter(Boolean) as { base64: string; fileName: string; mimeType: string }[];
+
+      // Upload in parallel batches of 3
+      const BATCH_SIZE = 3;
+      for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
+        const batch = validFiles.slice(i, i + BATCH_SIZE);
+        const results = await Promise.allSettled(
+          batch.map(async (item) => {
+            const res = await api.uploadPhoto(event.id, {
+              base64: item.base64,
+              fileName: item.fileName,
+              mimeType: item.mimeType,
+              tag: 'Geral',
+            }, token);
+            return res;
+          })
+        );
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            const res = result.value;
+            setEventPhotos((prev) => [...prev, res.photo]);
+            setEvents((prev) => prev.map((e) =>
+              e.id === event.id ? { ...e, photoCount: e.photoCount + 1 } : e
+            ));
+            count++;
+            setUploadSuccess(count);
+            if (res.photo.url) {
+              uploadedPhotos.push({ id: res.photo.id, url: res.photo.url });
+            }
+          } else {
+            console.log('Erro ao enviar foto:', result.reason);
+          }
         }
       }
 
       if (count === 0) {
         setUploadError('Nenhuma foto foi enviada. Verifique os arquivos e tente novamente.');
       } else if (uploadedPhotos.length > 0) {
-        // Process faces in background (lazy — doesn't block UI)
-        setFaceProcessing(true);
-        setFacesProcessed(0);
-        setFacesTotal(uploadedPhotos.length);
-        ;(async () => {
-          let done = 0;
-          for (const { id, url } of uploadedPhotos) {
-            await processFacesForPhoto(id, event.id, url, token);
-            done++;
-            setFacesProcessed(done);
-          }
-          setFaceProcessing(false);
-        })();
+        // Enfileira na fila global — processa em background sem bloquear a UI
+        // O toast de progresso é exibido globalmente via FaceQueueToast no Root
+        faceQueueEnqueue(uploadedPhotos.map(({ id, url }) => ({
+          photoId: id,
+          eventId: event.id,
+          photoUrl: url,
+          token,
+        })));
       }
     } catch (err: any) {
       setUploadError(err.message ?? 'Erro ao processar upload.');
@@ -600,6 +654,11 @@ export function AdminEvents() {
 
   const photosTotalPages = Math.max(1, Math.ceil(eventPhotos.length / PHOTOS_PER_PAGE));
   const pagedPhotos = eventPhotos.slice((photosPage - 1) * PHOTOS_PER_PAGE, photosPage * PHOTOS_PER_PAGE);
+
+  // Clamp photosPage when photos are deleted or added
+  useEffect(() => {
+    setPhotosPage((prev) => Math.min(prev, Math.max(1, Math.ceil(eventPhotos.length / PHOTOS_PER_PAGE))));
+  }, [eventPhotos.length]);
 
   const previewSlug = computeSlug(uploadDate, uploadTime);
 
@@ -633,44 +692,6 @@ export function AdminEvents() {
 
         {/* ── Error Toast ── */}
         <ErrorToast msg={errorMsg} onClose={() => setErrorMsg(null)} isDark={isDark} />
-
-        {/* Face processing toast */}
-        <AnimatePresence>
-          {faceProcessing && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 20 }}
-              className="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-2xl"
-              style={{ background: isDark ? '#0e0e1a' : '#fff', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}
-            >
-              <div className="relative w-8 h-8">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
-                  className="absolute inset-0 rounded-full border-2 border-transparent"
-                  style={{ borderTopColor: isDark ? '#86efac' : '#006B2B' }}
-                />
-                <Scan className="absolute inset-0 m-auto w-3.5 h-3.5" style={{ color: green }} />
-              </div>
-              <div>
-                <p className="text-xs font-bold" style={{ color: isDark ? '#fff' : '#0D2818' }}>
-                  Processando reconhecimento facial
-                </p>
-                <p className="text-[11px]" style={{ color: mutedText }}>
-                  {facesProcessed}/{facesTotal} fotos · modelos de IA ativos
-                </p>
-              </div>
-              <div className="w-24 h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)' }}>
-                <motion.div
-                  className="h-full rounded-full"
-                  style={{ background: `linear-gradient(90deg, ${green}, #7dd3fc)`, width: `${facesTotal > 0 ? (facesProcessed / facesTotal) * 100 : 0}%` }}
-                  transition={{ duration: 0.3 }}
-                />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         {/* Title */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
@@ -810,10 +831,18 @@ export function AdminEvents() {
 
                   {/* Info */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm truncate" style={{ color: textColor, fontWeight: 700 }}>
-                      {event.name}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <p className="text-sm truncate" style={{ color: textColor, fontWeight: 700 }}>
+                        {event.name}
+                      </p>
+                      {event.sessionType && (
+                        <span className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wide"
+                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'}` }}>
+                          {event.sessionType}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
                       <span
                         className="text-[10px] px-2 py-0.5 rounded-full font-mono"
                         style={{
@@ -861,31 +890,54 @@ export function AdminEvents() {
                 </motion.div>
               ))}
               {eventsTotalPages > 1 && (
-                <div className="flex items-center justify-center mt-4">
+                <div className="flex items-center justify-center gap-1 mt-4 pt-3 flex-shrink-0" style={{ borderTop: `1px solid ${cardBorder}` }}>
+                  {/* Prev */}
                   <button
-                    onClick={() => setEventsPage((prev) => Math.max(1, prev - 1))}
-                    className="p-1.5 rounded-lg transition-colors"
-                    style={{
-                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                      color: eventsPage > 1 ? green : mutedText,
-                    }}
+                    onClick={() => setEventsPage((p) => Math.max(1, p - 1))}
                     disabled={eventsPage <= 1}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                    style={{ background: cardBg, border: `1px solid ${cardBorder}`, color: eventsPage > 1 ? green : mutedText, opacity: eventsPage <= 1 ? 0.35 : 1 }}
                   >
-                    <ChevronRight className="w-3.5 h-3.5 rotate-180" />
+                    <ChevronRight className="w-3 h-3 rotate-180" />
                   </button>
-                  <span className="mx-2 text-xs" style={{ color: mutedText }}>
-                    Página {eventsPage} de {eventsTotalPages}
-                  </span>
+
+                  {/* Page numbers */}
+                  {Array.from({ length: eventsTotalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === eventsTotalPages || Math.abs(p - eventsPage) <= 1)
+                    .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                      if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, i) => p === '...'
+                      ? <span key={`e${i}`} className="w-7 text-center text-[10px]" style={{ color: mutedText }}>…</span>
+                      : (
+                        <button
+                          key={p}
+                          onClick={() => setEventsPage(p as number)}
+                          className="w-7 h-7 rounded-lg text-[11px] font-bold transition-all"
+                          style={{
+                            background: p === eventsPage
+                              ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)')
+                              : cardBg,
+                            border: `1px solid ${p === eventsPage ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                            color: p === eventsPage ? green : mutedText,
+                          }}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )
+                  }
+
+                  {/* Next */}
                   <button
-                    onClick={() => setEventsPage((prev) => Math.min(eventsTotalPages, prev + 1))}
-                    className="p-1.5 rounded-lg transition-colors"
-                    style={{
-                      background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                      color: eventsPage < eventsTotalPages ? green : mutedText,
-                    }}
+                    onClick={() => setEventsPage((p) => Math.min(eventsTotalPages, p + 1))}
                     disabled={eventsPage >= eventsTotalPages}
+                    className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                    style={{ background: cardBg, border: `1px solid ${cardBorder}`, color: eventsPage < eventsTotalPages ? green : mutedText, opacity: eventsPage >= eventsTotalPages ? 0.35 : 1 }}
                   >
-                    <ChevronRight className="w-3.5 h-3.5" />
+                    <ChevronRight className="w-3 h-3" />
                   </button>
                 </div>
               )}
@@ -913,13 +965,13 @@ export function AdminEvents() {
                   {/* Header */}
                   <div className="p-5" style={{ borderBottom: `1px solid ${cardBorder}` }}>
                     <div className="flex items-center gap-2 mb-1">
-                      <Upload className="w-4 h-4" style={{ color: green }} />
+                      <CalendarDays className="w-4 h-4" style={{ color: green }} />
                       <h3 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1rem', color: textColor }}>
-                        Enviar Fotos para um Tour
+                        Novo Tour / Enviar Fotos
                       </h3>
                     </div>
                     <p className="text-xs" style={{ color: mutedText }}>
-                      Escolha data + hora → o tour é criado automaticamente pelo slug
+                      Crie o tour vazio agora e envie as fotos depois, ou arraste as fotos para criar e enviar de uma vez
                     </p>
                   </div>
 
@@ -972,22 +1024,73 @@ export function AdminEvents() {
                       </motion.div>
                     )}
 
-                    {/* Tag */}
+                    {/* Session Type */}
                     <div>
                       <label className="flex items-center gap-2 text-xs mb-2" style={{ color: mutedText, fontWeight: 600 }}>
-                        <Camera className="w-3 h-3" style={{ color: green }} />
-                        CATEGORIA DAS FOTOS
+                        <CalendarDays className="w-3 h-3" style={{ color: green }} />
+                        TIPO DE SESSÃO
                       </label>
-                      <select
-                        value={uploadTag}
-                        onChange={(e) => setUploadTag(e.target.value)}
-                        className="w-full px-4 py-2.5 rounded-xl text-sm outline-none appearance-none"
+                      <input
+                        type="text"
+                        value={uploadSessionType}
+                        onChange={(e) => setUploadSessionType(e.target.value)}
+                        placeholder="Ex: Tour, Camarote, VIP…"
+                        className="w-full px-4 py-2.5 rounded-xl text-sm outline-none mb-2"
                         style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor }}
-                      >
-                        {['Geral', 'Arena', 'Camarote', 'Gramado', 'Fachada', 'Bastidores'].map((t) => (
-                          <option key={t} value={t}>{t}</option>
-                        ))}
-                      </select>
+                      />
+                      {(branding.eventSessionTypes ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {branding.eventSessionTypes.map((st) => {
+                            const active = uploadSessionType === st;
+                            return (
+                              <button
+                                key={st}
+                                onClick={() => setUploadSessionType(uploadSessionType === st ? '' : st)}
+                                className="px-3 py-1 rounded-lg text-[10px] transition-all font-medium"
+                                style={{
+                                  background: active ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)') : inputBg,
+                                  border: `1px solid ${active ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                                  color: active ? green : mutedText,
+                                  fontWeight: active ? 700 : 500,
+                                }}
+                              >
+                                {st}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── Botão Criar Evento ── */}
+                    <motion.button
+                      whileHover={!creatingEvent ? { scale: 1.02 } : {}}
+                      whileTap={!creatingEvent ? { scale: 0.97 } : {}}
+                      onClick={handleCreateEventOnly}
+                      disabled={creatingEvent || !uploadDate || !uploadTime}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all"
+                      style={{
+                        background: (uploadDate && uploadTime)
+                          ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.09)')
+                          : inputBg,
+                        border: `1px solid ${(uploadDate && uploadTime)
+                          ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.22)')
+                          : cardBorder}`,
+                        color: (uploadDate && uploadTime) ? green : mutedText,
+                        opacity: (!uploadDate || !uploadTime) ? 0.5 : 1,
+                        cursor: (!uploadDate || !uploadTime) ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {creatingEvent
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Criando…</>
+                        : <><CalendarDays className="w-4 h-4" /> Criar Evento</>}
+                    </motion.button>
+
+                    {/* Separador */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1 h-px" style={{ background: cardBorder }} />
+                      <span className="text-[10px] uppercase tracking-widest" style={{ color: mutedText }}>ou envie fotos agora</span>
+                      <div className="flex-1 h-px" style={{ background: cardBorder }} />
                     </div>
 
                     {/* Drop zone */}
@@ -1104,18 +1207,84 @@ export function AdminEvents() {
                     </div>
                   </div>
 
-                  {/* Tag + hidden input for upload-to-selected-event */}
-                  <div className="px-5 pt-4 flex items-center gap-2">
-                    <select
-                      value={uploadTag}
-                      onChange={(e) => setUploadTag(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg text-xs outline-none appearance-none"
-                      style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor }}
-                    >
-                      {['Geral', 'Arena', 'Camarote', 'Gramado', 'Fachada', 'Bastidores'].map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
+                  {/* Session type inline editor */}
+                  <div className="px-5 pt-3 pb-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
+                      <span className="text-[11px] flex-shrink-0" style={{ color: mutedText, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Tipo:</span>
+                      <input
+                        type="text"
+                        value={viewerSessionTypeInput}
+                        onChange={(e) => setViewerSessionTypeInput(e.target.value)}
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter') {
+                            if (!selectedEvent || viewerSessionTypeInput === selectedEvent.sessionType) return;
+                            const token = await getToken();
+                            if (!token) return;
+                            try {
+                              await api.updateEvent(selectedEvent.id, { sessionType: viewerSessionTypeInput }, token);
+                              setSelectedEvent(prev => prev ? { ...prev, sessionType: viewerSessionTypeInput } : prev);
+                              setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, sessionType: viewerSessionTypeInput } : ev));
+                              await registerSessionTypeIfNew(viewerSessionTypeInput, token);
+                            } catch (err: any) {
+                              setErrorMsg(`Erro ao atualizar tipo: ${err.message}`);
+                              setTimeout(() => setErrorMsg(null), 4000);
+                            }
+                          }
+                        }}
+                        placeholder="Ex: Tour, VIP…"
+                        className="flex-1 min-w-[110px] px-2.5 py-1 rounded-lg text-xs outline-none"
+                        style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor }}
+                      />
+                      {viewerSessionTypeInput !== (selectedEvent?.sessionType ?? '') && (
+                        <button
+                          onClick={async () => {
+                            if (!selectedEvent) return;
+                            const token = await getToken();
+                            if (!token) return;
+                            try {
+                              await api.updateEvent(selectedEvent.id, { sessionType: viewerSessionTypeInput }, token);
+                              setSelectedEvent(prev => prev ? { ...prev, sessionType: viewerSessionTypeInput } : prev);
+                              setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? { ...ev, sessionType: viewerSessionTypeInput } : ev));
+                              await registerSessionTypeIfNew(viewerSessionTypeInput, token);
+                            } catch (err: any) {
+                              setErrorMsg(`Erro ao atualizar tipo: ${err.message}`);
+                              setTimeout(() => setErrorMsg(null), 4000);
+                            }
+                          }}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-bold flex-shrink-0"
+                          style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}` }}
+                        >
+                          Salvar
+                        </button>
+                      )}
+                    </div>
+                    {(branding.eventSessionTypes ?? []).length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {branding.eventSessionTypes.map((st) => {
+                          const active = viewerSessionTypeInput === st;
+                          return (
+                            <button
+                              key={st}
+                              onClick={() => setViewerSessionTypeInput(st)}
+                              className="px-2 py-0.5 rounded-md text-[10px] transition-all"
+                              style={{
+                                background: active ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)') : inputBg,
+                                border: `1px solid ${active ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                                color: active ? green : mutedText,
+                                fontWeight: active ? 700 : 500,
+                              }}
+                            >
+                              {st}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions bar */}
+                  <div className="px-5 pb-1">
+                  <div className="flex items-center gap-2">
                     {uploading && (
                       <span className="flex items-center gap-1 text-xs" style={{ color: green }}>
                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -1139,8 +1308,9 @@ export function AdminEvents() {
                       className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs"
                       style={{ background: isDark ? 'rgba(252,165,165,0.08)' : 'rgba(220,38,38,0.06)', color: isDark ? '#fca5a5' : '#dc2626', fontWeight: 600 }}
                     >
-                      <Trash2 className="w-3 h-3" /> Excluir tour
+                      <Trash2 className="w-3 h-3" /> Excluir {(selectedEvent.sessionType || 'evento').toLowerCase()}
                     </button>
+                  </div>
                   </div>
 
                   {/* Photos grid */}
@@ -1187,33 +1357,64 @@ export function AdminEvents() {
                         ))}
                       </div>
                     )}
-                    {photosTotalPages > 1 && (
-                      <div className="flex items-center justify-center mt-4">
-                        <button
-                          onClick={() => setPhotosPage((prev) => Math.max(1, prev - 1))}
-                          className="p-1.5 rounded-lg transition-colors"
-                          style={{
-                            background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                            color: photosPage > 1 ? green : mutedText,
-                          }}
-                          disabled={photosPage <= 1}
-                        >
-                          <ChevronRight className="w-3.5 h-3.5 rotate-180" />
-                        </button>
-                        <span className="mx-2 text-xs" style={{ color: mutedText }}>
-                          Página {photosPage} de {photosTotalPages}
-                        </span>
-                        <button
-                          onClick={() => setPhotosPage((prev) => Math.min(photosTotalPages, prev + 1))}
-                          className="p-1.5 rounded-lg transition-colors"
-                          style={{
-                            background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
-                            color: photosPage < photosTotalPages ? green : mutedText,
-                          }}
-                          disabled={photosPage >= photosTotalPages}
-                        >
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
+                    {/* Info + paginação de fotos */}
+                    {eventPhotos.length > 0 && (
+                      <div className="mt-4 flex flex-col gap-2">
+                        <p className="text-center text-[10px]" style={{ color: mutedText }}>
+                          {(photosPage - 1) * PHOTOS_PER_PAGE + 1}–{Math.min(photosPage * PHOTOS_PER_PAGE, eventPhotos.length)} de {eventPhotos.length} fotos
+                        </p>
+                        {photosTotalPages > 1 && (
+                          <div className="flex items-center justify-center gap-1">
+                            {/* Prev */}
+                            <button
+                              onClick={() => setPhotosPage((p) => Math.max(1, p - 1))}
+                              disabled={photosPage <= 1}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                              style={{ background: cardBg, border: `1px solid ${cardBorder}`, color: photosPage > 1 ? green : mutedText, opacity: photosPage <= 1 ? 0.35 : 1 }}
+                            >
+                              <ChevronRight className="w-3 h-3 rotate-180" />
+                            </button>
+
+                            {/* Page numbers */}
+                            {Array.from({ length: photosTotalPages }, (_, i) => i + 1)
+                              .filter(p => p === 1 || p === photosTotalPages || Math.abs(p - photosPage) <= 1)
+                              .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                                if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                                acc.push(p);
+                                return acc;
+                              }, [])
+                              .map((p, i) => p === '...'
+                                ? <span key={`ph${i}`} className="w-7 text-center text-[10px]" style={{ color: mutedText }}>…</span>
+                                : (
+                                  <button
+                                    key={p}
+                                    onClick={() => setPhotosPage(p as number)}
+                                    className="w-7 h-7 rounded-lg text-[11px] font-bold transition-all"
+                                    style={{
+                                      background: p === photosPage
+                                        ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)')
+                                        : cardBg,
+                                      border: `1px solid ${p === photosPage ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                                      color: p === photosPage ? green : mutedText,
+                                    }}
+                                  >
+                                    {p}
+                                  </button>
+                                )
+                              )
+                            }
+
+                            {/* Next */}
+                            <button
+                              onClick={() => setPhotosPage((p) => Math.min(photosTotalPages, p + 1))}
+                              disabled={photosPage >= photosTotalPages}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                              style={{ background: cardBg, border: `1px solid ${cardBorder}`, color: photosPage < photosTotalPages ? green : mutedText, opacity: photosPage >= photosTotalPages ? 0.35 : 1 }}
+                            >
+                              <ChevronRight className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

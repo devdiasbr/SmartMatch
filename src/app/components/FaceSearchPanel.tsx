@@ -154,15 +154,12 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
         return;
       }
 
-      const matched = faceService.findMatches(queryDescriptor, faces);
+      // Matching rankeado: min-pool por foto + dois passes (strict → relaxed)
+      const ranked = faceService.findRankedMatches(queryDescriptor, faces);
+      const matched = ranked.map((m) => m.photoId);
 
-      const distances: number[] = [];
-      for (const { descriptors } of faces) {
-        for (const d of descriptors) {
-          distances.push(faceService.euclideanDistance(queryDescriptor, d));
-        }
-      }
-      const best = Math.min(...distances);
+      // Confiança baseada na melhor distância encontrada
+      const best = ranked.length > 0 ? ranked[0].minDistance : 1;
       const conf = Math.max(0, Math.min(100, Math.round((1 - best / 0.8) * 100)));
 
       setMatchedIds(matched);
@@ -240,7 +237,7 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
         faceService.clearCanvas(canvas);
         setFaceDetected(false);
       }
-    }, 500);
+    }, 300);
   };
 
   /* ── upload de selfie (fallback sem câmera) ───────────────────────────── */
@@ -252,7 +249,7 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
     setPreviewSrc(null);
 
     try {
-      setLoadStep('Carregando modelos de IA… (pode levar ~15 s na 1ª vez)');
+      setLoadStep('Carregando modelos de IA…');
       await faceService.loadModels();
       setLoadStep('Modelos prontos. Selecione sua selfie…');
       // trigger file picker after models are loaded

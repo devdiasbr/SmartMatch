@@ -43,7 +43,7 @@ interface FaceCluster {
   coverSrc: string;
 }
 
-/* ── tema helper ─────────────────────────────────────────────────────────── */
+/* ── tema helper ───────────────��─────────────────────────────────────────── */
 
 function useColors() {
   const { theme } = useTheme();
@@ -248,7 +248,7 @@ function PersonCard({ cluster, index, photoMap, eventId, eventName }: {
         <div className="flex-shrink-0 overflow-hidden rounded-full"
           style={{ width: 56, height: 56, border: `2px solid ${allInCart ? c.accentBorder2 : c.avatarBorder}`, background: c.avatarBg }}>
           {cluster.coverSrc
-            ? <img src={cluster.coverSrc} alt={`Pessoa ${index + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+            ? <img src={cluster.coverSrc} alt={`Pessoa ${index + 1}`} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
             : <div className="flex items-center justify-center w-full h-full" style={{ background: c.accentBg }}><User className="w-6 h-6" style={{ color: c.accentText }} /></div>
           }
         </div>
@@ -305,7 +305,7 @@ function PersonCard({ cluster, index, photoMap, eventId, eventName }: {
                   return (
                     <div key={String(photo.id)} className="relative group overflow-hidden rounded-xl flex-shrink-0"
                       style={{ width: 72, height: 48, border: `1px solid ${inCart ? c.accentBorder2 : c.stripBorder}`, cursor: 'pointer' }}>
-                      <img src={photo.src} alt={photo.tag} style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-110 transition-transform duration-300" />
+                      <img src={photo.src} alt={photo.tag} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-110 transition-transform duration-300" />
                       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: c.ovlBg }} />
                       <button onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
                         className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -332,7 +332,7 @@ function PersonCard({ cluster, index, photoMap, eventId, eventName }: {
                     <motion.div key={String(photo.id)} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.03 }}
                       className="relative group overflow-hidden rounded-xl"
                       style={{ aspectRatio: '3/2', border: `1px solid ${inCart ? c.accentBorder2 : c.stripBorder}`, cursor: 'pointer' }}>
-                      <img src={photo.src} alt={photo.tag} style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-105 transition-transform duration-300" />
+                      <img src={photo.src} alt={photo.tag} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-105 transition-transform duration-300" />
                       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)' }} />
                       <div className="absolute inset-x-0 bottom-0 p-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
                         <span className="text-[10px] font-bold" style={{ color: c.accentText }}>R$ {photo.price}</span>
@@ -359,7 +359,11 @@ function UnidentifiedCard({ photos, eventId, eventName }: { photos: GroupPhoto[]
   const { addItem, isInCart, openDrawer } = useCart();
   const c = useColors();
   const [expanded, setExpanded] = useState(false);
+  const [showCount, setShowCount] = useState(12);
   if (photos.length === 0) return null;
+
+  const displayPhotos = expanded ? photos.slice(0, showCount) : [];
+  const hasMore = expanded && showCount < photos.length;
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
@@ -382,7 +386,7 @@ function UnidentifiedCard({ photos, eventId, eventName }: { photos: GroupPhoto[]
             Rosto não encontrado pela IA · Compre individualmente
           </p>
         </div>
-        <button onClick={() => setExpanded(!expanded)} className="p-2 rounded-xl flex-shrink-0"
+        <button onClick={() => { setExpanded(!expanded); setShowCount(12); }} className="p-2 rounded-xl flex-shrink-0"
           style={{ background: c.controlBg, border: `1px solid ${c.controlBorder}`, color: c.controlText }}>
           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
@@ -390,24 +394,35 @@ function UnidentifiedCard({ photos, eventId, eventName }: { photos: GroupPhoto[]
       <AnimatePresence>
         {expanded && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            className="px-5 pb-5 grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
-            {photos.map(photo => {
-              const inCart = isInCart(photo.id, eventId);
-              return (
-                <div key={String(photo.id)} className="relative group overflow-hidden rounded-xl"
-                  style={{ aspectRatio: '3/2', border: `1px solid ${inCart ? c.accentBorder2 : c.stripBorder}`, cursor: 'pointer' }}>
-                  <img src={photo.src} alt={photo.tag} style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-105 transition-transform duration-300" />
-                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)' }} />
-                  <div className="absolute inset-x-0 bottom-0 p-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-[10px] font-bold" style={{ color: c.accentText }}>R$ {photo.price}</span>
-                    <button onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
-                      className="p-1 rounded-lg" style={{ background: inCart ? c.buyInCartBg : 'rgba(22,101,52,0.85)', border: `1px solid ${inCart ? c.accentBorder2 : c.accentBorder}` }}>
-                      {inCart ? <CheckCircle2 className="w-3 h-3" style={{ color: c.accentText }} /> : <ShoppingCart className="w-3 h-3 text-white" />}
-                    </button>
+            className="px-5 pb-5">
+            <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
+              {displayPhotos.map(photo => {
+                const inCart = isInCart(photo.id, eventId);
+                return (
+                  <div key={String(photo.id)} className="relative group overflow-hidden rounded-xl"
+                    style={{ aspectRatio: '3/2', border: `1px solid ${inCart ? c.accentBorder2 : c.stripBorder}`, cursor: 'pointer' }}>
+                    <img src={photo.src} alt={photo.tag} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-105 transition-transform duration-300" />
+                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)' }} />
+                    <div className="absolute inset-x-0 bottom-0 p-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="text-[10px] font-bold" style={{ color: c.accentText }}>R$ {photo.price}</span>
+                      <button onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
+                        className="p-1 rounded-lg" style={{ background: inCart ? c.buyInCartBg : 'rgba(22,101,52,0.85)', border: `1px solid ${inCart ? c.accentBorder2 : c.accentBorder}` }}>
+                        {inCart ? <CheckCircle2 className="w-3 h-3" style={{ color: c.accentText }} /> : <ShoppingCart className="w-3 h-3 text-white" />}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+            {hasMore && (
+              <button
+                onClick={() => setShowCount(prev => prev + 12)}
+                className="w-full mt-3 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2"
+                style={{ background: c.controlBg, border: `1px solid ${c.controlBorder}`, color: c.muted, fontWeight: 700 }}
+              >
+                Carregar mais ({photos.length - showCount} restantes)
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

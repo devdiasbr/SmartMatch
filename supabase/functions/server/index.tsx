@@ -21,14 +21,26 @@ app.use(
   }),
 );
 
-// ── Supabase admin client ─────────────────────────────────────────────────────
+// ── Supabase admin client (singleton) ────────────────────────────────────────
 
+let _sb: ReturnType<typeof createClient> | null = null;
 function sb() {
-  return createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-  );
+  if (!_sb) {
+    _sb = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+  }
+  return _sb;
 }
+
+// ── In-memory branding cache ──────────────────────────────────────────────────
+
+interface BrandingCacheEntry { data: any; ts: number; }
+let brandingCache: BrandingCacheEntry | null = null;
+const BRANDING_TTL = 30_000; // 30 s
+
+function bustBrandingCache() { brandingCache = null; }
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
@@ -117,31 +129,43 @@ app.get("/make-server-68454e9b/stats/public", async (c) => {
 
 // ── Branding ──────────────────────────────────────────────────────────────────
 
-async function brandingWithUrls() {
+async function brandingWithUrls(bustCache = false) {
+  // Serve from in-memory cache when fresh
+  const now = Date.now();
+  if (!bustCache && brandingCache && now - brandingCache.ts < BRANDING_TTL) {
+    return brandingCache.data;
+  }
+
   const b: any = (await kv.get(`${KV}branding`)) ?? {};
-  let logoUrl: string | null = null;
-  let faviconUrl: string | null = null;
-  let ctaBgUrl: string | null = null;
-  const backgroundUrls: string[] = [];
 
-  if (b.logoPath) {
-    const { data } = await sb().storage.from(BUCKET).createSignedUrl(b.logoPath, 3600);
-    logoUrl = data?.signedUrl ?? null;
-  }
-  if (b.faviconPath) {
-    const { data } = await sb().storage.from(BUCKET).createSignedUrl(b.faviconPath, 3600);
-    faviconUrl = data?.signedUrl ?? null;
-  }
-  if (b.ctaBgPath) {
-    const { data } = await sb().storage.from(BUCKET).createSignedUrl(b.ctaBgPath, 3600);
-    ctaBgUrl = data?.signedUrl ?? null;
-  }
-  for (const p of (b.backgroundPaths ?? [])) {
-    const { data } = await sb().storage.from(BUCKET).createSignedUrl(p, 3600);
-    if (data?.signedUrl) backgroundUrls.push(data.signedUrl);
+  // ── Batch-sign all storage paths in ONE round-trip ────────────────────────
+  const pathsToSign: string[] = [
+    b.logoPath,
+    b.faviconPath,
+    b.ctaBgPath,
+    b.scannerImagePath,
+    ...(b.backgroundPaths ?? []),
+  ].filter(Boolean) as string[];
+
+  const urlMap: Record<string, string> = {};
+  if (pathsToSign.length > 0) {
+    const { data: signed } = await sb().storage
+      .from(BUCKET)
+      .createSignedUrls(pathsToSign, 3600);
+    for (const item of signed ?? []) {
+      if (item.signedUrl) urlMap[item.path] = item.signedUrl;
+    }
   }
 
-  return {
+  const logoUrl        = b.logoPath         ? (urlMap[b.logoPath]         ?? null) : null;
+  const faviconUrl     = b.faviconPath      ? (urlMap[b.faviconPath]      ?? null) : null;
+  const ctaBgUrl       = b.ctaBgPath        ? (urlMap[b.ctaBgPath]        ?? null) : null;
+  const scannerImageUrl= b.scannerImagePath ? (urlMap[b.scannerImagePath] ?? null) : null;
+  const backgroundUrls = (b.backgroundPaths ?? [])
+    .map((p: string) => urlMap[p])
+    .filter(Boolean) as string[];
+
+  const result = {
     appName: b.appName ?? "Smart Match",
     pageTitle: b.pageTitle ?? "Smart Match – Tour Palmeiras",
     watermarkText: b.watermarkText ?? "SMART MATCH",
@@ -152,6 +176,7 @@ async function brandingWithUrls() {
     faviconUrl,
     backgroundUrls,
     ctaBgUrl,
+    scannerImageUrl,
     hasLogo: !!b.logoPath,
     hasFavicon: !!b.faviconPath,
     backgroundCount: (b.backgroundPaths ?? []).length,
@@ -178,7 +203,21 @@ async function brandingWithUrls() {
     eventsHeroTitleAccent: b.eventsHeroTitleAccent ?? "Momentos no Allianz",
     eventsHeroSubtitle: b.eventsHeroSubtitle ?? "Busca com reconhecimento facial. Encontre suas fotos pelo data e horário do tour.",
     eventsListTitle: b.eventsListTitle ?? "Tours Disponíveis",
+    eventSessionTypes: (() => {
+      const OLD_DEFAULTS = ["Tour", "Partida", "Confraternização", "Show", "Corporativo"];
+      const stored: string[] = Array.isArray(b.eventSessionTypes) ? b.eventSessionTypes : [];
+      // If the stored list is exactly the old hardcoded defaults, migrate to ['Tour']
+      const isOldDefault =
+        stored.length === OLD_DEFAULTS.length &&
+        OLD_DEFAULTS.every((v, i) => stored[i] === v);
+      if (stored.length === 0 || isOldDefault) return ["Tour"];
+      return stored;
+    })(),
+    bgTransitionInterval: typeof b.bgTransitionInterval === 'number' ? b.bgTransitionInterval : 5,
   };
+
+  brandingCache = { data: result, ts: Date.now() };
+  return result;
 }
 
 // Public branding (no auth)
@@ -194,7 +233,7 @@ app.get("/make-server-68454e9b/branding/public", async (c) => {
       watermarkProducer: "EDU SANTANA PRODUÇÕES",
       watermarkPhotoTag: "◆ FOTO PROTEGIDA ◆",
       watermarkTour: "© TOUR PALMEIRAS",
-      logoUrl: null, faviconUrl: null, backgroundUrls: [],
+      logoUrl: null, faviconUrl: null, backgroundUrls: [], ctaBgUrl: null, scannerImageUrl: null,
       hasLogo: false, hasFavicon: false, backgroundCount: 0, updatedAt: null,
       venueName: "Allianz Parque", venueLocation: "São Paulo, SP",
       tourLabel: "Tour", homeExclusiveText: "Exclusivo Allianz Parque",
@@ -205,7 +244,7 @@ app.get("/make-server-68454e9b/branding/public", async (c) => {
 // Admin branding GET
 app.get("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
   try {
-    return c.json(await brandingWithUrls());
+    return c.json(await brandingWithUrls(true)); // always fresh for admin
   } catch (err) {
     return c.json({ error: `Erro ao buscar branding: ${err}` }, 500);
   }
@@ -246,9 +285,11 @@ app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
       eventsHeroTitleAccent: body.eventsHeroTitleAccent !== undefined ? body.eventsHeroTitleAccent : existing.eventsHeroTitleAccent,
       eventsHeroSubtitle: body.eventsHeroSubtitle !== undefined ? body.eventsHeroSubtitle : existing.eventsHeroSubtitle,
       eventsListTitle: body.eventsListTitle !== undefined ? body.eventsListTitle : existing.eventsListTitle,
+      eventSessionTypes: body.eventSessionTypes !== undefined ? body.eventSessionTypes : existing.eventSessionTypes,
       updatedAt: new Date().toISOString(),
     };
     await kv.set(`${KV}branding`, updated);
+    bustBrandingCache();
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao salvar branding: ${err}` }, 500);
@@ -260,8 +301,8 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
   try {
     const { type, base64, mimeType = "image/png" } = await c.req.json();
     if (!base64 || !type) return c.json({ error: "type e base64 obrigatórios" }, 400);
-    if (!["logo", "favicon", "background", "cta-background"].includes(type))
-      return c.json({ error: "type deve ser logo, favicon, background ou cta-background" }, 400);
+    if (!["logo", "favicon", "background", "cta-background", "scanner-image"].includes(type))
+      return c.json({ error: "type deve ser logo, favicon, background, cta-background ou scanner-image" }, 400);
 
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -280,7 +321,9 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
         ? `branding/favicon-${ts}.${ext}`
         : type === "cta-background"
           ? `branding/cta-bg/cta-${ts}.${ext}`
-          : `branding/bg/bg-${ts}.${ext}`;
+          : type === "scanner-image"
+            ? `branding/scanner/scanner-${ts}.${ext}`
+            : `branding/bg/bg-${ts}.${ext}`;
 
     const { error: uploadError } = await sb().storage
       .from(BUCKET).upload(storagePath, bytes, { contentType: mimeType, upsert: false });
@@ -295,15 +338,19 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
       await sb().storage.from(BUCKET).remove([existing.faviconPath]);
     } else if (type === "cta-background" && existing.ctaBgPath) {
       await sb().storage.from(BUCKET).remove([existing.ctaBgPath]);
+    } else if (type === "scanner-image" && existing.scannerImagePath) {
+      await sb().storage.from(BUCKET).remove([existing.scannerImagePath]);
     }
 
     const updated: any = { ...existing, updatedAt: new Date().toISOString() };
     if (type === "logo") updated.logoPath = storagePath;
     else if (type === "favicon") updated.faviconPath = storagePath;
     else if (type === "cta-background") updated.ctaBgPath = storagePath;
+    else if (type === "scanner-image") updated.scannerImagePath = storagePath;
     else updated.backgroundPaths = [...(existing.backgroundPaths ?? []), storagePath];
 
     await kv.set(`${KV}branding`, updated);
+    bustBrandingCache();
 
     const { data: signData } = await sb().storage.from(BUCKET).createSignedUrl(storagePath, 3600);
     return c.json({ url: signData?.signedUrl ?? null, path: storagePath });
@@ -316,15 +363,16 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
 app.delete("/make-server-68454e9b/admin/branding/asset/:asset", adminAuth, async (c) => {
   try {
     const asset = c.req.param("asset");
-    if (asset !== "logo" && asset !== "favicon" && asset !== "cta-background")
-      return c.json({ error: "Asset deve ser logo, favicon ou cta-background" }, 400);
+    if (asset !== "logo" && asset !== "favicon" && asset !== "cta-background" && asset !== "scanner-image")
+      return c.json({ error: "Asset deve ser logo, favicon, cta-background ou scanner-image" }, 400);
 
     const existing: any = (await kv.get(`${KV}branding`)) ?? {};
-    const pathKey = asset === "logo" ? "logoPath" : asset === "favicon" ? "faviconPath" : "ctaBgPath";
+    const pathKey = asset === "logo" ? "logoPath" : asset === "favicon" ? "faviconPath" : asset === "scanner-image" ? "scannerImagePath" : "ctaBgPath";
     if (existing[pathKey]) {
       await sb().storage.from(BUCKET).remove([existing[pathKey]]);
     }
     await kv.set(`${KV}branding`, { ...existing, [pathKey]: null, updatedAt: new Date().toISOString() });
+    bustBrandingCache();
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao remover asset: ${err}` }, 500);
@@ -342,13 +390,14 @@ app.delete("/make-server-68454e9b/admin/branding/backgrounds/:index", adminAuth,
     const [removed] = paths.splice(idx, 1);
     await sb().storage.from(BUCKET).remove([removed]);
     await kv.set(`${KV}branding`, { ...existing, backgroundPaths: paths, updatedAt: new Date().toISOString() });
+    bustBrandingCache();
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao remover background: ${err}` }, 500);
   }
 });
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Auth ──────────────────────────────────���───────────────────────────────────
 
 // Register admin user
 app.post("/make-server-68454e9b/auth/register", async (c) => {
@@ -462,13 +511,24 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
     const cfg: any = (await kv.get(`${KV}config`)) ?? {};
     const photoPrice: number = cfg.photoPrice ?? 30;
 
+    // sessionType from body, default to first in branding list or 'Tour'
+    const branding: any = (await kv.get(`${KV}branding`)) ?? {};
+    const defaultSessionType = Array.isArray(branding.eventSessionTypes) && branding.eventSessionTypes.length > 0
+      ? branding.eventSessionTypes[0]
+      : "Tour";
+    const sessionType: string = body.sessionType ?? defaultSessionType;
+    const venueName: string = branding.venueName ?? "Allianz Parque";
+    const venueLocation: string = branding.venueLocation ?? "São Paulo, SP";
+    const location = `${venueName}, ${venueLocation}`;
+
     const event = {
       id: slug,
-      name: `Tour ${day}/${month}/${year}, ${hours}:${mins}`,
+      name: `${sessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
       slug,
       date: dateISO,
       endTime: body.endTime ?? "",
-      location: "Allianz Parque, São Paulo, SP",
+      location,
+      sessionType,
       status: "disponivel",
       photoCount: 0,
       faceCount: 0,
@@ -517,6 +577,7 @@ app.delete("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
       await kv.del(`${KV}photo:${pid}`);
     }
     await kv.del(`${KV}photos:event:${id}`);
+    await kv.del(`${KV}faces:event:${id}`); // aggregated face index
     await kv.del(`${KV}event:${id}`);
     await removeFromList(`${KV}events:index`, id);
     return c.json({ success: true });
@@ -542,20 +603,41 @@ app.get("/make-server-68454e9b/events/:id/photos", async (c) => {
     const eventId = c.req.param("id");
     const photoIds = await getList(`${KV}photos:event:${eventId}`);
 
-    // Always serve photos with the current configured price
-    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
-    const currentPrice: number = cfg.photoPrice ?? 30;
+    // Pagination: ?page=1&limit=20 (defaults: page 1, limit 20)
+    const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
+    const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") ?? "20", 10)));
+    const total = photoIds.length;
+    const totalPages = Math.ceil(total / limit);
+    const start = (page - 1) * limit;
+    const pageIds = photoIds.slice(start, start + limit);
 
-    const photos = await Promise.all(
-      photoIds.map(async (pid) => {
-        const p = await kv.get(`${KV}photo:${pid}`);
-        if (!p) return null;
-        const withUrl = await withSignedUrl(p);
-        // Inject current price so UI always reflects the admin setting
-        return { ...withUrl, price: currentPrice };
-      }),
-    );
-    return c.json({ photos: photos.filter(Boolean) });
+    // Batch: fetch config + all photo records in parallel
+    const [cfg, ...photoRecords] = await Promise.all([
+      kv.get(`${KV}config`),
+      ...pageIds.map((pid) => kv.get(`${KV}photo:${pid}`)),
+    ]);
+    const currentPrice: number = (cfg as any)?.photoPrice ?? 30;
+
+    // Collect storage paths for a single batch sign call
+    const validPhotos = photoRecords.filter(Boolean) as any[];
+    const storagePaths = validPhotos.map((p) => p.storagePath).filter(Boolean) as string[];
+
+    const urlMap: Record<string, string> = {};
+    if (storagePaths.length > 0) {
+      const { data: signed } = await sb().storage
+        .from(BUCKET)
+        .createSignedUrls(storagePaths, 3600);
+      for (const item of signed ?? []) {
+        if (item.signedUrl) urlMap[item.path] = item.signedUrl;
+      }
+    }
+
+    const photos = validPhotos.map((p) => ({
+      ...p,
+      url: p.storagePath ? (urlMap[p.storagePath] ?? null) : null,
+      price: currentPrice,
+    }));
+    return c.json({ photos, total, page, totalPages, limit });
   } catch (err) {
     console.log("Erro ao listar fotos:", err);
     return c.json({ error: `Erro ao listar fotos: ${err}` }, 500);
@@ -580,13 +662,19 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
         const mins  = eventId.slice(10, 12);
         const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
         const d = new Date(dateISO);
+        const autoBranding: any = (await kv.get(`${KV}branding`)) ?? {};
+        const autoSessionType = Array.isArray(autoBranding.eventSessionTypes) && autoBranding.eventSessionTypes.length > 0
+          ? autoBranding.eventSessionTypes[0]
+          : "Tour";
+        const autoVenue = `${autoBranding.venueName ?? "Allianz Parque"}, ${autoBranding.venueLocation ?? "São Paulo, SP"}`;
         event = {
           id: eventId,
-          name: `Tour ${day}/${month}/${year}, ${hours}:${mins}`,
+          name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
           slug: eventId,
           date: dateISO,
           endTime: "",
-          location: "Allianz Parque, São Paulo, SP",
+          location: autoVenue,
+          sessionType: autoSessionType,
           status: "disponivel",
           photoCount: 0,
           faceCount: 0,
@@ -678,6 +766,18 @@ app.delete(
       await kv.del(`${KV}photo:${photoId}`);
       await removeFromList(`${KV}photos:event:${eventId}`, photoId);
 
+      // Remove from aggregated face index
+      const facesKey = `${KV}faces:event:${eventId}`;
+      const faceIndex: Record<string, number[][]> = (await kv.get(facesKey)) ?? {};
+      if (faceIndex[photoId]) {
+        delete faceIndex[photoId];
+        if (Object.keys(faceIndex).length > 0) {
+          await kv.set(facesKey, faceIndex);
+        } else {
+          await kv.del(facesKey);
+        }
+      }
+
       // Decrement event photo count
       const event: any = await kv.get(`${KV}event:${eventId}`);
       if (event) {
@@ -720,6 +820,12 @@ app.post(
         facesProcessedAt: new Date().toISOString(),
       });
 
+      // ── Atualiza índice agregado de faces do evento (1 KV → O(1) leitura) ──
+      const facesKey = `${KV}faces:event:${eventId}`;
+      const faceIndex: Record<string, number[][]> = (await kv.get(facesKey)) ?? {};
+      faceIndex[photoId] = descriptors;
+      await kv.set(facesKey, faceIndex);
+
       // Atualiza contador de faces no evento
       if (descriptors.length > 0) {
         const event: any = await kv.get(`${KV}event:${eventId}`);
@@ -741,18 +847,34 @@ app.post(
 );
 
 // Get all face descriptors for an event (public — used for client-side comparison)
+// Fast path: reads ONE aggregated key. Falls back to N reads + auto-migrates legacy data.
 app.get("/make-server-68454e9b/events/:id/faces", async (c) => {
   try {
     const eventId = c.req.param("id");
+    const facesKey = `${KV}faces:event:${eventId}`;
+
+    // ── Fast path: aggregated index (1 KV call) ──────────────────────────────
+    const faceIndex: Record<string, number[][]> | null = await kv.get(facesKey);
+    if (faceIndex) {
+      const faces = Object.entries(faceIndex)
+        .filter(([, descs]) => descs?.length > 0)
+        .map(([photoId, descriptors]) => ({ photoId, descriptors }));
+      return c.json({ faces });
+    }
+
+    // ── Legacy fallback: N KV calls + rebuild aggregated index ───────────────
+    console.log(`[faces] No aggregated index for event ${eventId}, rebuilding from photo records…`);
     const photoIds = await getList(`${KV}photos:event:${eventId}`);
+    const photoRecords = await Promise.all(photoIds.map((pid) => kv.get(`${KV}photo:${pid}`)));
+    const faces = (photoRecords as any[])
+      .filter((p) => p?.faceDescriptors?.length > 0)
+      .map((p) => ({ photoId: p.id, descriptors: p.faceDescriptors }));
 
-    const faces: { photoId: string; descriptors: number[][] }[] = [];
-
-    for (const photoId of photoIds) {
-      const photo: any = await kv.get(`${KV}photo:${photoId}`);
-      if (photo?.faceDescriptors?.length > 0) {
-        faces.push({ photoId, descriptors: photo.faceDescriptors });
-      }
+    // Persist aggregated index so next call is O(1)
+    if (faces.length > 0) {
+      const newIndex: Record<string, number[][]> = {};
+      for (const { photoId, descriptors } of faces) newIndex[photoId] = descriptors;
+      kv.set(facesKey, newIndex).catch(console.warn); // fire-and-forget
     }
 
     return c.json({ faces });
@@ -1057,7 +1179,10 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
 
 app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
   try {
-    const orderIds = await getList(`${KV}orders:index`);
+    const [orderIds, eventIds] = await Promise.all([
+      getList(`${KV}orders:index`),
+      getList(`${KV}events:index`),
+    ]);
     const orders: any[] = (
       await Promise.all(orderIds.map((id) => kv.get(`${KV}order:${id}`)))
     ).filter(Boolean);
@@ -1070,19 +1195,23 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
     const totalPhotos   = paidOrders.reduce((s, o) => s + (o.items?.length ?? 0), 0);
     const pendingOrders = activeOrders.filter((o) => o.status === "pending").length;
 
-    const eventIds = await getList(`${KV}events:index`);
-
-    // Build daily chart for last 14 days
-    const daily: { day: string; receita: number; fotos: number }[] = [];
-    for (let i = 13; i >= 0; i--) {
+    // Build daily chart for last 14 days — fetch all keys in parallel
+    const dailyMeta = Array.from({ length: 14 }, (_, i) => {
       const d = new Date();
-      d.setDate(d.getDate() - i);
+      d.setDate(d.getDate() - (13 - i));
       const dateKey = d.toISOString().slice(0, 10);
       const dayLabel = `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")}`;
-      const receita = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
-      const fotos = ((await kv.get(`${KV}daily:count:${dateKey}`)) as number) ?? 0;
-      daily.push({ day: dayLabel, receita, fotos });
-    }
+      return { dateKey, dayLabel };
+    });
+    const [dailyRevenues, dailyCounts] = await Promise.all([
+      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${KV}daily:revenue:${dateKey}`))),
+      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${KV}daily:count:${dateKey}`))),
+    ]);
+    const daily = dailyMeta.map(({ dayLabel }, i) => ({
+      day: dayLabel,
+      receita: (dailyRevenues[i] as number) ?? 0,
+      fotos:   (dailyCounts[i]   as number) ?? 0,
+    }));
 
     // Recent orders — show all (including cancelled), UI can style accordingly
     const recentOrders = orders.slice(0, 10);
@@ -1256,7 +1385,7 @@ app.post("/make-server-68454e9b/payments/pix", async (c) => {
 app.post("/make-server-68454e9b/payments/preference", async (c) => {
   try {
     const body = await c.req.json();
-    const { amount, customerEmail, orderId, successUrl, failureUrl, pendingUrl } = body;
+    const { amount, customerEmail, orderId, successUrl, failureUrl, pendingUrl, installments } = body;
 
     if (!amount || !customerEmail || !orderId) {
       return c.json({ error: "amount, customerEmail e orderId são obrigatórios" }, 400);
@@ -1267,7 +1396,9 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
       return c.json({ error: "MP_ACCESS_TOKEN não configurado. Configure-o na área Financeiro do admin." }, 500);
     }
 
-    const preferenceBody = {
+    const maxInstallments = Math.min(12, Math.max(1, parseInt(installments ?? "1", 10)));
+
+    const preferenceBody: any = {
       items: [
         {
           title: "Smart Match – Fotos Tour Palmeiras",
@@ -1277,6 +1408,9 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
         },
       ],
       payer: { email: customerEmail },
+      payment_methods: {
+        installments: maxInstallments,
+      },
       back_urls: {
         success: successUrl,
         failure: failureUrl,

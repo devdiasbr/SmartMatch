@@ -84,6 +84,7 @@ export function ProtectedImage({
         alt={alt}
         className="w-full h-full object-cover"
         draggable={false}
+        loading="lazy"
         onDragStart={(e) => e.preventDefault()}
         style={{ pointerEvents: 'none', display: 'block' }}
       />

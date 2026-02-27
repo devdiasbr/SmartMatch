@@ -16,6 +16,7 @@ import { motion, useScroll, useTransform } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
 import { useBranding } from '../contexts/BrandingContext';
 import { api } from '../lib/api';
+import { AnimatedBackground } from '../components/AnimatedBackground';
 
 /* ─── Images ─── */
 const IMG_STADIUM =
@@ -30,6 +31,8 @@ function FaceScanWidget() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const accentGreen = isDark ? '#4ade80' : '#006B2B';
+  const { branding } = useBranding();
+  const scannerImg = branding.scannerImageUrl || IMG_FAN_PORTRAIT;
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: 300, height: 340 }}>
@@ -67,7 +70,7 @@ function FaceScanWidget() {
       >
         {/* Fan image */}
         <img
-          src={IMG_FAN_PORTRAIT}
+          src={scannerImg}
           alt="Face scan"
           className="w-full h-full object-cover"
           style={{ filter: 'saturate(0.7) brightness(0.75)' }}
@@ -221,6 +224,7 @@ function HeroSection() {
 
   // Use branding background if available, else fallback to default stadium photo
   const heroBg = branding.backgroundUrls.length > 0 ? branding.backgroundUrls[0] : IMG_STADIUM;
+  const heroBgUrls = branding.backgroundUrls;
 
   const statsRow = [
     {
@@ -241,11 +245,11 @@ function HeroSection() {
     <section ref={ref} className="relative min-h-screen flex items-center overflow-hidden">
       {/* Background image with parallax */}
       <motion.div className="absolute inset-0 z-0" style={{ y }}>
-        <img
-          src={heroBg}
-          alt="Background"
-          className="w-full h-full object-cover"
-          style={{ filter: 'brightness(0.32) saturate(0.9)' }}
+        <AnimatedBackground
+          urls={heroBgUrls}
+          fallback={IMG_STADIUM}
+          interval={branding.bgTransitionInterval * 1000}
+          filter="brightness(0.32) saturate(0.9)"
         />
       </motion.div>
 

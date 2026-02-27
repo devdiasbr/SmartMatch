@@ -256,6 +256,9 @@ export function Cart() {
   const [pixQrCodeBase64, setPixQrCodeBase64] = useState('');
   const [pixCode, setPixCode] = useState('');
 
+  // Card installments
+  const [installments, setInstallments] = useState(1);
+
   const bg = isDark ? '#08080E' : '#F2F8F4';
   const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.9)';
   const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
@@ -413,6 +416,7 @@ export function Cart() {
           successUrl: `${origin}/carrinho?status=success&orderId=${newOrderId}`,
           failureUrl: `${origin}/carrinho?status=failure`,
           pendingUrl: `${origin}/carrinho?status=pending`,
+          installments,
         });
 
         // checkoutUrl = init_point (production) or sandbox_init_point (test)
@@ -877,21 +881,65 @@ export function Cart() {
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -6 }}
                           transition={{ duration: 0.18 }}
-                          className="flex flex-col items-center gap-3 py-3"
+                          className="flex flex-col gap-4 py-3"
                         >
-                          <div
-                            className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                            style={{ background: '#009ee3' }}
-                          >
-                            <CreditCard className="w-7 h-7 text-white" />
+                          <div className="flex flex-col items-center gap-2">
+                            <div
+                              className="w-12 h-12 rounded-2xl flex items-center justify-center"
+                              style={{ background: '#009ee3' }}
+                            >
+                              <CreditCard className="w-6 h-6 text-white" />
+                            </div>
+                            <p className="text-sm text-center" style={{ color: textColor, fontWeight: 600 }}>
+                              Cartão de Crédito
+                            </p>
                           </div>
-                          <p className="text-sm text-center" style={{ color: textColor, fontWeight: 600 }}>
-                            Checkout Mercado Pago
-                          </p>
+
+                          {/* Installments selector */}
+                          <div>
+                            <p className="text-xs uppercase tracking-widest mb-2" style={{ color: mutedColor, fontWeight: 600 }}>
+                              Parcelamento
+                            </p>
+                            <div className="grid grid-cols-3 gap-2">
+                              {[1, 2, 3, 6, 10, 12].filter(n => finalPrice / n >= 5).map((n) => {
+                                const isActive = installments === n;
+                                const installmentValue = (finalPrice / n).toFixed(2).replace('.', ',');
+                                return (
+                                  <button
+                                    key={n}
+                                    onClick={() => setInstallments(n)}
+                                    className="flex flex-col items-center gap-0.5 py-2.5 px-2 rounded-xl text-center transition-all"
+                                    style={{
+                                      background: isActive
+                                        ? isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)'
+                                        : inputBg,
+                                      border: `1.5px solid ${isActive
+                                        ? isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.3)'
+                                        : borderColor}`,
+                                      color: isActive ? green : textColor,
+                                    }}
+                                  >
+                                    <span style={{ fontWeight: 800, fontSize: '0.85rem', fontFamily: "'Montserrat', sans-serif" }}>
+                                      {n}x
+                                    </span>
+                                    <span style={{ fontSize: '0.65rem', color: isActive ? green : mutedColor, fontWeight: 600 }}>
+                                      R$ {installmentValue}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {installments > 1 && (
+                              <p className="text-xs text-center mt-2" style={{ color: mutedColor }}>
+                                {installments}x de R$ {(finalPrice / installments).toFixed(2).replace('.', ',')} sem juros
+                              </p>
+                            )}
+                          </div>
+
                           <p className="text-xs text-center" style={{ color: mutedColor }}>
-                            Você será redirecionado para a página segura do Mercado Pago para inserir os dados do cartão
+                            Você será redirecionado para a página segura do Mercado Pago
                           </p>
-                          <div className="flex items-center gap-2 text-xs" style={{ color: mutedColor }}>
+                          <div className="flex items-center justify-center gap-2 text-xs" style={{ color: mutedColor }}>
                             <ExternalLink className="w-3 h-3" />
                             Redirecionamento seguro via MP
                           </div>

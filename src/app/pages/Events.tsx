@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
 import { useBranding } from '../contexts/BrandingContext';
 import { api, type EventRecord } from '../lib/api';
+import { AnimatedBackground } from '../components/AnimatedBackground';
 
 /* ── Transform API EventRecord to local session format ── */
 interface TourSession {
@@ -18,6 +19,7 @@ interface TourSession {
   endTime: string;
   location: string;
   photos: number;
+  rawDate: string; // ISO date for filtering
 }
 
 function transformEvent(e: EventRecord): TourSession {
@@ -30,7 +32,7 @@ function transformEvent(e: EventRecord): TourSession {
   return {
     id: e.id,
     slug: e.slug ?? e.id,
-    eventType: 'Tour',
+    eventType: e.sessionType || 'Tour',
     fullDate: `${day}/${month}/${year}, ${hours}:${mins}`,
     dayOfWeek: e.dayOfWeek || '',
     shortDate: `${day}.${month}.${String(year).slice(2)}`,
@@ -38,6 +40,7 @@ function transformEvent(e: EventRecord): TourSession {
     endTime: e.endTime || '',
     location: e.location,
     photos: e.photoCount,
+    rawDate: `${year}-${month}-${day}`,
   };
 }
 
@@ -46,7 +49,8 @@ function SessionCard({ session, index }: { session: TourSession; index: number }
   const isDark = theme === 'dark';
   const { branding } = useBranding();
   const hasPhotos = session.photos > 0;
-  const displayEventType = branding.tourLabel || session.eventType;
+  // If event has a specific sessionType set, use it; otherwise fall back to branding tourLabel
+  const displayEventType = session.eventType !== 'Tour' ? session.eventType : (branding.tourLabel || session.eventType);
 
   const accentColor = hasPhotos
     ? isDark ? '#86efac' : '#006B2B'
@@ -162,10 +166,22 @@ function SessionCard({ session, index }: { session: TourSession; index: number }
 export function Events() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { branding } = useBranding();
 
   const [search, setSearch] = useState('');
   const [sessions, setSessions] = useState<TourSession[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Session type filter
+  const [sessionTypeFilter, setSessionTypeFilter] = useState('');
+
+  // Date filter: default to today (YYYY-MM-DD)
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [dateFilter, setDateFilter] = useState(todayStr);
+
+  // Pagination
+  const PAGE_SIZE = 12;
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     api.getEvents()
@@ -174,38 +190,65 @@ export function Events() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Search: strip non-digits for slug matching + text matching
+  // Filter: session type + date + search text
   const filtered = sessions.filter((s) => {
+    // Session type filter
+    if (sessionTypeFilter && s.eventType !== sessionTypeFilter) return false;
+    // Date filter
+    if (dateFilter && s.rawDate !== dateFilter) return false;
+    // Text search
     if (!search) return true;
     const digits = search.replace(/\D/g, '');
     const slugMatch = digits && s.slug.includes(digits);
     const nameMatch = s.fullDate.toLowerCase().includes(search.toLowerCase()) ||
-      s.dayOfWeek.toLowerCase().includes(search.toLowerCase());
+      s.dayOfWeek.toLowerCase().includes(search.toLowerCase()) ||
+      s.eventType.toLowerCase().includes(search.toLowerCase());
     return slugMatch || nameMatch;
   });
 
-  const totalPhotos = sessions.reduce((a, s) => a + s.photos, 0);
+  // Reset page when filters change
+  useEffect(() => { setCurrentPage(1); }, [dateFilter, search, sessionTypeFilter]);
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice(0, currentPage * PAGE_SIZE);
+  const hasMore = currentPage < totalPages;
+
+  // Check if today has any events
+  const todayHasEvents = sessions.some((s) => s.rawDate === todayStr);
+
+  // Unique dates that have events (for quick-access chips)
+  const availableDates = [...new Set(sessions.map(s => s.rawDate))].sort().reverse();
 
   const headingColor = isDark ? '#ffffff' : '#0D2818';
   const subtitleColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(13,40,24,0.5)';
   const sectionBg = isDark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)';
   const sectionBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.1)';
   const accentGreen = isDark ? '#86efac' : '#006B2B';
+  const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+  const inputBorder = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,107,43,0.12)';
+
+  // Dynamic unit label for the counter: filtered type or generic "eventos"
+  const unitLabel = sessionTypeFilter ? sessionTypeFilter.toLowerCase() : 'eventos';
 
   const IMG_STADIUM_FALLBACK = 'https://images.unsplash.com/photo-1587565276758-0076cff659b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
-  const { branding } = useBranding();
-  const IMG_STADIUM = branding.backgroundUrls[0] ?? IMG_STADIUM_FALLBACK;
+
+  // Format a YYYY-MM-DD into readable label
+  const formatDateLabel = (d: string) => {
+    if (d === todayStr) return 'Hoje';
+    const dt = new Date(d + 'T12:00:00');
+    return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  };
 
   return (
     <div className="min-h-screen">
       {/* ── Hero ── */}
       <section className="relative pt-28 pb-16 px-6 overflow-hidden">
         <div className="absolute inset-0 z-0">
-          <img
-            src={IMG_STADIUM}
-            alt="Allianz Parque"
-            className="w-full h-full object-cover"
-            style={{ filter: 'brightness(0.25) saturate(0.7)' }}
+          <AnimatedBackground
+            urls={branding.backgroundUrls}
+            fallback={IMG_STADIUM_FALLBACK}
+            interval={branding.bgTransitionInterval * 1000}
+            filter="brightness(0.25) saturate(0.7)"
           />
         </div>
         <div
@@ -291,24 +334,157 @@ export function Events() {
                   </h2>
                 </div>
                 <p className="text-sm" style={{ color: subtitleColor }}>
-                  Selecione o tour para ver as fotos · slug = DDMMYYYYHHMM
+                  Selecione o evento para ver as fotos
                 </p>
               </div>
 
               <div className="flex items-center gap-4">
                 <div className="text-center">
                   <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.3rem', fontWeight: 800, color: accentGreen, lineHeight: 1 }}>
-                    {sessions.length}
+                    {filtered.length}
                   </div>
-                  <div className="text-xs mt-0.5" style={{ color: subtitleColor }}>tours</div>
+                  <div className="text-xs mt-0.5" style={{ color: subtitleColor }}>{unitLabel}</div>
                 </div>
                 <div className="w-px h-8" style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }} />
                 <div className="text-center">
                   <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.3rem', fontWeight: 800, color: accentGreen, lineHeight: 1 }}>
-                    {totalPhotos}
+                    {filtered.reduce((a, s) => a + s.photos, 0)}
                   </div>
                   <div className="text-xs mt-0.5" style={{ color: subtitleColor }}>fotos</div>
                 </div>
+              </div>
+            </div>
+
+            {/* Session type filter chips */}
+            {(branding.eventSessionTypes ?? []).length > 1 && (
+              <div className="mt-4 pt-4 flex flex-wrap items-center gap-2" style={{ borderTop: `1px solid ${sectionBorder}` }}>
+                <span className="text-xs mr-1 flex-shrink-0" style={{ color: subtitleColor, fontWeight: 600 }}>Tipo:</span>
+
+                {/* "Todos" chip */}
+                <button
+                  onClick={() => setSessionTypeFilter('')}
+                  className="px-3 py-1.5 rounded-lg text-xs transition-all flex-shrink-0"
+                  style={{
+                    background: !sessionTypeFilter
+                      ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                      : inputBg,
+                    border: `1px solid ${!sessionTypeFilter
+                      ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                      : inputBorder}`,
+                    color: !sessionTypeFilter ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
+                    fontWeight: !sessionTypeFilter ? 700 : 500,
+                  }}
+                >
+                  Todos
+                </button>
+
+                {branding.eventSessionTypes.map((st) => {
+                  const count = sessions.filter(s => s.eventType === st).length;
+                  if (count === 0) return null;
+                  const active = sessionTypeFilter === st;
+                  return (
+                    <button
+                      key={st}
+                      onClick={() => setSessionTypeFilter(active ? '' : st)}
+                      className="px-3 py-1.5 rounded-lg text-xs transition-all flex-shrink-0 flex items-center gap-1.5"
+                      style={{
+                        background: active
+                          ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                          : inputBg,
+                        border: `1px solid ${active
+                          ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                          : inputBorder}`,
+                        color: active ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
+                        fontWeight: active ? 700 : 500,
+                      }}
+                    >
+                      {st}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{
+                        background: active ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'),
+                        color: active ? accentGreen : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'),
+                      }}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Date filter bar */}
+            <div className="mt-4 pt-4 flex flex-wrap items-center gap-2" style={{ borderTop: `1px solid ${sectionBorder}` }}>
+              <Calendar className="w-3.5 h-3.5 flex-shrink-0" style={{ color: subtitleColor }} />
+              <span className="text-xs mr-1" style={{ color: subtitleColor, fontWeight: 600 }}>Data:</span>
+
+              {/* "All" chip */}
+              <button
+                onClick={() => setDateFilter('')}
+                className="px-3 py-1.5 rounded-lg text-xs transition-all"
+                style={{
+                  background: !dateFilter
+                    ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                    : inputBg,
+                  border: `1px solid ${!dateFilter
+                    ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                    : inputBorder}`,
+                  color: !dateFilter ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
+                  fontWeight: !dateFilter ? 700 : 500,
+                }}
+              >
+                Todos
+              </button>
+
+              {/* "Today" chip */}
+              <button
+                onClick={() => setDateFilter(todayStr)}
+                className="px-3 py-1.5 rounded-lg text-xs transition-all"
+                style={{
+                  background: dateFilter === todayStr
+                    ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                    : inputBg,
+                  border: `1px solid ${dateFilter === todayStr
+                    ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                    : inputBorder}`,
+                  color: dateFilter === todayStr ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
+                  fontWeight: dateFilter === todayStr ? 700 : 500,
+                }}
+              >
+                Hoje {todayHasEvents && <span className="ml-1 w-1.5 h-1.5 rounded-full inline-block" style={{ background: accentGreen }} />}
+              </button>
+
+              {/* Recent dates with events (max 5, excluding today) */}
+              {availableDates.filter(d => d !== todayStr).slice(0, 5).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDateFilter(d)}
+                  className="px-3 py-1.5 rounded-lg text-xs transition-all"
+                  style={{
+                    background: dateFilter === d
+                      ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                      : inputBg,
+                    border: `1px solid ${dateFilter === d
+                      ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                      : inputBorder}`,
+                    color: dateFilter === d ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
+                    fontWeight: dateFilter === d ? 700 : 500,
+                  }}
+                >
+                  {formatDateLabel(d)}
+                </button>
+              ))}
+
+              {/* Custom date picker */}
+              <div className="relative ml-auto">
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  className="px-3 py-1.5 rounded-lg text-xs outline-none"
+                  style={{
+                    background: inputBg,
+                    border: `1px solid ${inputBorder}`,
+                    color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                    colorScheme: isDark ? 'dark' : 'light',
+                  }}
+                />
               </div>
             </div>
           </motion.div>
@@ -318,34 +494,90 @@ export function Events() {
             {loading ? (
               <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center py-24">
                 <Loader2 className="w-10 h-10 mx-auto mb-4 animate-spin" style={{ color: subtitleColor }} />
-                <p style={{ color: subtitleColor }}>Carregando tours...</p>
+                <p style={{ color: subtitleColor }}>Carregando eventos...</p>
               </motion.div>
             ) : filtered.length === 0 ? (
               <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-center py-24">
-                <Search className="w-10 h-10 mx-auto mb-4" style={{ color: subtitleColor }} />
+                <Calendar className="w-10 h-10 mx-auto mb-4" style={{ color: subtitleColor }} />
                 <p style={{ color: subtitleColor }}>
-                  Nenhum tour encontrado
-                  {search && <> para <strong style={{ color: headingColor }}>"{search}"</strong></>}
+                  Nenhum evento encontrado
+                  {sessionTypeFilter && <> do tipo <strong style={{ color: headingColor }}>"{sessionTypeFilter}"</strong></>}
+                  {dateFilter === todayStr && ' para hoje'}
+                  {dateFilter && dateFilter !== todayStr && <> para <strong style={{ color: headingColor }}>{dateFilter.split('-').reverse().join('/')}</strong></>}
+                  {search && <> com busca <strong style={{ color: headingColor }}>"{search}"</strong></>}
                 </p>
-                <button
-                  onClick={() => setSearch('')}
-                  className="mt-4 text-sm underline"
-                  style={{ color: subtitleColor }}
-                >
-                  Limpar busca
-                </button>
+                <div className="flex items-center justify-center gap-3 mt-4 flex-wrap">
+                  {sessionTypeFilter && (
+                    <button
+                      onClick={() => setSessionTypeFilter('')}
+                      className="text-sm px-4 py-2 rounded-xl"
+                      style={{
+                        background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)',
+                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`,
+                        color: accentGreen,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Todos os tipos
+                    </button>
+                  )}
+                  {dateFilter && (
+                    <button
+                      onClick={() => setDateFilter('')}
+                      className="text-sm px-4 py-2 rounded-xl"
+                      style={{
+                        background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)',
+                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`,
+                        color: accentGreen,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Ver todos os eventos
+                    </button>
+                  )}
+                  {search && (
+                    <button
+                      onClick={() => setSearch('')}
+                      className="text-sm underline"
+                      style={{ color: subtitleColor }}
+                    >
+                      Limpar busca
+                    </button>
+                  )}
+                </div>
               </motion.div>
             ) : (
               <motion.div
-                key="grid"
+                key={`grid-${dateFilter}-${search}-${sessionTypeFilter}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
               >
-                {filtered.map((session, i) => (
-                  <SessionCard key={session.id} session={session} index={i} />
-                ))}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {paginated.map((session, i) => (
+                    <SessionCard key={session.id} session={session} index={i} />
+                  ))}
+                </div>
+                {/* Load more */}
+                {hasMore && (
+                  <div className="flex justify-center mt-8">
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => setCurrentPage(p => p + 1)}
+                      className="flex items-center gap-2 px-8 py-3.5 rounded-2xl text-sm"
+                      style={{
+                        background: sectionBg,
+                        border: `1px solid ${sectionBorder}`,
+                        color: headingColor,
+                        fontWeight: 700,
+                        fontFamily: "'Montserrat', sans-serif",
+                      }}
+                    >
+                      Carregar mais ({filtered.length - paginated.length} restantes)
+                    </motion.button>
+                  </div>
+                )}
               </motion.div>
             )}
           </AnimatePresence>

@@ -82,6 +82,7 @@ export interface EventRecord {
   faceCount: number;
   price: number;
   dayOfWeek: string;
+  sessionType?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -161,6 +162,7 @@ export interface BrandingConfig {
   faviconUrl: string | null;
   backgroundUrls: string[];
   ctaBgUrl: string | null;
+  scannerImageUrl: string | null;
   hasLogo: boolean;
   hasFavicon: boolean;
   backgroundCount: number;
@@ -187,6 +189,10 @@ export interface BrandingConfig {
   eventsHeroTitleAccent: string;
   eventsHeroSubtitle: string;
   eventsListTitle: string;
+  // Session types
+  eventSessionTypes: string[];
+  // Background slideshow
+  bgTransitionInterval: number; // seconds
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -215,7 +221,7 @@ export const api = {
   // ── Events (admin) ───────────────────────────────────────────────────────
 
   /** find-or-create by date slug */
-  createEvent: (data: Partial<EventRecord>, token: string) =>
+  createEvent: (data: Partial<EventRecord> & { sessionType?: string }, token: string) =>
     aPost<{ event: EventRecord }>('/events', data, token),
 
   updateEvent: (id: string, data: Partial<EventRecord>, token: string) =>
@@ -226,8 +232,10 @@ export const api = {
 
   // ── Photos (public) ──────────────────────────────────────────────────────
 
-  getEventPhotos: (eventId: string) =>
-    get<{ photos: PhotoRecord[] }>(`/events/${eventId}/photos`),
+  getEventPhotos: (eventId: string, page = 1, limit = 20) =>
+    get<{ photos: PhotoRecord[]; total: number; page: number; totalPages: number; limit: number }>(
+      `/events/${eventId}/photos?page=${page}&limit=${limit}`,
+    ),
 
   // ── Photos (admin) ───────────────────────────────────────────────────────
 
@@ -268,7 +276,7 @@ export const api = {
   }, token: string) =>
     aPost<{ order: OrderRecord }>('/orders/pos', data, token),
 
-  // ── Admin Stats ────���─────────────────────────────────────────────────
+  // ── Admin Stats ─────────────────────────────────────────────────────
 
   getAdminStats: (token: string) =>
     aGet<AdminStats>('/admin/stats', token),
@@ -283,14 +291,15 @@ export const api = {
     'venueName' | 'venueLocation' | 'tourLabel' | 'homeExclusiveText' |
     'heroLine1' | 'heroLine2' | 'heroLine3' | 'heroSubtitle' | 'heroCTA' | 'heroBadge' |
     'ctaTitle1' | 'ctaTitle2' | 'ctaSubtitle' | 'ctaButton' |
-    'eventsHeroTitle' | 'eventsHeroTitleAccent' | 'eventsHeroSubtitle' | 'eventsListTitle'
+    'eventsHeroTitle' | 'eventsHeroTitleAccent' | 'eventsHeroSubtitle' | 'eventsListTitle' |
+    'eventSessionTypes' | 'bgTransitionInterval'
   >>, token: string) =>
     aPut<{ success: boolean }>('/admin/branding', data, token),
 
-  uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background' | 'cta-background'; base64: string; mimeType: string }, token: string) =>
+  uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background' | 'cta-background' | 'scanner-image'; base64: string; mimeType: string }, token: string) =>
     aPost<{ url: string | null; path: string }>('/admin/branding/upload', data, token),
 
-  deleteBrandingAsset: (asset: 'logo' | 'favicon' | 'cta-background', token: string) =>
+  deleteBrandingAsset: (asset: 'logo' | 'favicon' | 'cta-background' | 'scanner-image', token: string) =>
     aDel<{ success: boolean }>(`/admin/branding/asset/${asset}`, token),
 
   deleteBrandingBackground: (index: number, token: string) =>
@@ -325,6 +334,7 @@ export const api = {
     successUrl: string;
     failureUrl: string;
     pendingUrl: string;
+    installments?: number;
   }) =>
     post<{ preferenceId: string; checkoutUrl: string; sandboxUrl: string }>(
       '/payments/preference',

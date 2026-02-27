@@ -1,7 +1,7 @@
-import { Outlet, useLocation } from 'react-router';
 import { Header } from './Header';
 import { Footer } from './Footer';
 import { CartDrawer } from './CartDrawer';
+import { FaceQueueToast } from './FaceQueueToast';
 import { useEffect } from 'react';
 import { useTheme } from './ThemeProvider';
 
@@ -39,6 +39,7 @@ export function Root() {
       />
       {!isAdminLogin && <Header />}
       {!isAdminLogin && <CartDrawer />}
+      <FaceQueueToast />
       <main className="relative z-10">
         <Outlet />
       </main>

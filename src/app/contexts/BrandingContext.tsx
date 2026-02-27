@@ -12,6 +12,7 @@ export interface BrandingConfig {
   faviconUrl: string | null;
   backgroundUrls: string[];
   ctaBgUrl: string | null;
+  scannerImageUrl: string | null;
   hasLogo: boolean;
   hasFavicon: boolean;
   backgroundCount: number;
@@ -38,6 +39,10 @@ export interface BrandingConfig {
   eventsHeroTitleAccent: string;
   eventsHeroSubtitle: string;
   eventsListTitle: string;
+  // Session types
+  eventSessionTypes: string[];
+  // Background slideshow
+  bgTransitionInterval: number; // seconds
 }
 
 export const DEFAULT_BRANDING: BrandingConfig = {
@@ -51,6 +56,7 @@ export const DEFAULT_BRANDING: BrandingConfig = {
   faviconUrl: null,
   backgroundUrls: [],
   ctaBgUrl: null,
+  scannerImageUrl: null,
   hasLogo: false,
   hasFavicon: false,
   backgroundCount: 0,
@@ -76,6 +82,8 @@ export const DEFAULT_BRANDING: BrandingConfig = {
   eventsHeroTitleAccent: 'Momentos no Allianz',
   eventsHeroSubtitle: 'Busca com reconhecimento facial. Encontre suas fotos pelo data e horário do tour.',
   eventsListTitle: 'Tours Disponíveis',
+  eventSessionTypes: ['Tour'],
+  bgTransitionInterval: 5,
 };
 
 interface BrandingContextValue {

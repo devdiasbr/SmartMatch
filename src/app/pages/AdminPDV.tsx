@@ -4,7 +4,7 @@ import {
   Store, CalendarDays, BarChart3, DollarSign, Search, ShoppingCart,
   Printer, CheckCircle2, Loader2, Trash2, X, User,
   CreditCard, Banknote, ImageIcon, AlertCircle, ClipboardList,
-  FolderOpen, Scan, Trash, MoveHorizontal,
+  FolderOpen, Scan, Trash, MoveHorizontal, ChevronLeft, ChevronRight,
   Settings,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -189,7 +189,7 @@ export function AdminPDV() {
     setPhotosLoading(true);
     setSearchTerm('');
     setFaceMatchIds([]);
-    api.getEventPhotos(selectedEvent.id)
+    api.getEventPhotos(selectedEvent.id, 1, 500)
       .then(r => setPhotos(r.photos))
       .catch(console.error)
       .finally(() => setPhotosLoading(false));
@@ -381,6 +381,14 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
     pw.document.close();
   };
 
+  /* ── Carrossel de eventos ── */
+  const eventsCarouselRef = useRef<HTMLDivElement>(null);
+  const scrollEvents = (dir: 'left' | 'right') => {
+    const el = eventsCarouselRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir === 'left' ? -260 : 260, behavior: 'smooth' });
+  };
+
   /* ── Filtrar fotos ── */
   const filteredPhotos = photos.filter(p => {
     const term     = searchTerm.toLowerCase();
@@ -388,6 +396,18 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
     const byFace   = faceMatchIds.length === 0 || faceMatchIds.includes(String(p.id));
     return bySearch && byFace;
   });
+
+  /* ── Paginação das fotos ── */
+  const PHOTOS_PER_PAGE = 20;
+  const [photosPage, setPhotosPage] = useState(1);
+  const photosTotalPages = Math.max(1, Math.ceil(filteredPhotos.length / PHOTOS_PER_PAGE));
+  const pagedFilteredPhotos = filteredPhotos.slice(
+    (photosPage - 1) * PHOTOS_PER_PAGE,
+    photosPage * PHOTOS_PER_PAGE,
+  );
+
+  // Resetar página quando o evento, busca ou face-match mudarem
+  useEffect(() => { setPhotosPage(1); }, [selectedEvent?.id, searchTerm, faceMatchIds.length]);
 
   /* ─────────────────────────────────────────────────────────────────────────── */
 
@@ -540,26 +560,68 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                 {events.length === 0 ? (
                   <p className="text-xs text-center py-6" style={{ color:muted }}>Nenhum evento com fotos</p>
                 ) : (
-                  <div className="flex gap-2 flex-wrap p-4">
-                    {events.map(e => (
-                      <button
-                        key={e.id}
-                        onClick={() => setSelectedEvent(e)}
-                        className="px-3 py-2 rounded-xl text-xs font-bold transition-all text-left"
-                        style={{
-                          background: selectedEvent?.id === e.id
-                            ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)') : inputBg,
-                          border: `1px solid ${selectedEvent?.id === e.id
-                            ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.2)') : border}`,
-                          color: selectedEvent?.id === e.id ? green : muted,
-                        }}
-                      >
-                        <span className="block font-bold" style={{ color: selectedEvent?.id === e.id ? green : text }}>
-                          {e.name}
-                        </span>
-                        <span className="text-[9px]">{e.date} · {e.photoCount} fotos</span>
-                      </button>
-                    ))}
+                  <div className="relative">
+                    {/* Seta esquerda */}
+                    <button
+                      onClick={() => scrollEvents('left')}
+                      className="absolute left-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 flex items-center justify-center rounded-full transition-all"
+                      style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)', border: `1px solid ${border}`, color: text }}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+
+                    {/* Trilha rolável */}
+                    <div
+                      ref={eventsCarouselRef}
+                      className="carousel-track flex gap-3 overflow-x-auto px-10 py-4 scroll-smooth"
+                      style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                    >
+                      {events.map(e => {
+                        const active = selectedEvent?.id === e.id;
+                        return (
+                          <button
+                            key={e.id}
+                            onClick={() => setSelectedEvent(e)}
+                            className="flex-shrink-0 w-44 text-left px-3 py-3 rounded-xl transition-all"
+                            style={{
+                              background: active ? (isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.09)') : inputBg,
+                              border: `1.5px solid ${active ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.3)') : border}`,
+                              boxShadow: active ? `0 0 0 3px ${isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)'}` : 'none',
+                            }}
+                          >
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <CalendarDays className="w-3 h-3 flex-shrink-0" style={{ color: active ? green : muted }} />
+                              <span className="text-[10px] font-black truncate" style={{ color: active ? green : text }}>
+                                {e.name}
+                              </span>
+                            </div>
+                            <span className="text-[9px] block truncate" style={{ color: muted }}>
+                              {e.date}
+                            </span>
+                            <div className="mt-2 flex items-center gap-1">
+                              <span
+                                className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
+                                style={{
+                                  background: active ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                                  color: active ? green : muted,
+                                }}
+                              >
+                                {e.photoCount} fotos
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Seta direita */}
+                    <button
+                      onClick={() => scrollEvents('right')}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 z-10 w-7 h-7 flex items-center justify-center rounded-full transition-all"
+                      style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)', border: `1px solid ${border}`, color: text }}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
                 )}
               </motion.div>
@@ -628,8 +690,20 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                     </p>
                   </div>
                 ) : (
+                  <>
+                  {/* Sumário + paginação topo */}
+                  {filteredPhotos.length > 0 && (
+                    <div className="flex items-center justify-between mb-2 text-[10px]" style={{ color: muted }}>
+                      <span>
+                        {(photosPage - 1) * PHOTOS_PER_PAGE + 1}–{Math.min(photosPage * PHOTOS_PER_PAGE, filteredPhotos.length)} de {filteredPhotos.length} fotos
+                      </span>
+                      {photosTotalPages > 1 && (
+                        <span style={{ color: green, fontWeight: 700 }}>Pág. {photosPage}/{photosTotalPages}</span>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                    {filteredPhotos.map(photo => {
+                    {pagedFilteredPhotos.map(photo => {
                       const inCart      = isInCart(photo.id);
                       const isFaceMatch = faceMatchIds.length > 0 && faceMatchIds.includes(String(photo.id));
                       return (
@@ -704,6 +778,63 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                       );
                     })}
                   </div>
+
+                  {/* Barra de paginação */}
+                  {photosTotalPages > 1 && (
+                    <div className="flex items-center justify-center gap-1 mt-3 pt-3" style={{ borderTop: `1px solid ${border}` }}>
+                      {/* Prev */}
+                      <button
+                        onClick={() => setPhotosPage(p => Math.max(1, p - 1))}
+                        disabled={photosPage <= 1}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                        style={{ background: card, border: `1px solid ${border}`, color: photosPage > 1 ? green : muted, opacity: photosPage <= 1 ? 0.3 : 1 }}
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                      </button>
+
+                      {/* Números de página */}
+                      {Array.from({ length: photosTotalPages }, (_, i) => i + 1)
+                        .filter(p => p === 1 || p === photosTotalPages || Math.abs(p - photosPage) <= 1)
+                        .reduce<(number | '...')[]>((acc, p, idx, arr) => {
+                          if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
+                          acc.push(p);
+                          return acc;
+                        }, [])
+                        .map((p, i) => p === '...'
+                          ? <span key={`pdv${i}`} className="w-7 text-center text-[10px]" style={{ color: muted }}>…</span>
+                          : (
+                            <button
+                              key={p}
+                              onClick={() => setPhotosPage(p as number)}
+                              className="w-7 h-7 rounded-lg text-[11px] font-bold transition-all"
+                              style={{
+                                background: p === photosPage
+                                  ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)')
+                                  : card,
+                                border: `1px solid ${p === photosPage
+                                  ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)')
+                                  : border}`,
+                                color: p === photosPage ? green : muted,
+                              }}
+                            >
+                              {p}
+                            </button>
+                          )
+                        )
+                      }
+
+                      {/* Next */}
+                      <button
+                        onClick={() => setPhotosPage(p => Math.min(photosTotalPages, p + 1))}
+                        disabled={photosPage >= photosTotalPages}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center transition-all"
+                        style={{ background: card, border: `1px solid ${border}`, color: photosPage < photosTotalPages ? green : muted, opacity: photosPage >= photosTotalPages ? 0.3 : 1 }}
+                      >
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                  </>
                 )}
               </motion.div>
 

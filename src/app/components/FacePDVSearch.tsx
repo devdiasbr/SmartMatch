@@ -137,7 +137,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
         cvs.getContext('2d')?.drawImage(vid, 0, 0);
         const det = await faceService.detectSingleFace(cvs);
         setFaceDetected(!!det);
-        if (det) faceService.drawFaceBox(cvs, det.detection.box, true);
+        if (det) faceService.drawFaceBox(cvs, det.box, '#86efac');
       }, 300);
     } catch (err: any) {
       setError(err.message ?? 'Erro ao iniciar câmera.');

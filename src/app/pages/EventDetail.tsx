@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router';
 import {
   ArrowLeft,
@@ -27,6 +27,7 @@ import { FaceGroupingPanel } from '../components/FaceGroupingPanel';
 import { ProtectedImage } from '../components/ProtectedImage';
 import { useTheme } from '../components/ThemeProvider';
 import { useBranding } from '../contexts/BrandingContext';
+import { AnimatedBackground } from '../components/AnimatedBackground';
 
 /* ─── Images ─── */
 const IMG_STADIUM = 'https://images.unsplash.com/photo-1587565276758-0076cff659b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1200';
@@ -163,9 +164,10 @@ function PhotoCard({ photo, eventId, eventName, onClick }: {
 }
 
 /* ─── Lightbox ─── */
-function Lightbox({ photos, index, eventId, eventName, onClose, onNext, onPrev }: {
+function Lightbox({ photos, index, eventId, eventName, onClose, onNext, onPrev, globalIndex, totalPhotos, hasNext, hasPrev }: {
   photos: Photo[]; index: number; eventId: string; eventName: string;
   onClose: () => void; onNext: () => void; onPrev: () => void;
+  globalIndex: number; totalPhotos: number; hasNext: boolean; hasPrev: boolean;
 }) {
   const photo = photos[index];
   const { addItem, isInCart, openDrawer } = useCart();
@@ -194,13 +196,22 @@ function Lightbox({ photos, index, eventId, eventName, onClose, onNext, onPrev }
       <button onClick={onClose} className="absolute top-6 right-6 w-10 h-10 rounded-full flex items-center justify-center z-10" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}>
         <X className="w-5 h-5 text-white" />
       </button>
+      {/* Global counter: "13 / 24" */}
       <div className="absolute top-6 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm z-10" style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.5)' }}>
-        {index + 1} / {photos.length}
+        {globalIndex + 1} / {totalPhotos || photos.length}
       </div>
-      <button onClick={(e) => { e.stopPropagation(); onPrev(); }} className="absolute left-6 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center z-10" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); if (hasPrev) onPrev(); }}
+        className="absolute left-6 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center z-10 transition-opacity"
+        style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', opacity: hasPrev ? 1 : 0.25, cursor: hasPrev ? 'pointer' : 'not-allowed' }}
+      >
         <ChevronLeft className="w-6 h-6 text-white" />
       </button>
-      <button onClick={(e) => { e.stopPropagation(); onNext(); }} className="absolute right-6 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center z-10" style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' }}>
+      <button
+        onClick={(e) => { e.stopPropagation(); if (hasNext) onNext(); }}
+        className="absolute right-6 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full flex items-center justify-center z-10 transition-opacity"
+        style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', opacity: hasNext ? 1 : 0.25, cursor: hasNext ? 'pointer' : 'not-allowed' }}
+      >
         <ChevronRight className="w-6 h-6 text-white" />
       </button>
       <div className="relative max-h-[80vh] max-w-[70vw]" onClick={(e) => e.stopPropagation()}>
@@ -325,17 +336,26 @@ export function EventDetail() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Pagination
+  const PHOTOS_PER_PAGE = 12;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPhotos, setTotalPhotos] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loadingPage, setLoadingPage] = useState(false);
+
   useEffect(() => {
     if (!id) { setLoading(false); return; }
     if (EVENT_DATA[id]) {
       setApiEvent(null);
       setPhotos(PHOTOS_MOCK);
+      setTotalPhotos(PHOTOS_MOCK.length);
+      setTotalPages(1);
       setLoading(false);
       return;
     }
     const load = async () => {
       try {
-        const [evRes, phRes] = await Promise.all([api.getEvent(id), api.getEventPhotos(id)]);
+        const [evRes, phRes] = await Promise.all([api.getEvent(id), api.getEventPhotos(id, 1, PHOTOS_PER_PAGE)]);
         const ev = evRes.event;
         const d = new Date(ev.date);
         setApiEvent({
@@ -353,16 +373,132 @@ export function EventDetail() {
           id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
         }));
         setPhotos(mapped.length > 0 ? mapped : []);
+        setTotalPhotos(phRes.total ?? mapped.length);
+        setTotalPages(phRes.totalPages ?? 1);
+        setCurrentPage(1);
       } catch (err) {
         console.log('Erro ao carregar evento, usando fallback:', err);
         setApiEvent(null);
         setPhotos(PHOTOS_MOCK);
+        setTotalPhotos(PHOTOS_MOCK.length);
+        setTotalPages(1);
       } finally {
         setLoading(false);
       }
     };
     load();
   }, [id]);
+
+  /** Navigate to a specific page — fetches from server and replaces photos */
+  const goToPage = async (page: number, scrollTop = true): Promise<boolean> => {
+    if (!id || loadingPage || page < 1 || page > totalPages || page === currentPage) return false;
+    setLoadingPage(true);
+    try {
+      const phRes = await api.getEventPhotos(id, page, PHOTOS_PER_PAGE);
+      const mapped: Photo[] = phRes.photos.map((p: PhotoRecord) => ({
+        id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
+      }));
+      setPhotos(mapped);
+      setCurrentPage(page);
+      setTotalPhotos(phRes.total ?? totalPhotos);
+      setTotalPages(phRes.totalPages ?? totalPages);
+      if (scrollTop) {
+        document.getElementById('photo-grid-top')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      return true;
+    } catch (err) {
+      console.log('Erro ao carregar página de fotos:', err);
+      return false;
+    } finally {
+      setLoadingPage(false);
+    }
+  };
+
+  /**
+   * Guard para navegação do lightbox — evita chamadas simultâneas.
+   * Usa useRef para não causar re-render desnecessário.
+   */
+  const lightboxNavBusy = useRef(false);
+
+  /**
+   * Carrega uma página diretamente para o lightbox, sem usar goToPage
+   * (que teria a trava de loadingPage e verificação de currentPage).
+   */
+  const fetchPageForLightbox = async (page: number): Promise<boolean> => {
+    if (!id || lightboxNavBusy.current || page < 1 || page > totalPages) return false;
+    lightboxNavBusy.current = true;
+    try {
+      const phRes = await api.getEventPhotos(id, page, PHOTOS_PER_PAGE);
+      const mapped: Photo[] = phRes.photos.map((p: PhotoRecord) => ({
+        id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
+      }));
+      setPhotos(mapped);
+      setCurrentPage(page);
+      setTotalPhotos(phRes.total ?? totalPhotos);
+      setTotalPages(phRes.totalPages ?? totalPages);
+      return true;
+    } catch (err) {
+      console.log('Lightbox nav: erro ao carregar página:', err);
+      return false;
+    } finally {
+      lightboxNavBusy.current = false;
+    }
+  };
+
+  /**
+   * Lightbox "next": avança foto a foto; ao chegar na última foto da página
+   * busca a próxima página diretamente e abre no índice 0.
+   */
+  const lightboxNext = async () => {
+    if (lightboxIndex === null || lightboxNavBusy.current) return;
+    if (lightboxIndex < photos.length - 1) {
+      setLightboxIndex(lightboxIndex + 1);
+    } else if (currentPage < totalPages) {
+      const ok = await fetchPageForLightbox(currentPage + 1);
+      if (ok) setLightboxIndex(0);
+    }
+    // última foto da última página — sem loop
+  };
+
+  /**
+   * Lightbox "prev": recua foto a foto; ao chegar na primeira foto da página
+   * busca a página anterior e abre na última foto.
+   */
+  const lightboxPrev = async () => {
+    if (lightboxIndex === null || lightboxNavBusy.current) return;
+    if (lightboxIndex > 0) {
+      setLightboxIndex(lightboxIndex - 1);
+    } else if (currentPage > 1) {
+      const ok = await fetchPageForLightbox(currentPage - 1);
+      // página anterior (não é a última) sempre tem PHOTOS_PER_PAGE fotos
+      if (ok) setLightboxIndex(PHOTOS_PER_PAGE - 1);
+    }
+    // primeira foto da primeira página — sem loop
+  };
+
+  // All photos (for face search / grouping tabs that need the complete set)
+  const [allPhotos, setAllPhotos] = useState<Photo[]>([]);
+  const [allPhotosLoaded, setAllPhotosLoaded] = useState(false);
+
+  const loadAllPhotosIfNeeded = async () => {
+    if (allPhotosLoaded || !id || EVENT_DATA[id]) return;
+    try {
+      const phRes = await api.getEventPhotos(id, 1, 500);
+      const mapped: Photo[] = phRes.photos.map((p: PhotoRecord) => ({
+        id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
+      }));
+      setAllPhotos(mapped);
+      setAllPhotosLoaded(true);
+    } catch (err) {
+      console.log('Erro ao carregar todas as fotos para agrupamento:', err);
+      // Fallback: use whatever we have loaded so far
+      setAllPhotos(photos);
+      setAllPhotosLoaded(true);
+    }
+  };
+
+  // Photos for face tabs: use allPhotos if available, otherwise current paginated photos
+  const facePhotos = allPhotosLoaded ? allPhotos : photos;
 
   const event = apiEvent ?? (id && EVENT_DATA[id] ? EVENT_DATA[id] : FALLBACK_EVENT);
   const eventId = id ?? 'maratona-sp-2024';
@@ -397,7 +533,16 @@ export function EventDetail() {
     <div className="min-h-screen" style={{ background: bg }}>
       {/* Event Hero */}
       <section className="relative h-72 md:h-96 overflow-hidden">
-        <img src={heroUrl} alt={event.title} className="w-full h-full object-cover" style={{ filter: 'brightness(0.4) saturate(0.8)' }} />
+        {apiEvent && branding.backgroundUrls.length > 1 ? (
+          <AnimatedBackground
+            urls={branding.backgroundUrls}
+            fallback={heroUrl}
+            interval={branding.bgTransitionInterval * 1000}
+            filter="brightness(0.4) saturate(0.8)"
+          />
+        ) : (
+          <img src={heroUrl} alt={event.title} className="w-full h-full object-cover" style={{ filter: 'brightness(0.4) saturate(0.8)' }} />
+        )}
         <div className="absolute inset-0" style={{ background: heroGrad }} />
         <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 20% 80%, ${event.tagColor}08 0%, transparent 60%)` }} />
         <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-12 max-w-7xl mx-auto w-full">
@@ -413,7 +558,7 @@ export function EventDetail() {
           <div className="flex flex-wrap items-center gap-4 mt-4">
             <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📅 {event.date}</span>
             <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📍 {event.location}</span>
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📸 {photos.length} fotos disponíveis</span>
+            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📸 {totalPhotos || photos.length} fotos disponíveis</span>
           </div>
         </div>
       </section>
@@ -423,7 +568,7 @@ export function EventDetail() {
         {/* Stats bar */}
         <div className="flex flex-wrap gap-6 mb-8 pb-8" style={{ borderBottom: `1px solid ${divider}` }}>
           {[
-            { value: photos.length, label: 'Fotos', color: statAccent1 },
+            { value: totalPhotos || photos.length, label: 'Fotos', color: statAccent1 },
             { value: `R$ ${photos.length > 0 ? photos[0].price : event.price}`, label: 'por foto', color: statAccent2 },
             { value: '98.7%', label: 'precisão facial', color: statAccent1 },
           ].map(({ value, label, color }, i) => (
@@ -446,7 +591,11 @@ export function EventDetail() {
         </div>
 
         {/* Tabs */}
-        <TabNav className="mb-8" active={activeTab} onChange={(k) => setActiveTab(k as typeof activeTab)} tabs={tabs} />
+        <TabNav className="mb-8" active={activeTab} onChange={(k) => {
+          const tab = k as typeof activeTab;
+          setActiveTab(tab);
+          if (tab === 'minhas' || tab === 'agrupamento') loadAllPhotosIfNeeded();
+        }} tabs={tabs} />
 
         {/* Tab content */}
         <AnimatePresence mode="wait">
@@ -459,18 +608,132 @@ export function EventDetail() {
                   <p className="text-sm mt-2 opacity-60">As fotos são processadas em até 48h após o evento.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {photos.map((photo, i) => (
-                    <PhotoCard key={String(photo.id)} photo={photo} eventId={eventId} eventName={event.title} onClick={() => setLightboxIndex(i)} />
-                  ))}
-                </div>
+                <>
+                  {/* Photo counter + page info */}
+                  <div id="photo-grid-top" className="flex items-center justify-between mb-4 scroll-mt-28">
+                    <p className="text-sm" style={{ color: textSubtle }}>
+                      Exibindo <strong style={{ color: textPrimary }}>{(currentPage - 1) * PHOTOS_PER_PAGE + 1}–{Math.min(currentPage * PHOTOS_PER_PAGE, totalPhotos)}</strong> de <strong style={{ color: textPrimary }}>{totalPhotos}</strong> fotos
+                    </p>
+                    {totalPages > 1 && (
+                      <p className="text-xs" style={{ color: textSubtle }}>
+                        Página {currentPage} de {totalPages}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Loading overlay for page transitions */}
+                  <div className="relative">
+                    {loadingPage && (
+                      <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl" style={{ background: isDark ? 'rgba(8,8,14,0.7)' : 'rgba(242,248,244,0.7)', backdropFilter: 'blur(4px)' }}>
+                        <Loader2 className="w-8 h-8 animate-spin" style={{ color: statAccent1 }} />
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+                      {photos.map((photo, i) => (
+                        <PhotoCard key={String(photo.id)} photo={photo} eventId={eventId} eventName={event.title} onClick={() => setLightboxIndex(i)} />
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* ── Pagination bar ── */}
+                  {totalPages > 1 && (
+                    <div className="flex flex-col items-center gap-3 mt-10">
+                      <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                        {/* Prev button */}
+                        <button
+                          onClick={() => goToPage(currentPage - 1)}
+                          disabled={currentPage <= 1 || loadingPage}
+                          className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
+                          style={{
+                            background: currentPage > 1 ? cardBg : 'transparent',
+                            border: `1px solid ${currentPage > 1 ? cardBorder : 'transparent'}`,
+                            color: currentPage > 1 ? textPrimary : textSubtle,
+                            opacity: currentPage <= 1 ? 0.3 : 1,
+                            cursor: currentPage <= 1 ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+
+                        {/* Page number buttons */}
+                        {(() => {
+                          const pages: (number | '...')[] = [];
+                          if (totalPages <= 7) {
+                            for (let i = 1; i <= totalPages; i++) pages.push(i);
+                          } else {
+                            pages.push(1);
+                            if (currentPage > 3) pages.push('...');
+                            const start = Math.max(2, currentPage - 1);
+                            const end = Math.min(totalPages - 1, currentPage + 1);
+                            for (let i = start; i <= end; i++) pages.push(i);
+                            if (currentPage < totalPages - 2) pages.push('...');
+                            pages.push(totalPages);
+                          }
+                          return pages.map((p, idx) => {
+                            if (p === '...') {
+                              return (
+                                <span key={`ellipsis-${idx}`} className="w-10 h-10 flex items-center justify-center text-xs" style={{ color: textSubtle }}>
+                                  ...
+                                </span>
+                              );
+                            }
+                            const isActive = p === currentPage;
+                            return (
+                              <button
+                                key={p}
+                                onClick={() => goToPage(p)}
+                                disabled={loadingPage}
+                                className="w-10 h-10 rounded-xl flex items-center justify-center text-sm transition-all"
+                                style={{
+                                  background: isActive
+                                    ? isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'
+                                    : cardBg,
+                                  border: `1px solid ${isActive
+                                    ? isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)'
+                                    : cardBorder}`,
+                                  color: isActive ? statAccent1 : textPrimary,
+                                  fontWeight: isActive ? 800 : 500,
+                                  fontFamily: "'Montserrat', sans-serif",
+                                  cursor: loadingPage ? 'wait' : 'pointer',
+                                }}
+                              >
+                                {p}
+                              </button>
+                            );
+                          });
+                        })()}
+
+                        {/* Next button */}
+                        <button
+                          onClick={() => goToPage(currentPage + 1)}
+                          disabled={currentPage >= totalPages || loadingPage}
+                          className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
+                          style={{
+                            background: currentPage < totalPages ? cardBg : 'transparent',
+                            border: `1px solid ${currentPage < totalPages ? cardBorder : 'transparent'}`,
+                            color: currentPage < totalPages ? textPrimary : textSubtle,
+                            opacity: currentPage >= totalPages ? 0.3 : 1,
+                            cursor: currentPage >= totalPages ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Quick summary */}
+                      <p className="text-[11px]" style={{ color: textSubtle }}>
+                        {PHOTOS_PER_PAGE} fotos por página · Total: {totalPhotos}
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
             </motion.div>
           )}
-          {activeTab === 'minhas'      && <FaceSearchTab    photos={photos} eventId={eventId} eventName={event.title} />}
+          {activeTab === 'minhas'      && <FaceSearchTab    photos={facePhotos} eventId={eventId} eventName={event.title} />}
           {activeTab === 'agrupamento' && (
             <motion.div key="agrupamento" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
-              <FaceGroupingTab photos={photos} eventId={eventId} eventName={event.title} />
+              <FaceGroupingTab photos={facePhotos} eventId={eventId} eventName={event.title} />
             </motion.div>
           )}
           {activeTab === 'pacotes' && (
@@ -488,8 +751,12 @@ export function EventDetail() {
             photos={photos} index={lightboxIndex}
             eventId={eventId} eventName={event.title}
             onClose={() => setLightboxIndex(null)}
-            onNext={() => setLightboxIndex((lightboxIndex + 1) % photos.length)}
-            onPrev={() => setLightboxIndex((lightboxIndex - 1 + photos.length) % photos.length)}
+            onNext={lightboxNext}
+            onPrev={lightboxPrev}
+            globalIndex={(currentPage - 1) * PHOTOS_PER_PAGE + lightboxIndex}
+            totalPhotos={totalPhotos}
+            hasNext={lightboxIndex < photos.length - 1 || currentPage < totalPages}
+            hasPrev={lightboxIndex > 0 || currentPage > 1}
           />
         )}
       </AnimatePresence>

@@ -2,11 +2,11 @@ import { api, type BrandingConfig } from '../lib/api';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  Settings, Image, Globe, Type, Droplets, Upload, Trash2,
+  Settings, Image as ImageIcon, Globe, Type, Droplets, Upload, Trash2,
   CheckCircle2, AlertCircle, Loader2, Plus, Monitor, Camera,
   BarChart3, CalendarDays, DollarSign, ClipboardList, Store,
   Home, Tag, Eye,
-  Palette, Layout, FileText, Save, Layers,
+  Palette, Layout, FileText, Save, Layers, Scan, List, X as XIcon,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -22,6 +22,51 @@ function fileToBase64(file: File): Promise<string> {
     reader.onload = () => { res((reader.result as string).split(',')[1] ?? ''); };
     reader.onerror = rej;
     reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Compress image via Canvas before base64 encoding.
+ * maxDim controls resize, targetKB controls quality loop.
+ * Returns { base64, mimeType } — always outputs JPEG for photos.
+ * SVG/ICO are returned as-is without compression.
+ */
+function compressImage(
+  file: File,
+  { maxDim = 1920, targetKB = 500 } = {},
+): Promise<{ base64: string; mimeType: string }> {
+  if (['image/svg+xml', 'image/x-icon', 'image/ico'].includes(file.type)) {
+    return fileToBase64(file).then(b64 => ({ base64: b64, mimeType: file.type }));
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          const r = Math.min(maxDim / width, maxDim / height);
+          width = Math.round(width * r);
+          height = Math.round(height * r);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
+        const maxB64 = targetKB * 1024 * 1.37;
+        let quality = 0.82;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        while (dataUrl.length > maxB64 && quality > 0.2) {
+          quality -= 0.1;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+        }
+        resolve({ base64: dataUrl.split(',')[1], mimeType: 'image/jpeg' });
+      };
+      img.onerror = () => reject(new Error(`Falha ao decodificar ${file.name}`));
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => reject(new Error(`Falha ao ler ${file.name}`));
   });
 }
 
@@ -316,6 +361,17 @@ export function AdminConfig() {
   const [homeDirty, setHomeDirty] = useState(false);
   const [savingHome, setSavingHome] = useState(false);
 
+  // Session types
+  const [eventSessionTypes, setEventSessionTypes] = useState<string[]>(['Tour']);
+  const [newSessionType, setNewSessionType] = useState('');
+  const [sessionTypesDirty, setSessionTypesDirty] = useState(false);
+  const [savingSessionTypes, setSavingSessionTypes] = useState(false);
+
+  // Background slideshow interval
+  const [bgTransitionInterval, setBgTransitionInterval] = useState(5);
+  const [bgIntervalDirty, setBgIntervalDirty] = useState(false);
+  const [savingBgInterval, setSavingBgInterval] = useState(false);
+
   // Events fields
   const [eventsHeroTitle, setEventsHeroTitle] = useState('');
   const [eventsHeroTitleAccent, setEventsHeroTitleAccent] = useState('');
@@ -333,6 +389,8 @@ export function AdminConfig() {
   const [deletingBgIdx, setDeletingBgIdx] = useState<number | null>(null);
   const [uploadingCtaBg, setUploadingCtaBg] = useState(false);
   const [deletingCtaBg, setDeletingCtaBg] = useState(false);
+  const [uploadingScanner, setUploadingScanner] = useState(false);
+  const [deletingScanner, setDeletingScanner] = useState(false);
 
   // Toast
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -381,6 +439,8 @@ export function AdminConfig() {
       setEventsHeroTitleAccent(data.eventsHeroTitleAccent ?? 'Momentos no Allianz');
       setEventsHeroSubtitle(data.eventsHeroSubtitle ?? '');
       setEventsListTitle(data.eventsListTitle ?? 'Eventos');
+      setEventSessionTypes(data.eventSessionTypes?.length ? data.eventSessionTypes : ['Tour']);
+      setBgTransitionInterval(typeof data.bgTransitionInterval === 'number' ? data.bgTransitionInterval : 5);
       setVenueName(data.venueName ?? 'Allianz Parque');
       setVenueLocation(data.venueLocation ?? 'São Paulo, SP');
       setTourLabel(data.tourLabel ?? 'Tour Oficial');
@@ -441,6 +501,32 @@ export function AdminConfig() {
     finally { setSavingHome(false); }
   };
 
+  // ── Save Session Types ──
+  const saveSessionTypes = async () => {
+    const t = await getToken(); if (!t) return;
+    setSavingSessionTypes(true);
+    try {
+      await api.updateAdminBranding({ eventSessionTypes }, t);
+      setSessionTypesDirty(false);
+      showToast('ok', 'Tipos de sessão salvos!');
+      await refreshBranding();
+    } catch (err: any) { showToast('err', err.message); }
+    finally { setSavingSessionTypes(false); }
+  };
+
+  // ── Save BG Transition Interval ──
+  const saveBgInterval = async () => {
+    const t = await getToken(); if (!t) return;
+    setSavingBgInterval(true);
+    try {
+      await api.updateAdminBranding({ bgTransitionInterval }, t);
+      setBgIntervalDirty(false);
+      showToast('ok', 'Intervalo de transição salvo!');
+      await refreshBranding();
+    } catch (err: any) { showToast('err', err.message); }
+    finally { setSavingBgInterval(false); }
+  };
+
   // ── Save Events ──
   const saveEvents = async () => {
     const t = await getToken(); if (!t) return;
@@ -474,8 +560,9 @@ export function AdminConfig() {
     else if (type === 'favicon') setUploadingFavicon(true);
     else setUploadingBg(true);
     try {
-      const base64 = await fileToBase64(file);
-      await api.uploadBrandingAsset({ type, base64, mimeType: file.type }, t);
+      const opts = type === 'background' ? { maxDim: 1920, targetKB: 400 } : type === 'logo' ? { maxDim: 480, targetKB: 200 } : { maxDim: 64, targetKB: 50 };
+      const { base64, mimeType } = await compressImage(file, opts);
+      await api.uploadBrandingAsset({ type, base64, mimeType }, t);
       showToast('ok', type === 'logo' ? 'Logotipo enviado!' : type === 'favicon' ? 'Favicon enviado!' : 'Background adicionado!');
       await refreshBranding();
       await loadBranding();
@@ -514,8 +601,8 @@ export function AdminConfig() {
     const t = await getToken(); if (!t) return;
     setUploadingCtaBg(true);
     try {
-      const base64 = await fileToBase64(file);
-      await api.uploadBrandingAsset({ type: 'cta-background', base64, mimeType: file.type }, t);
+      const { base64, mimeType } = await compressImage(file, { maxDim: 1920, targetKB: 400 });
+      await api.uploadBrandingAsset({ type: 'cta-background', base64, mimeType }, t);
       showToast('ok', 'Imagem do banner CTA enviada!');
       await refreshBranding();
       await loadBranding();
@@ -532,6 +619,30 @@ export function AdminConfig() {
       await refreshBranding(); await loadBranding();
     } catch (err: any) { showToast('err', err.message); }
     finally { setDeletingCtaBg(false); }
+  };
+
+  const uploadScannerImage = async (file: File) => {
+    const t = await getToken(); if (!t) return;
+    setUploadingScanner(true);
+    try {
+      const { base64, mimeType } = await compressImage(file, { maxDim: 600, targetKB: 150 });
+      await api.uploadBrandingAsset({ type: 'scanner-image', base64, mimeType }, t);
+      showToast('ok', 'Foto do scanner enviada!');
+      await refreshBranding();
+      await loadBranding();
+    } catch (err: any) { showToast('err', `Upload falhou: ${err.message}`); }
+    finally { setUploadingScanner(false); }
+  };
+
+  const deleteScannerImage = async () => {
+    const t = await getToken(); if (!t) return;
+    setDeletingScanner(true);
+    try {
+      await api.deleteBrandingAsset('scanner-image', t);
+      showToast('ok', 'Foto do scanner removida.');
+      await refreshBranding(); await loadBranding();
+    } catch (err: any) { showToast('err', err.message); }
+    finally { setDeletingScanner(false); }
   };
 
   // ── Render ──
@@ -590,7 +701,7 @@ export function AdminConfig() {
                 {/* Dirty indicator */}
                 {((tab.key === 'marca' && marcaDirty) ||
                   (tab.key === 'home' && homeDirty) ||
-                  (tab.key === 'eventos' && (eventsDirty || venueDirty)) ||
+                  (tab.key === 'eventos' && (eventsDirty || venueDirty || sessionTypesDirty)) ||
                   (tab.key === 'watermark' && watermarkDirty)) && (
                   <span className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
                 )}
@@ -654,7 +765,7 @@ export function AdminConfig() {
                 </SectionCard>
 
                 {/* Logotipo */}
-                <SectionCard icon={Image} title="Logotipo" subtitle="PNG ou SVG com fundo transparente • max 2 MB"
+                <SectionCard icon={ImageIcon} title="Logotipo" subtitle="PNG ou SVG com fundo transparente • max 2 MB"
                   isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
                   {branding?.logoUrl ? (
                     <div>
@@ -749,6 +860,58 @@ export function AdminConfig() {
                     <p className="text-[11px] mt-3" style={{ color: muted }}>
                       A primeira imagem é usada como destaque no hero. Sugerido: 1920×1080 px, JPG.
                     </p>
+
+                    {/* ── Intervalo de transição ── */}
+                    <div className="mt-5 pt-5" style={{ borderTop: `1px solid ${cardBorder}` }}>
+                      <label className="block text-[11px] font-bold mb-3 uppercase tracking-wider flex items-center gap-1.5" style={{ color: muted }}>
+                        <span>⏱</span> Tempo entre slides (segundos)
+                      </label>
+
+                      {/* Slider */}
+                      <div className="flex items-center gap-4">
+                        <input
+                          type="range"
+                          min={2}
+                          max={30}
+                          step={1}
+                          value={bgTransitionInterval}
+                          onChange={e => { setBgTransitionInterval(Number(e.target.value)); setBgIntervalDirty(true); }}
+                          className="flex-1"
+                          style={{ accentColor: green }}
+                        />
+                        <div
+                          className="flex items-center justify-center rounded-xl text-sm font-bold min-w-[56px] h-10"
+                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`, color: green, fontFamily: "'Montserrat',sans-serif" }}
+                        >
+                          {bgTransitionInterval}s
+                        </div>
+                      </div>
+
+                      {/* Presets */}
+                      <div className="flex flex-wrap gap-1.5 mt-3">
+                        {[3, 5, 8, 10, 15, 20].map(v => (
+                          <button
+                            key={v}
+                            onClick={() => { setBgTransitionInterval(v); setBgIntervalDirty(true); }}
+                            className="px-3 py-1.5 rounded-lg text-xs transition-all"
+                            style={{
+                              background: bgTransitionInterval === v
+                                ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                                : inputBg,
+                              border: `1px solid ${bgTransitionInterval === v
+                                ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.2)'
+                                : inputBrd}`,
+                              color: bgTransitionInterval === v ? green : muted,
+                              fontWeight: bgTransitionInterval === v ? 700 : 500,
+                            }}
+                          >
+                            {v}s
+                          </button>
+                        ))}
+                      </div>
+
+                      <SaveBar dirty={bgIntervalDirty} saving={savingBgInterval} onSave={saveBgInterval} green={green} isDark={isDark} />
+                    </div>
                   </SectionCard>
                 </div>
               </div>
@@ -768,6 +931,91 @@ export function AdminConfig() {
                     As seções abaixo estão na mesma ordem em que aparecem na página Home. Edite os campos e veja a prévia ao vivo antes de salvar.
                   </p>
                 </div>
+
+                {/* ══ IMAGENS DA HOME ══ */}
+                <SectionCard icon={ImageIcon} title="Imagens da Home"
+                  subtitle="Fotos de fundo do hero e imagem da animação de scanner facial"
+                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
+                  <div className="space-y-5">
+
+                    {/* ── Backgrounds do Hero ── */}
+                    <div>
+                      <p className="text-[11px] uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5" style={{ color: muted }}>
+                        <Droplets className="w-3.5 h-3.5" /> Fotos de Background (Hero + Eventos)
+                      </p>
+                      {(branding?.backgroundUrls?.length ?? 0) > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+                          {branding!.backgroundUrls.map((url, idx) => (
+                            <ImagePreview key={`${url}-${idx}`} url={url} label={`BG ${idx + 1}`}
+                              onDelete={() => deleteBg(idx)} deleting={deletingBgIdx === idx} />
+                          ))}
+                          <div
+                            onClick={() => !uploadingBg && document.getElementById('home-bg-add')?.click()}
+                            className="flex flex-col items-center justify-center gap-2 rounded-xl cursor-pointer transition-all"
+                            style={{ aspectRatio: '16/9', border: `2px dashed ${inputBrd}`, background: inputBg }}
+                          >
+                            {uploadingBg ? <Loader2 className="w-5 h-5 animate-spin" style={{ color: green }} /> : <Plus className="w-5 h-5" style={{ color: muted }} />}
+                            <span className="text-[11px]" style={{ color: muted }}>{uploadingBg ? 'Enviando...' : 'Adicionar'}</span>
+                          </div>
+                        </div>
+                      )}
+                      {(!branding?.backgroundUrls?.length) && (
+                        <DropZone label="Arraste fotos de fundo ou clique para selecionar (JPG/PNG)"
+                          accept="image/*" onFile={f => uploadAsset('background', f)} uploading={uploadingBg}
+                          isDark={isDark} green={green} muted={muted} inputBg={inputBg} border={inputBrd} />
+                      )}
+                      <input id="home-bg-add" type="file" accept="image/*" className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) uploadAsset('background', f); e.target.value = ''; }} />
+                      <p className="text-[11px] mt-2" style={{ color: muted }}>
+                        A 1ª imagem é usada no hero da Home e da página Eventos. Sugerido: 1920×1080 px, JPG.
+                      </p>
+                    </div>
+
+                    {/* ── Foto do Scanner Facial ── */}
+                    <div>
+                      <p className="text-[11px] uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5" style={{ color: muted }}>
+                        <Scan className="w-3.5 h-3.5" /> Foto da Animação de Scanner Facial
+                      </p>
+                      {branding?.scannerImageUrl ? (
+                        <div className="space-y-2">
+                          <div className="relative rounded-xl overflow-hidden group" style={{ width: 160, height: 160, border: `1px solid ${cardBorder}` }}>
+                            <img src={branding.scannerImageUrl} alt="Scanner" className="w-full h-full object-cover rounded-full" />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/55 transition-all flex items-center justify-center gap-2">
+                              <motion.button
+                                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                onClick={deleteScannerImage} disabled={deletingScanner}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold"
+                                style={{ background: 'rgba(239,68,68,0.9)', color: '#fff' }}
+                              >
+                                {deletingScanner ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                Remover
+                              </motion.button>
+                              <label
+                                className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
+                                style={{ background: 'rgba(0,107,43,0.9)', color: '#fff' }}
+                              >
+                                <Upload className="w-3 h-3" /> Trocar
+                                <input type="file" accept="image/*" className="hidden"
+                                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadScannerImage(f); e.target.value = ''; }} />
+                              </label>
+                            </div>
+                          </div>
+                          <p className="text-[11px]" style={{ color: muted }}>Passe o mouse para trocar ou remover.</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <DropZone label="Clique ou arraste a foto (rosto do torcedor · JPG/PNG)"
+                            accept="image/*" onFile={uploadScannerImage} uploading={uploadingScanner}
+                            isDark={isDark} green={green} muted={muted} inputBg={inputBg} border={inputBrd} />
+                          <p className="text-[11px] mt-2" style={{ color: muted }}>
+                            Foto exibida dentro do círculo com animação de scanner facial na Home. Recomendado: retrato/selfie, 400×400 px.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                </SectionCard>
 
                 {/* ══ SEÇÃO 1: HERO ══ */}
                 <PageSection
@@ -1000,14 +1248,38 @@ export function AdminConfig() {
             <motion.div key="eventos" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <div className="space-y-5">
 
-                {/* ── Aviso informativo ── */}
-                <div className="flex items-start gap-3 px-4 py-3 rounded-xl text-sm"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.04)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.12)'}` }}>
-                  <Eye className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: green }} />
-                  <p className="text-xs leading-relaxed" style={{ color: muted }}>
-                    As seções abaixo estão na mesma ordem em que aparecem na página <strong style={{ color: text }}>/eventos</strong>. O background desta página é compartilhado com a Home — configure-o na aba <strong style={{ color: text }}>Marca</strong>.
-                  </p>
-                </div>
+                {/* ── Background da página Eventos ── */}
+                <SectionCard icon={Droplets} title="Background da Página de Eventos"
+                  subtitle="A imagem de fundo é compartilhada com a Home — edite na aba Home > Imagens"
+                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
+                  {(branding?.backgroundUrls?.length ?? 0) > 0 ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                        {branding!.backgroundUrls.map((url, idx) => (
+                          <ImagePreview key={`${url}-${idx}`} url={url} label={`BG ${idx + 1}`}
+                            onDelete={() => deleteBg(idx)} deleting={deletingBgIdx === idx} />
+                        ))}
+                        <div
+                          onClick={() => !uploadingBg && document.getElementById('ev-bg-add')?.click()}
+                          className="flex flex-col items-center justify-center gap-2 rounded-xl cursor-pointer transition-all"
+                          style={{ aspectRatio: '16/9', border: `2px dashed ${inputBrd}`, background: inputBg }}
+                        >
+                          {uploadingBg ? <Loader2 className="w-5 h-5 animate-spin" style={{ color: green }} /> : <Plus className="w-5 h-5" style={{ color: muted }} />}
+                          <span className="text-[11px]" style={{ color: muted }}>{uploadingBg ? 'Enviando...' : 'Adicionar'}</span>
+                        </div>
+                      </div>
+                      <input id="ev-bg-add" type="file" accept="image/*" className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) uploadAsset('background', f); e.target.value = ''; }} />
+                      <p className="text-[11px]" style={{ color: muted }}>A 1ª imagem é usada como fundo do hero. Mesmas fotos da Home.</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <DropZone label="Nenhum background configurado. Clique para adicionar (JPG/PNG)"
+                        accept="image/*" onFile={f => uploadAsset('background', f)} uploading={uploadingBg}
+                        isDark={isDark} green={green} muted={muted} inputBg={inputBg} border={inputBrd} />
+                    </div>
+                  )}
+                </SectionCard>
 
                 {/* ══ SEÇÃO 1: HERO DE EVENTOS ══ */}
                 <PageSection
@@ -1164,6 +1436,200 @@ export function AdminConfig() {
                   <SaveBar dirty={eventsDirty || venueDirty} saving={savingEvents || savingVenue} onSave={async () => { if (eventsDirty) await saveEvents(); if (venueDirty) await saveVenue(); }} green={green} isDark={isDark} />
                 </PageSection>
 
+                {/* ══ SEÇÃO 3: TIPOS DE SESSÃO ══ */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+                  className="rounded-2xl overflow-hidden"
+                  style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+                >
+                  {/* Header */}
+                  <div className="flex items-center gap-3 px-5 py-4"
+                    style={{ borderBottom: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,107,43,0.02)' }}>
+                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0"
+                      style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)', color: green }}>3</span>
+                    <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)' }}>
+                      <List className="w-3.5 h-3.5" style={{ color: green }} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.9rem', color: text }}>Tipos de Sessão de Eventos</h3>
+                      <p className="text-[11px] mt-0.5" style={{ color: muted }}>Labels aplicadas nos cards e usadas como filtros pelo público (ex: Tour, Partida, Show...)</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-5">
+                    {/* Left: editor */}
+                    <div className="lg:col-span-3 p-5 space-y-4">
+                      {/* Current types */}
+                      <div>
+                        <label className="block text-[11px] font-bold mb-2 uppercase tracking-wider" style={{ color: muted }}>Tipos cadastrados</label>
+                        <div className="flex flex-wrap gap-2 min-h-[48px] p-3 rounded-xl" style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${cardBorder}` }}>
+                          {eventSessionTypes.length === 0 && (
+                            <span className="text-xs italic" style={{ color: muted }}>Nenhum tipo cadastrado</span>
+                          )}
+                          {eventSessionTypes.map((st, i) => (
+                            <motion.span
+                              key={`${st}-${i}`}
+                              initial={{ opacity: 0, scale: 0.85 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0, scale: 0.85 }}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                              style={{
+                                background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)',
+                                border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`,
+                                color: green,
+                              }}
+                            >
+                              {st}
+                              <button
+                                onClick={() => {
+                                  setEventSessionTypes(prev => prev.filter((_, idx) => idx !== i));
+                                  setSessionTypesDirty(true);
+                                }}
+                                className="hover:opacity-60 transition-opacity ml-0.5"
+                              >
+                                <XIcon className="w-3 h-3" />
+                              </button>
+                            </motion.span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Add new type */}
+                      <div>
+                        <label className="block text-[11px] font-bold mb-2 uppercase tracking-wider" style={{ color: muted }}>Adicionar tipo</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={newSessionType}
+                            onChange={e => setNewSessionType(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && newSessionType.trim()) {
+                                const trimmed = newSessionType.trim();
+                                if (!eventSessionTypes.includes(trimmed)) {
+                                  setEventSessionTypes(prev => [...prev, trimmed]);
+                                  setSessionTypesDirty(true);
+                                }
+                                setNewSessionType('');
+                              }
+                            }}
+                            placeholder="Ex: Pré-jogo, VIP, Backstage..."
+                            className="flex-1 px-3 py-2.5 rounded-xl text-sm outline-none"
+                            style={{ background: inputBg, border: `1px solid ${inputBrd}`, color: text }}
+                          />
+                          <motion.button
+                            whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                            disabled={!newSessionType.trim()}
+                            onClick={() => {
+                              const trimmed = newSessionType.trim();
+                              if (!trimmed) return;
+                              if (!eventSessionTypes.includes(trimmed)) {
+                                setEventSessionTypes(prev => [...prev, trimmed]);
+                                setSessionTypesDirty(true);
+                              }
+                              setNewSessionType('');
+                            }}
+                            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold"
+                            style={{
+                              background: newSessionType.trim() ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)') : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
+                              border: `1px solid ${newSessionType.trim() ? (isDark ? 'rgba(134,239,172,0.25)' : 'rgba(0,107,43,0.2)') : cardBorder}`,
+                              color: newSessionType.trim() ? green : muted,
+                              opacity: newSessionType.trim() ? 1 : 0.5,
+                            }}
+                          >
+                            <Plus className="w-4 h-4" />
+                            Adicionar
+                          </motion.button>
+                        </div>
+                        <p className="text-[11px] mt-1.5" style={{ color: muted }}>Pressione Enter ou clique em Adicionar. Cada tipo vira um chip de filtro na página de Eventos.</p>
+                      </div>
+
+                      {/* Presets */}
+                      <div>
+                        <label className="block text-[11px] font-bold mb-2 uppercase tracking-wider" style={{ color: muted }}>Sugestões rápidas</label>
+                        <div className="flex flex-wrap gap-1.5">
+                          {['Tour', 'Partida', 'Confraternização', 'Show', 'Corporativo', 'Pré-jogo', 'VIP', 'Backstage', 'Treino', 'Inauguração'].map(preset => {
+                            const already = eventSessionTypes.includes(preset);
+                            return (
+                              <button
+                                key={preset}
+                                disabled={already}
+                                onClick={() => {
+                                  if (!already) {
+                                    setEventSessionTypes(prev => [...prev, preset]);
+                                    setSessionTypesDirty(true);
+                                  }
+                                }}
+                                className="px-2.5 py-1 rounded-lg text-xs transition-all"
+                                style={{
+                                  background: already ? (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)') : inputBg,
+                                  border: `1px solid ${cardBorder}`,
+                                  color: already ? muted : (isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.55)'),
+                                  opacity: already ? 0.4 : 1,
+                                  cursor: already ? 'default' : 'pointer',
+                                  fontWeight: 500,
+                                }}
+                              >
+                                {already ? '✓ ' : '+ '}{preset}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <SaveBar dirty={sessionTypesDirty} saving={savingSessionTypes} onSave={saveSessionTypes} green={green} isDark={isDark} />
+                    </div>
+
+                    {/* Right: preview */}
+                    <div className="lg:col-span-2 p-5"
+                      style={{
+                        borderTop: `1px solid ${cardBorder}`,
+                        background: isDark ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.015)',
+                      }}
+                    >
+                      <p className="text-[10px] uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5"
+                        style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,40,20,0.3)' }}>
+                        <Eye className="w-3 h-3" /> Prévia ao vivo
+                      </p>
+                      {/* Simulate filter bar */}
+                      <div className="rounded-xl p-3 space-y-3"
+                        style={{ background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.7)', border: `1px solid ${cardBorder}` }}>
+                        <p className="text-[9px] uppercase tracking-widest font-bold" style={{ color: muted }}>Filtro por tipo de sessão</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {/* "Todos" chip */}
+                          <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold"
+                            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}`, color: green }}>
+                            Todos
+                          </span>
+                          {eventSessionTypes.map((st, i) => (
+                            <span
+                              key={`prev-${st}-${i}`}
+                              className="px-2.5 py-1 rounded-lg text-[10px] font-medium"
+                              style={{
+                                background: inputBg,
+                                border: `1px solid ${cardBorder}`,
+                                color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)',
+                              }}
+                            >
+                              {st}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      {/* Card mock */}
+                      <div className="mt-3 rounded-xl overflow-hidden" style={{ border: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.85)' }}>
+                        <div style={{ height: 3, background: isDark ? 'linear-gradient(90deg,#166534,#15803d)' : 'linear-gradient(90deg,#006B2B,#00843D)' }} />
+                        <div className="p-3">
+                          <span className="text-[9px] tracking-widest uppercase font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)', fontFamily: "'Montserrat',sans-serif" }}>
+                            {eventSessionTypes[0] || 'Tipo de Sessão'}
+                          </span>
+                          <div className="text-xs font-bold mt-0.5" style={{ color: text, fontFamily: "'Montserrat',sans-serif" }}>27/02/2026, 10:00</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+
               </div>
             </motion.div>
           )}
@@ -1196,25 +1662,90 @@ export function AdminConfig() {
 
                 {/* Preview watermark */}
                 <SectionCard icon={Eye} title="Prévia da Marca d\'água"
-                  subtitle="Simulação do texto sobreposto nas fotos"
+                  subtitle="Simulação fiel do padrão sobreposto nas fotos"
                   isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
                   <div className="relative rounded-xl overflow-hidden"
                     style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)', aspectRatio: '4/3' }}>
+                    {/* Simulated photo */}
                     <div className="absolute inset-0 flex items-center justify-center">
-                      <Camera className="w-10 h-10" style={{ color: muted, opacity: 0.3 }} />
+                      <Camera className="w-12 h-12" style={{ color: muted, opacity: 0.15 }} />
                     </div>
-                    <div className="absolute inset-0 flex items-end justify-end p-3">
-                      <span className="text-[11px] font-bold px-2 py-1 rounded-md"
-                        style={{ background: 'rgba(0,0,0,0.45)', color: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(4px)' }}>
-                        {watermarkText || '© Smart Match'}
+                    {/* Tiled watermark grid — matches ProtectedImage */}
+                    <div className="absolute inset-0 overflow-hidden" style={{ pointerEvents: 'none' }}>
+                      {(() => {
+                        const defs = [
+                          { t: watermarkText || 'SMART MATCH', s: '0.55rem', w: 900, c: 'rgba(255,255,255,0.35)' },
+                          { t: watermarkProducer || 'EDU SANTANA PRODUÇÕES', s: '0.38rem', w: 700, c: 'rgba(0,255,127,0.32)' },
+                          { t: watermarkPhotoTag || '◆ FOTO PROTEGIDA ◆', s: '0.34rem', w: 700, c: 'rgba(255,255,255,0.18)' },
+                          { t: watermarkTour || '© TOUR PALMEIRAS', s: '0.38rem', w: 700, c: 'rgba(0,212,255,0.25)' },
+                          { t: watermarkText || 'SMART MATCH', s: '0.55rem', w: 900, c: 'rgba(0,255,127,0.18)' },
+                        ];
+                        const totalRows = 18;
+                        return (
+                          <div style={{ position: 'absolute', top: '-60%', left: '-60%', width: '220%', height: '220%', display: 'flex', flexDirection: 'column' as const, justifyContent: 'space-evenly' }}>
+                            {Array.from({ length: totalRows }).map((_, r) => {
+                              const d = defs[r % defs.length];
+                              return (
+                                <div key={r} className="whitespace-nowrap" style={{
+                                  fontFamily: "'Montserrat',sans-serif", fontSize: d.s, fontWeight: d.w, color: d.c,
+                                  letterSpacing: '0.18em', textTransform: 'uppercase' as const, lineHeight: '1',
+                                  textShadow: '0 1px 4px rgba(0,0,0,0.5)', transform: 'rotate(-25deg)',
+                                  transformOrigin: 'center center',
+                                  marginLeft: r % 2 === 0 ? '-15%' : '0%',
+                                }}>
+                                  {Array.from({ length: 6 }).map((_, i) => <span key={i} style={{ marginRight: '1.8em' }}>{d.t}</span>)}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                    {/* Corner badges */}
+                    {[{ top: 8, left: 8 }, { top: 8, right: 8 }, { bottom: 8, left: 8 }, { bottom: 8, right: 8 }].map((pos, i) => (
+                      <span key={i} className="absolute" style={{
+                        ...pos, fontFamily: "'Montserrat',sans-serif", fontSize: '0.4rem', fontWeight: 800,
+                        color: i % 2 === 0 ? 'rgba(255,255,255,0.3)' : 'rgba(0,255,127,0.25)',
+                        letterSpacing: '0.15em', textTransform: 'uppercase' as const,
+                        textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+                      } as React.CSSProperties}>
+                        © {watermarkText || 'SMART MATCH'}
+                      </span>
+                    ))}
+                    {/* Central logo text */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center" style={{ pointerEvents: 'none' }}>
+                      <span style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1rem', fontWeight: 900,
+                        color: 'rgba(255,255,255,0.12)', letterSpacing: '0.3em', textTransform: 'uppercase' as const,
+                        textShadow: '0 2px 8px rgba(0,0,0,0.5)' }}>
+                        {watermarkText || 'SMART MATCH'}
+                      </span>
+                      <span style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '0.45rem', fontWeight: 700,
+                        color: 'rgba(0,255,127,0.15)', letterSpacing: '0.45em', textTransform: 'uppercase' as const, marginTop: 4 }}>
+                        {watermarkProducer || 'EDU SANTANA PRODUÇÕES'}
                       </span>
                     </div>
-                    <div className="absolute top-2 left-2">
+                    {/* Label */}
+                    <div className="absolute top-2 left-2 z-10">
                       <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded"
                         style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)', color: green }}>
                         prévia
                       </span>
                     </div>
+                  </div>
+                  {/* Legend */}
+                  <div className="mt-3 space-y-1.5">
+                    {[
+                      { label: 'Texto principal', color: 'rgba(255,255,255,0.4)', sample: watermarkText || 'SMART MATCH' },
+                      { label: 'Produzido por', color: 'rgba(0,255,127,0.45)', sample: watermarkProducer || 'EDU SANTANA PRODUÇÕES' },
+                      { label: 'Tag da foto', color: 'rgba(255,255,255,0.25)', sample: watermarkPhotoTag || '◆ FOTO PROTEGIDA ◆' },
+                      { label: 'Nome do tour', color: 'rgba(0,212,255,0.35)', sample: watermarkTour || '© TOUR PALMEIRAS' },
+                    ].map(item => (
+                      <div key={item.label} className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: item.color }} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: muted }}>{item.label}:</span>
+                        <span className="text-[10px] truncate" style={{ color: text, opacity: 0.7 }}>{item.sample}</span>
+                      </div>
+                    ))}
                   </div>
                 </SectionCard>
               </div>

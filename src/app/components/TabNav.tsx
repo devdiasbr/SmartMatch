@@ -1,5 +1,6 @@
 import { Link } from 'react-router';
 import { useTheme } from './ThemeProvider';
+import { useState, useEffect } from 'react';
 
 export interface TabNavItem {
   key: string;
@@ -28,6 +29,16 @@ export function TabNav({
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
+  // Responsive: only icons on mobile
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const handler = (e: MediaQueryListEvent | MediaQueryList) => setIsMobile(e.matches);
+    handler(mq);
+    mq.addEventListener('change', handler as any);
+    return () => mq.removeEventListener('change', handler as any);
+  }, []);
+
   /* ─── tokens ─── */
   const containerBg    = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
   const containerBorder= isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
@@ -43,13 +54,13 @@ export function TabNav({
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: '0.5rem',
-    paddingTop: '0.875rem',
-    paddingBottom: '0.875rem',
-    paddingLeft: fullWidth ? undefined : '1.25rem',
-    paddingRight: fullWidth ? undefined : '1.25rem',
-    flex: fullWidth ? '1' : undefined,
-    fontSize: '0.875rem',
+    gap: isMobile ? '0' : '0.5rem',
+    paddingTop: isMobile ? '0.75rem' : '0.875rem',
+    paddingBottom: isMobile ? '0.75rem' : '0.875rem',
+    paddingLeft: fullWidth ? undefined : isMobile ? '0.75rem' : '1.25rem',
+    paddingRight: fullWidth ? undefined : isMobile ? '0.75rem' : '1.25rem',
+    flex: fullWidth || isMobile ? '1' : undefined,
+    fontSize: isMobile ? '0.75rem' : '0.875rem',
     fontFamily: "'Montserrat', sans-serif",
     fontWeight: isActive ? 700 : 500,
     letterSpacing: '-0.01em',
@@ -64,7 +75,7 @@ export function TabNav({
 
   return (
     <div
-      className={`flex rounded-2xl overflow-hidden ${fullWidth ? '' : 'ml-auto w-fit'} ${className}`}
+      className={`flex rounded-2xl overflow-hidden ${fullWidth ? '' : isMobile ? 'w-full' : 'ml-auto w-fit'} ${className}`}
       style={{
         background: containerBg,
         border: `1px solid ${containerBorder}`,
@@ -79,9 +90,9 @@ export function TabNav({
 
         const inner = (
           <>
-            {Icon && <Icon style={{ width: 16, height: 16, flexShrink: 0 }} />}
-            <span>{tab.label}</span>
-            {tab.badge !== undefined && tab.badge > 0 && (
+            {Icon && <Icon style={{ width: isMobile ? 18 : 16, height: isMobile ? 18 : 16, flexShrink: 0 }} />}
+            {!isMobile && <span>{tab.label}</span>}
+            {!isMobile && tab.badge !== undefined && tab.badge > 0 && (
               <span
                 style={{
                   display: 'inline-flex',

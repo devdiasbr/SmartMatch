@@ -123,38 +123,35 @@ A plataforma ja opera no **Tour do Palmeiras no Allianz Parque** e esta pronta p
 
 ## 4. Orcamento
 
-### Opcao A — Licenciamento White-Label (Recomendado)
+### Opcao A — Plataforma Completa (Recomendado)
 
-Ideal para empresas que desejam operar a plataforma com sua propria marca.
+Ideal para empresas que desejam operar a plataforma com sua propria marca, com tudo configurado e pronto para usar.
 
 | Item | Valor |
 |------|-------|
-| Licenca de uso perpetua do codigo-fonte | R$ 18.000,00 |
-| Customizacao de branding e identidade visual | R$ 4.000,00 |
-| Configuracao do ambiente Supabase (producao) | R$ 2.500,00 |
-| Integracao Mercado Pago (conta do cliente) | R$ 1.500,00 |
-| Configuracao Resend (dominio do cliente) | R$ 1.000,00 |
-| Treinamento operacional (3 sessoes remotas) | R$ 2.000,00 |
+| Licenca de uso do codigo-fonte completo | R$ 6.500,00 |
+| Customizacao de branding e identidade visual | R$ 1.500,00 |
+| Configuracao do ambiente (Supabase + Resend + MP) | R$ 1.200,00 |
+| Treinamento operacional (2 sessoes remotas) | R$ 800,00 |
 | Documentacao tecnica e operacional | Incluso |
-| **TOTAL** | **R$ 29.000,00** |
+| **TOTAL** | **R$ 10.000,00** |
 
 **Forma de pagamento:** 50% na assinatura + 50% na entrega
 
 ---
 
-### Opcao B — Produto Completo + Exclusividade Regional
+### Opcao B — Plataforma Completa + Suporte Estendido
 
-Para operadores que desejam exclusividade em sua regiao/segmento.
+Para quem quer comecar com seguranca e ter acompanhamento nos primeiros meses.
 
 | Item | Valor |
 |------|-------|
-| Tudo da Opcao A | R$ 29.000,00 |
-| Exclusividade regional (estado ou segmento) por 12 meses | R$ 8.000,00 |
-| Suporte prioritario por 6 meses | R$ 4.800,00 (R$ 800/mes) |
-| Evolucoes e features customizadas (banco de 40h) | R$ 6.000,00 (R$ 150/h) |
-| **TOTAL** | **R$ 47.800,00** |
+| Tudo da Opcao A | R$ 10.000,00 |
+| Suporte prioritario por 3 meses (WhatsApp + e-mail) | R$ 2.400,00 (R$ 800/mes) |
+| Banco de horas para ajustes e evolucoes (20h) | R$ 2.600,00 (R$ 130/h) |
+| **TOTAL** | **R$ 15.000,00** |
 
-**Forma de pagamento:** 40% na assinatura + 30% na entrega + 30% em 30 dias
+**Forma de pagamento:** 50% na assinatura + 25% na entrega + 25% em 30 dias
 
 ---
 
@@ -164,13 +161,13 @@ Para operadores que preferem um modelo recorrente sem investimento alto inicial.
 
 | Item | Mensal |
 |------|--------|
-| Plataforma hospedada e gerenciada | R$ 1.200,00/mes |
+| Plataforma hospedada e gerenciada | R$ 697,00/mes |
 | Suporte tecnico (horario comercial) | Incluso |
 | Atualizacoes e manutencao | Incluso |
 | Limite: ate 5.000 fotos/mes | Incluso |
-| Fotos adicionais (acima de 5.000) | R$ 0,08/foto |
-| **Setup inicial (unico)** | **R$ 5.000,00** |
-| **Mensalidade** | **R$ 1.200,00/mes** |
+| Fotos adicionais (acima de 5.000) | R$ 0,05/foto |
+| **Setup inicial (unico)** | **R$ 2.500,00** |
+| **Mensalidade** | **R$ 697,00/mes** |
 
 **Contrato minimo:** 6 meses
 **Forma de pagamento:** Setup na assinatura + mensalidades via boleto/PIX
