@@ -223,14 +223,6 @@ function Lightbox({ photos, index, eventId, eventName, onClose, onNext, onPrev }
             : <><ShoppingCart className="w-4 h-4" /> Comprar foto</>
           }
         </motion.button>
-        <motion.button
-          whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
-          onClick={handlePreview}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm"
-          style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)', fontWeight: 600, cursor: 'pointer' }}
-        >
-          <Download className="w-4 h-4" /> Preview
-        </motion.button>
       </div>
     </motion.div>
   );

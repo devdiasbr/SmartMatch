@@ -211,11 +211,11 @@ export function AdminEvents() {
     }
   };
 
-  const handleFileUpload = async (files: FileList | null) => {
+  const handleFileUpload = async (files: FileList | null, targetEvent?: EventRecord) => {
     if (!files || files.length === 0) return;
 
-    // Validate date and time
-    if (!uploadDate || !uploadTime) {
+    // Se não há evento-alvo direto, valida data+hora para criar/encontrar um
+    if (!targetEvent && (!uploadDate || !uploadTime)) {
       setUploadError('Selecione a data e horário do tour antes de enviar as fotos.');
       return;
     }
@@ -228,19 +228,26 @@ export function AdminEvents() {
       const token = await getToken();
       if (!token) { navigate('/admin/login'); return; }
 
-      // Step 1 — Find or create the event by date+time slug
-      const dateISO = `${uploadDate}T${uploadTime}:00`;
-      const eventRes = await api.createEvent({ date: dateISO }, token);
-      const event = eventRes.event;
+      let event: EventRecord;
 
-      // Sync local events list
-      setEvents((prev) => {
-        const exists = prev.find((e) => e.id === event.id);
-        return exists
-          ? prev.map((e) => (e.id === event.id ? event : e))
-          : [event, ...prev];
-      });
-      setSelectedEvent(event);
+      if (targetEvent) {
+        // Upload direto para o evento já selecionado — sem criar novo
+        event = targetEvent;
+      } else {
+        // Step 1 — Find or create the event by date+time slug
+        const dateISO = `${uploadDate}T${uploadTime}:00`;
+        const eventRes = await api.createEvent({ date: dateISO }, token);
+        event = eventRes.event;
+
+        // Sync local events list
+        setEvents((prev) => {
+          const exists = prev.find((e) => e.id === event.id);
+          return exists
+            ? prev.map((e) => (e.id === event.id ? event : e))
+            : [event, ...prev];
+        });
+        setSelectedEvent(event);
+      }
 
       // Step 2 — Upload each file
       let count = 0;
@@ -837,12 +844,10 @@ export function AdminEvents() {
                     multiple
                     className="hidden"
                     onChange={(e) => {
-                      // When event is selected, upload directly to it
-                      if (selectedEvent) {
-                        setUploadDate(selectedEvent.date.slice(0, 10));
-                        setUploadTime(selectedEvent.date.slice(11, 16));
-                      }
-                      handleFileUpload(e.target.files);
+                      // Passa o evento selecionado diretamente — sem depender de state de data/hora
+                      handleFileUpload(e.target.files, selectedEvent ?? undefined);
+                      // Reset input para permitir re-selecionar o mesmo arquivo
+                      e.target.value = '';
                     }}
                   />
                 </motion.div>
