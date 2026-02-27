@@ -1,15 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { Camera, ShoppingCart, Menu, X, Moon, Sun, User, LogOut } from 'lucide-react';
+import { Camera, ShoppingCart, Menu, X, Moon, Sun, User, LogOut, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from './ThemeProvider';
 import { useCart } from '../contexts/CartContext';
-
-const navLinks = [
-  { label: 'Home', href: '/' },
-  { label: 'Eventos', href: '/eventos' },
-  { label: 'Admin', href: '/admin' },
-];
+import { useAuth } from '../contexts/AuthContext';
 
 export function Header() {
   const [scrolled, setScrolled] = useState(false);
@@ -17,9 +12,10 @@ export function Header() {
   const { totalItems, openDrawer } = useCart();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const { isAdmin, signOut } = useAuth();
   const isDark = theme === 'dark';
 
-  const isAdmin = location.pathname.startsWith('/admin');
+  const isAdminPage = location.pathname.startsWith('/admin');
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 40);
@@ -31,6 +27,11 @@ export function Header() {
     if (href === '/') return location.pathname === '/';
     return location.pathname.startsWith(href);
   };
+
+  const publicLinks = [
+    { label: 'Home', href: '/' },
+    { label: 'Eventos', href: '/eventos' },
+  ];
 
   return (
     <>
@@ -62,14 +63,14 @@ export function Header() {
               style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1.2rem' }}
               className={isDark ? 'text-white' : 'text-[#0D2818]'}
             >
-              Event
-              <span style={{ color: isDark ? '#86efac' : '#006B2B' }}>Face</span>
+              Smart
+              <span style={{ color: isDark ? '#86efac' : '#006B2B' }}>Match</span>
             </span>
           </Link>
 
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-1">
-            {navLinks.map((link) => (
+            {publicLinks.map((link) => (
               <Link
                 key={link.label}
                 to={link.href}
@@ -87,28 +88,37 @@ export function Header() {
                 {link.label}
               </Link>
             ))}
+            {/* Admin link — only when authenticated */}
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className="px-4 py-2 rounded-lg text-sm transition-all duration-200"
+                style={{
+                  color: isActive('/admin')
+                    ? isDark ? '#ffffff' : '#006B2B'
+                    : isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)',
+                  background: isActive('/admin')
+                    ? isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.07)'
+                    : 'transparent',
+                  fontWeight: isActive('/admin') ? 600 : 500,
+                }}
+              >
+                Admin
+              </Link>
+            )}
           </nav>
 
           {/* Right Actions */}
           <div className="hidden md:flex items-center gap-3">
-            {isAdmin && (
+            {isAdminPage && isAdmin && (
               <>
-                {/* Event ID input */}
-                <div
-                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
-                  style={{
-                    border: `1px solid ${isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,107,43,0.2)'}`,
-                    color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,107,43,0.7)',
-                  }}
-                >
-                  Informe o Event ID
-                </div>
                 <div className="flex items-center gap-2 text-sm" style={{ color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.5)' }}>
                   <User className="w-4 h-4" />
                   Administrador
                 </div>
                 <button
-                  className="text-sm flex items-center gap-1 px-3 py-1.5 rounded-lg transition-colors"
+                  onClick={() => signOut()}
+                  className="text-sm flex items-center gap-1 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                   style={{
                     color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)',
                     background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
@@ -123,7 +133,7 @@ export function Header() {
             {/* Theme toggle */}
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg transition-colors"
+              className="p-2 rounded-lg transition-colors cursor-pointer"
               style={{
                 background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
                 color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
@@ -132,12 +142,12 @@ export function Header() {
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
 
-            {!isAdmin && (
+            {!isAdminPage && (
               <>
                 {/* Cart */}
                 <button
                   onClick={openDrawer}
-                  className="relative p-2 rounded-lg hover:bg-white/5 transition-colors"
+                  className="relative p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
                 >
                   <ShoppingCart className="w-5 h-5" style={{ color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)' }} />
                   <AnimatePresence>
@@ -155,23 +165,25 @@ export function Header() {
                   </AnimatePresence>
                 </button>
 
-                {/* CTA */}
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm"
-                  style={{
-                    background: isDark
-                      ? 'rgba(22,101,52,0.9)'
-                      : 'linear-gradient(135deg, #006B2B, #00843D)',
-                    color: '#fff',
-                    fontWeight: 700,
-                    border: isDark ? '1px solid rgba(74,222,128,0.2)' : 'none',
-                  }}
-                >
-                  <Camera className="w-4 h-4" />
-                  Encontrar fotos
-                </motion.button>
+                {/* Login button (when not admin) */}
+                {!isAdmin && (
+                  <Link to="/admin/login">
+                    <motion.button
+                      whileHover={{ scale: 1.03 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm"
+                      style={{
+                        background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                        color: isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)',
+                        fontWeight: 600,
+                        border: `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)'}`,
+                      }}
+                    >
+                      <LogIn className="w-4 h-4" />
+                      Entrar
+                    </motion.button>
+                  </Link>
+                )}
               </>
             )}
           </div>
@@ -180,15 +192,13 @@ export function Header() {
           <div className="flex md:hidden items-center gap-2">
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-lg"
-              style={{
-                color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)',
-              }}
+              className="p-2 rounded-lg cursor-pointer"
+              style={{ color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)' }}
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             <button
-              className="p-2 rounded-lg"
+              className="p-2 rounded-lg cursor-pointer"
               style={{ color: isDark ? 'white' : '#1A1A2C' }}
               onClick={() => setMenuOpen(!menuOpen)}
             >
@@ -214,7 +224,7 @@ export function Header() {
             }}
           >
             <div className="px-6 py-6 flex flex-col gap-2">
-              {navLinks.map((link) => (
+              {publicLinks.map((link) => (
                 <Link
                   key={link.label}
                   to={link.href}
@@ -228,16 +238,44 @@ export function Header() {
                   {link.label}
                 </Link>
               ))}
-              <button
-                className="mt-4 py-3 rounded-xl text-base"
-                style={{
-                  background: isDark ? 'rgba(22,101,52,0.9)' : 'linear-gradient(135deg, #006B2B, #00843D)',
-                  color: '#fff',
-                  fontWeight: 700,
-                }}
-              >
-                Encontrar minhas fotos
-              </button>
+              {isAdmin && (
+                <Link
+                  to="/admin"
+                  className="px-4 py-3 rounded-xl text-base"
+                  style={{ color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)', fontWeight: 500 }}
+                  onClick={() => setMenuOpen(false)}
+                >
+                  Admin
+                </Link>
+              )}
+              {!isAdmin ? (
+                <Link to="/admin/login" onClick={() => setMenuOpen(false)}>
+                  <button
+                    className="mt-4 w-full py-3 rounded-xl text-base flex items-center justify-center gap-2 cursor-pointer"
+                    style={{
+                      background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+                      color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <LogIn className="w-4 h-4" />
+                    Entrar como Admin
+                  </button>
+                </Link>
+              ) : (
+                <button
+                  onClick={() => { signOut(); setMenuOpen(false); }}
+                  className="mt-4 py-3 rounded-xl text-base flex items-center justify-center gap-2 cursor-pointer"
+                  style={{
+                    background: isDark ? 'rgba(252,165,165,0.08)' : 'rgba(220,38,38,0.06)',
+                    color: isDark ? '#fca5a5' : '#dc2626',
+                    fontWeight: 600,
+                  }}
+                >
+                  <LogOut className="w-4 h-4" />
+                  Sair
+                </button>
+              )}
             </div>
           </motion.div>
         )}

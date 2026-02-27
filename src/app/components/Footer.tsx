@@ -29,7 +29,7 @@ export function Footer() {
                 style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1.2rem' }}
                 className={isDark ? 'text-white' : 'text-[#0D2818]'}
               >
-                Event<span style={{ color: isDark ? '#86efac' : '#006B2B' }}>Face</span>
+                Smart<span style={{ color: isDark ? '#86efac' : '#006B2B' }}>Match</span>
               </span>
             </div>
             <p className="text-sm" style={{ color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(13,40,24,0.5)', lineHeight: 1.7 }}>
@@ -92,7 +92,7 @@ export function Footer() {
           style={{ borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,107,43,0.08)'}` }}
         >
           <p className="text-xs" style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(13,40,24,0.35)' }}>
-            &copy; 2025 EventFace. Todos os direitos reservados.
+            &copy; 2025 Smart Match. Todos os direitos reservados.
           </p>
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-full"

@@ -19,7 +19,7 @@ export function useTheme() {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     if (typeof window !== 'undefined') {
-      return (localStorage.getItem('eventface-theme') as Theme) || 'dark';
+      return (localStorage.getItem('smartmatch-theme') as Theme) || 'dark';
     }
     return 'dark';
   });
@@ -31,7 +31,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('eventface-theme', theme);
+    localStorage.setItem('smartmatch-theme', theme);
   }, [theme]);
 
   const toggleTheme = () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));

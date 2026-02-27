@@ -1,8 +1,9 @@
 import { createContext, useContext, useState, useCallback } from 'react';
+import { api } from '../lib/api';
 
 export interface CartItem {
   id: string;
-  photoId: number;
+  photoId: number | string;
   src: string;
   tag: string;
   eventName: string;
@@ -15,15 +16,31 @@ interface CartContextValue {
   addItem: (item: Omit<CartItem, 'id'>) => void;
   removeItem: (id: string) => void;
   clearCart: () => void;
-  isInCart: (photoId: number, eventId: string) => boolean;
+  isInCart: (photoId: number | string, eventId: string) => boolean;
   totalItems: number;
   totalPrice: number;
   drawerOpen: boolean;
   openDrawer: () => void;
   closeDrawer: () => void;
+  /** Sync all item prices to the current server-configured price */
+  syncPrices: () => Promise<void>;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
+
+const NOOP_CART: CartContextValue = {
+  items: [],
+  addItem: () => {},
+  removeItem: () => {},
+  clearCart: () => {},
+  isInCart: () => false,
+  totalItems: 0,
+  totalPrice: 0,
+  drawerOpen: false,
+  openDrawer: () => {},
+  closeDrawer: () => {},
+  syncPrices: async () => {},
+};
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
@@ -43,13 +60,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const clearCart = useCallback(() => setItems([]), []);
 
   const isInCart = useCallback(
-    (photoId: number, eventId: string) =>
-      items.some((i) => i.photoId === photoId && i.eventId === eventId),
+    (photoId: number | string, eventId: string) =>
+      items.some((i) => String(i.photoId) === String(photoId) && i.eventId === eventId),
     [items],
   );
 
   const totalItems = items.length;
   const totalPrice = items.reduce((sum, i) => sum + i.price, 0);
+
+  const syncPrices = useCallback(async () => {
+    try {
+      const { photoPrice } = await api.getPhotoPrice();
+      setItems((prev) => {
+        const needsUpdate = prev.some((i) => i.price !== photoPrice);
+        if (!needsUpdate) return prev;
+        return prev.map((i) => ({ ...i, price: photoPrice }));
+      });
+    } catch (err) {
+      console.error('Erro ao sincronizar preços do carrinho:', err);
+    }
+  }, []);
 
   return (
     <CartContext.Provider
@@ -64,6 +94,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         drawerOpen,
         openDrawer: () => setDrawerOpen(true),
         closeDrawer: () => setDrawerOpen(false),
+        syncPrices,
       }}
     >
       {children}
@@ -73,6 +104,5 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
 export function useCart() {
   const ctx = useContext(CartContext);
-  if (!ctx) throw new Error('useCart must be used inside CartProvider');
-  return ctx;
+  return ctx ?? NOOP_CART;
 }

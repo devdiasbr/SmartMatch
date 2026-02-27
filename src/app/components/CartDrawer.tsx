@@ -1,13 +1,21 @@
 import { Link } from 'react-router';
-import { X, ShoppingCart, Trash2, ImageIcon, ArrowRight, Package } from 'lucide-react';
+import { X, ShoppingCart, Trash2, ImageIcon, ArrowRight, Trash } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useCart } from '../contexts/CartContext';
 import { useTheme } from './ThemeProvider';
+import { useEffect } from 'react';
 
 export function CartDrawer() {
-  const { items, removeItem, totalItems, totalPrice, drawerOpen, closeDrawer } = useCart();
+  const { items, removeItem, clearCart, totalItems, totalPrice, drawerOpen, closeDrawer, syncPrices } = useCart();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+
+  // Sync prices with server whenever drawer opens
+  useEffect(() => {
+    if (drawerOpen && totalItems > 0) {
+      syncPrices();
+    }
+  }, [drawerOpen, syncPrices, totalItems]);
 
   const bg = isDark ? '#0e0e1a' : '#ffffff';
   const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.1)';
@@ -77,16 +85,33 @@ export function CartDrawer() {
                   )}
                 </div>
               </div>
-              <button
-                onClick={closeDrawer}
-                className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
-                style={{
-                  background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
-                  color: mutedColor,
-                }}
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                {totalItems > 0 && (
+                  <button
+                    onClick={() => { clearCart(); }}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors"
+                    style={{
+                      background: isDark ? 'rgba(252,165,165,0.06)' : 'rgba(220,38,38,0.05)',
+                      color: isDark ? '#fca5a5' : '#dc2626',
+                      fontWeight: 600,
+                    }}
+                    title="Esvaziar carrinho"
+                  >
+                    <Trash className="w-3.5 h-3.5" />
+                    Esvaziar
+                  </button>
+                )}
+                <button
+                  onClick={closeDrawer}
+                  className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
+                  style={{
+                    background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                    color: mutedColor,
+                  }}
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Content */}
@@ -230,25 +255,7 @@ export function CartDrawer() {
                   </span>
                 </div>
 
-                {/* Package hint */}
-                {totalItems >= 3 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
-                    style={{
-                      background: isDark ? 'rgba(134,239,172,0.06)' : 'rgba(0,107,43,0.05)',
-                      border: `1px solid ${isDark ? 'rgba(134,239,172,0.14)' : 'rgba(0,107,43,0.12)'}`,
-                      color: green,
-                    }}
-                  >
-                    <Package className="w-3.5 h-3.5 flex-shrink-0" />
-                    <span>
-                      Você tem {totalItems} fotos — considere o{' '}
-                      <strong>Pacote Coleção (R$ {Math.round(29 * 2.7)})</strong> e economize!
-                    </span>
-                  </motion.div>
-                )}
+                {/* Package hint — removed: no packages, fixed R$30/photo */}
 
                 {/* CTA buttons */}
                 <div className="flex flex-col gap-2 pt-1">

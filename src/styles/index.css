@@ -1,3 +1,9 @@
 @import './fonts.css';
 @import './tailwind.css';
 @import './theme.css';
+
+/* Motion's useScroll requires the scroll container (document.scrollingElement / <html>)
+   to have a non-static position so scroll offsets are calculated correctly. */
+html {
+  position: relative;
+}

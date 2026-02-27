@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useLocation, Link } from 'react-router';
+import { useState, useEffect, useMemo } from 'react';
+import { useLocation, Link, useNavigate } from 'react-router';
 import {
   AreaChart,
   Area,
@@ -19,70 +19,22 @@ import {
   BarChart3,
   DollarSign,
   Users,
-  Upload,
   Plus,
   Download,
   ArrowRight,
   CheckCircle2,
   Clock,
-  AlertCircle,
   ImageIcon,
   Zap,
+  Loader2,
+  Store,
+  ClipboardList,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
 import { TabNav } from '../components/TabNav';
-
-/* ─── Mock Data ─── */
-const REVENUE_DATA = [
-  { day: '13/02', receita: 0, fotos: 0 },
-  { day: '14/02', receita: 180, fotos: 6 },
-  { day: '15/02', receita: 0, fotos: 0 },
-  { day: '16/02', receita: 420, fotos: 14 },
-  { day: '17/02', receita: 90, fotos: 3 },
-  { day: '18/02', receita: 0, fotos: 0 },
-  { day: '19/02', receita: 630, fotos: 21 },
-  { day: '20/02', receita: 270, fotos: 9 },
-  { day: '21/02', receita: 0, fotos: 0 },
-  { day: '22/02', receita: 750, fotos: 25 },
-  { day: '23/02', receita: 180, fotos: 6 },
-  { day: '24/02', receita: 360, fotos: 12 },
-  { day: '25/02', receita: 210, fotos: 7 },
-  { day: '26/02', receita: 120, fotos: 4 },
-];
-
-const SESSIONS_BAR = [
-  { nome: '22/02 15h', fotos: 25, vendas: 8 },
-  { nome: '23/02 13h', fotos: 0, vendas: 0 },
-  { nome: '23/02 15h', fotos: 6, vendas: 2 },
-  { nome: '24/02 10h', fotos: 0, vendas: 0 },
-  { nome: '24/02 14h', fotos: 12, vendas: 4 },
-  { nome: '25/02 11h', fotos: 7, vendas: 3 },
-  { nome: '26/02 09h', fotos: 4, vendas: 1 },
-];
-
-const RECENT_ACTIVITY = [
-  { id: 1, type: 'purchase', user: 'Carlos M.', event: 'Tour 22/02 – 15h30', amount: 90, time: '2 min atrás', status: 'success' },
-  { id: 2, type: 'upload', user: 'Sistema', event: 'Tour 24/02 – 14h00', amount: null, count: 12, time: '18 min atrás', status: 'success' },
-  { id: 3, type: 'purchase', user: 'Beatriz S.', event: 'Tour 22/02 – 15h30', amount: 30, time: '34 min atrás', status: 'success' },
-  { id: 4, type: 'purchase', user: 'Rafael O.', event: 'Tour 24/02 – 14h00', amount: 60, time: '1h atrás', status: 'success' },
-  { id: 5, type: 'upload', user: 'Sistema', event: 'Tour 25/02 – 11h00', amount: null, count: 7, time: '3h atrás', status: 'success' },
-  { id: 6, type: 'purchase', user: 'Mariana L.', event: 'Tour 23/02 – 15h00', amount: 30, time: '5h atrás', status: 'pending' },
-];
-
-const UPCOMING_SESSIONS = [
-  { id: 'u1', date: '01/03', time: '11:00', weekday: 'dom', slots: 20, registered: 0, status: 'scheduled' },
-  { id: 'u2', date: '01/03', time: '16:00', weekday: 'dom', slots: 20, registered: 0, status: 'scheduled' },
-  { id: 'u3', date: '07/03', time: '13:00', weekday: 'sáb', slots: 20, registered: 0, status: 'scheduled' },
-];
-
-const TOP_SESSIONS = [
-  { name: 'Tour 22/02 – 15h30', fotos: 25, vendas: 8, receita: 750, pct: 100 },
-  { name: 'Tour 24/02 – 14h00', fotos: 12, vendas: 4, receita: 360, pct: 48 },
-  { name: 'Tour 25/02 – 11h00', fotos: 7, vendas: 3, receita: 210, pct: 28 },
-  { name: 'Tour 23/02 – 15h00', fotos: 6, vendas: 2, receita: 180, pct: 24 },
-  { name: 'Tour 26/02 – 09h00', fotos: 4, vendas: 1, receita: 120, pct: 16 },
-];
+import { useAuth } from '../contexts/AuthContext';
+import { api, type AdminStats, type EventRecord } from '../lib/api';
 
 /* ─── Sub-components ─── */
 function KpiCard({
@@ -173,7 +125,7 @@ function KpiCard({
   );
 }
 
-/* ─── Custom Tooltip ─── */
+/* ─── Custom Tooltips ─── */
 function CustomTooltipRevenue({ active, payload, label, isDark }: any) {
   if (!active || !payload?.length) return null;
   return (
@@ -221,9 +173,43 @@ export function AdminDashboard() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const location = useLocation();
+  const navigate = useNavigate();
+  const { token, isAdmin, loading: authLoading, getToken } = useAuth();
   const isOnDashboard = location.pathname === '/admin' || location.pathname === '/admin/';
 
   const [chartView, setChartView] = useState<'receita' | 'fotos'>('receita');
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [upcomingEvents, setUpcomingEvents] = useState<EventRecord[]>([]);
+
+  useEffect(() => {
+    if (!authLoading && !isAdmin) {
+      navigate('/admin/login', { replace: true });
+    }
+  }, [isAdmin, authLoading, navigate]);
+
+  useEffect(() => {
+    if (!token) return;
+    setStatsLoading(true);
+    getToken().then((freshToken) => {
+      if (!freshToken) return;
+      return api.getAdminStats(freshToken);
+    })
+      .then((data) => { if (data) setStats(data); })
+      .catch((err) => console.log('Erro ao buscar stats do dashboard:', err))
+      .finally(() => setStatsLoading(false));
+  }, [token, getToken]);
+
+  useEffect(() => {
+    api.getEvents()
+      .then((res) => {
+        const upcoming = res.events
+          .filter((e) => e.status === 'em_breve')
+          .slice(0, 5);
+        setUpcomingEvents(upcoming);
+      })
+      .catch((err) => console.log('Erro ao buscar próximas sessões:', err));
+  }, []);
 
   /* Colors */
   const bg = isDark ? '#08080E' : '#F2F8F4';
@@ -237,13 +223,50 @@ export function AdminDashboard() {
   const violet = isDark ? '#c4b5fd' : '#7c3aed';
   const rose = isDark ? '#fda4af' : '#be185d';
 
-  /* KPI computed */
-  const totalRevenue = REVENUE_DATA.reduce((s, d) => s + d.receita, 0);
-  const totalFotos = SESSIONS_BAR.reduce((s, d) => s + d.fotos, 0);
-  const totalVendas = SESSIONS_BAR.reduce((s, d) => s + d.vendas, 0);
-  const sessionsWithPhotos = SESSIONS_BAR.filter((s) => s.fotos > 0).length;
-  const convRate = totalFotos > 0 ? ((totalVendas / totalFotos) * 100).toFixed(1) : '0';
+  /* Real KPI values */
+  const chartData = stats?.daily ?? [];
+  const totalRevenue = stats?.totalRevenue ?? 0;
+  const totalFotos = stats?.totalPhotos ?? 0;
+  const totalVendas = stats?.totalOrders ?? 0;
   const avgTicket = totalVendas > 0 ? (totalRevenue / totalVendas).toFixed(0) : '0';
+
+  /* Compute sessions bar from real orders */
+  const sessionsBarData = useMemo(() => {
+    if (!stats?.recentOrders?.length) return [];
+    const map: Record<string, { nome: string; fotos: number; vendas: number }> = {};
+    for (const order of stats.recentOrders) {
+      const eventName = order.items?.[0]?.eventName ?? 'Desconhecido';
+      const shortName = eventName.replace('Tour ', '').split(',')[0];
+      if (!map[eventName]) map[eventName] = { nome: shortName, fotos: 0, vendas: 0 };
+      map[eventName].fotos += order.items?.length ?? 0;
+      map[eventName].vendas += 1;
+    }
+    return Object.values(map).slice(0, 7);
+  }, [stats]);
+
+  /* Compute top sessions from real orders */
+  const topSessionsData = useMemo(() => {
+    if (!stats?.recentOrders?.length) return [];
+    const map: Record<string, { name: string; fotos: number; vendas: number; receita: number }> = {};
+    for (const order of stats.recentOrders) {
+      const eventName = order.items?.[0]?.eventName ?? 'Desconhecido';
+      if (!map[eventName]) map[eventName] = { name: eventName, fotos: 0, vendas: 0, receita: 0 };
+      map[eventName].fotos += order.items?.length ?? 0;
+      map[eventName].vendas += 1;
+      map[eventName].receita += order.total ?? 0;
+    }
+    const arr = Object.values(map).sort((a, b) => b.receita - a.receita);
+    const maxReceita = arr[0]?.receita ?? 1;
+    return arr.map((s) => ({ ...s, pct: Math.round((s.receita / maxReceita) * 100) }));
+  }, [stats]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ background: isDark ? '#08080E' : '#F2F8F4' }}>
+        <div className="w-8 h-8 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: isDark ? '#86efac' : '#006B2B' }} />
+      </div>
+    );
+  }
 
   const gridBorder = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,107,43,0.06)';
 
@@ -271,6 +294,11 @@ export function AdminDashboard() {
             </h1>
             <p className="text-sm mt-0.5" style={{ color: mutedText }}>
               Allianz Parque · Tour Oficial · Últimos 14 dias
+              {statsLoading && (
+                <span className="ml-2 inline-flex items-center gap-1 text-xs" style={{ color: mutedText }}>
+                  <Loader2 className="w-3 h-3 animate-spin" /> carregando...
+                </span>
+              )}
             </p>
           </div>
 
@@ -288,19 +316,21 @@ export function AdminDashboard() {
               <Download className="w-3.5 h-3.5" />
               Exportar
             </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
-              style={{
-                background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)',
-                border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.18)'}`,
-                color: green,
-                fontWeight: 700,
-              }}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Novo Evento
-            </motion.button>
+            <Link to="/admin/eventos">
+              <motion.button
+                whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
+                style={{
+                  background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)',
+                  border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.18)'}`,
+                  color: green,
+                  fontWeight: 700,
+                }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Novo Evento
+              </motion.button>
+            </Link>
           </div>
         </motion.div>
 
@@ -309,8 +339,11 @@ export function AdminDashboard() {
           className="mb-8"
           active={isOnDashboard ? 'dashboard' : 'eventos'}
           tabs={[
-            { key: 'dashboard', label: 'Dashboard',           icon: BarChart3,    to: '/admin' },
-            { key: 'eventos',   label: 'Controle de Eventos', icon: CalendarDays, to: '/admin/eventos' },
+            { key: 'dashboard',  label: 'Dashboard',   icon: BarChart3,    to: '/admin' },
+            { key: 'eventos',    label: 'Eventos',      icon: CalendarDays, to: '/admin/eventos' },
+            { key: 'financeiro', label: 'Financeiro',   icon: DollarSign,   to: '/admin/financeiro' },
+            { key: 'pedidos',    label: 'Pedidos',      icon: ClipboardList, to: '/admin/pedidos' },
+            { key: 'pdv',        label: 'PDV',           icon: Store,        to: '/admin/pdv' },
           ]}
         />
 
@@ -320,9 +353,7 @@ export function AdminDashboard() {
             icon={DollarSign}
             label="Receita Total"
             value={`R$ ${totalRevenue.toLocaleString('pt-BR')}`}
-            sub="últimos 14 dias"
-            trend="+18%"
-            trendUp={true}
+            sub="desde o início"
             color={green}
             iconBg={isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)'}
             delay={0.05}
@@ -334,11 +365,9 @@ export function AdminDashboard() {
           />
           <KpiCard
             icon={Camera}
-            label="Fotos Registradas"
+            label="Fotos Vendidas"
             value={String(totalFotos)}
-            sub={`${sessionsWithPhotos} sessões com fotos`}
-            trend="+32%"
-            trendUp={true}
+            sub={`${stats?.totalEvents ?? 0} eventos`}
             color={cyan}
             iconBg={isDark ? 'rgba(125,211,252,0.1)' : 'rgba(2,132,199,0.08)'}
             delay={0.1}
@@ -350,11 +379,9 @@ export function AdminDashboard() {
           />
           <KpiCard
             icon={TrendingUp}
-            label="Taxa de Conversão"
-            value={`${convRate}%`}
-            sub={`${totalVendas} vendas realizadas`}
-            trend="+4.2%"
-            trendUp={true}
+            label="Total de Pedidos"
+            value={String(totalVendas)}
+            sub={`${stats?.pendingOrders ?? 0} pendentes`}
             color={violet}
             iconBg={isDark ? 'rgba(196,181,253,0.1)' : 'rgba(124,58,237,0.08)'}
             delay={0.15}
@@ -369,8 +396,6 @@ export function AdminDashboard() {
             label="Ticket Médio"
             value={`R$ ${avgTicket}`}
             sub="por compra"
-            trend="-3%"
-            trendUp={false}
             color={rose}
             iconBg={isDark ? 'rgba(253,164,175,0.1)' : 'rgba(190,24,93,0.08)'}
             delay={0.2}
@@ -430,42 +455,48 @@ export function AdminDashboard() {
               </div>
             </div>
 
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={REVENUE_DATA} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorGreen" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={greenBright} stopOpacity={0.25} />
-                    <stop offset="95%" stopColor={greenBright} stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorCyan" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={cyan} stopOpacity={0.25} />
-                    <stop offset="95%" stopColor={cyan} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)'} vertical={false} />
-                <XAxis
-                  dataKey="day"
-                  tick={{ fontSize: 10, fill: mutedText }}
-                  tickLine={false}
-                  axisLine={false}
-                  interval={2}
-                />
-                <YAxis tick={{ fontSize: 10, fill: mutedText }} tickLine={false} axisLine={false} />
-                <Tooltip content={(props) => <CustomTooltipRevenue {...props} isDark={isDark} />} />
-                <Area
-                  type="monotone"
-                  dataKey={chartView}
-                  stroke={chartView === 'receita' ? greenBright : cyan}
-                  strokeWidth={2}
-                  fill={chartView === 'receita' ? 'url(#colorGreen)' : 'url(#colorCyan)'}
-                  dot={false}
-                  activeDot={{ r: 4, strokeWidth: 0 }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {chartData.length === 0 && !statsLoading ? (
+              <div className="h-[220px] flex items-center justify-center">
+                <p className="text-sm" style={{ color: mutedText }}>Nenhum dado disponível ainda</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorGreen" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={greenBright} stopOpacity={0.25} />
+                      <stop offset="95%" stopColor={greenBright} stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="colorCyan" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={cyan} stopOpacity={0.25} />
+                      <stop offset="95%" stopColor={cyan} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)'} vertical={false} />
+                  <XAxis
+                    dataKey="day"
+                    tick={{ fontSize: 10, fill: mutedText }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={2}
+                  />
+                  <YAxis tick={{ fontSize: 10, fill: mutedText }} tickLine={false} axisLine={false} />
+                  <Tooltip content={(props) => <CustomTooltipRevenue {...props} isDark={isDark} />} />
+                  <Area
+                    type="monotone"
+                    dataKey={chartView}
+                    stroke={chartView === 'receita' ? greenBright : cyan}
+                    strokeWidth={2}
+                    fill={chartView === 'receita' ? 'url(#colorGreen)' : 'url(#colorCyan)'}
+                    dot={false}
+                    activeDot={{ r: 4, strokeWidth: 0 }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
           </motion.div>
 
-          {/* Upcoming Sessions */}
+          {/* Upcoming Sessions — real data */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -478,7 +509,7 @@ export function AdminDashboard() {
                 <h3 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '0.95rem', fontWeight: 800, color: textColor }}>
                   Próximas Sessões
                 </h3>
-                <p className="text-xs mt-0.5" style={{ color: mutedText }}>Agendadas</p>
+                <p className="text-xs mt-0.5" style={{ color: mutedText }}>Em breve</p>
               </div>
               <Link to="/admin/eventos">
                 <ArrowRight className="w-4 h-4" style={{ color: mutedText }} />
@@ -486,49 +517,62 @@ export function AdminDashboard() {
             </div>
 
             <div className="flex flex-col gap-3 flex-1">
-              {UPCOMING_SESSIONS.map((s, i) => (
-                <motion.div
-                  key={s.id}
-                  initial={{ opacity: 0, x: 12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.35 + i * 0.07 }}
-                  className="flex items-center gap-3 p-3 rounded-xl"
+              {upcomingEvents.length === 0 ? (
+                <p className="text-xs text-center py-6" style={{ color: mutedText }}>Nenhuma sessão agendada</p>
+              ) : (
+                upcomingEvents.map((e, i) => {
+                  const d = new Date(e.date);
+                  const dateStr = `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}`;
+                  const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+                  const weekdays = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+                  const weekday = weekdays[d.getDay()];
+                  return (
+                    <motion.div
+                      key={e.id}
+                      initial={{ opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.35 + i * 0.07 }}
+                      className="flex items-center gap-3 p-3 rounded-xl"
+                      style={{
+                        background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,107,43,0.04)',
+                        border: `1px solid ${gridBorder}`,
+                      }}
+                    >
+                      <div
+                        className="flex flex-col items-center justify-center w-10 h-10 rounded-lg flex-shrink-0"
+                        style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.08)' }}
+                      >
+                        <span style={{ fontSize: '0.65rem', color: green, fontWeight: 800, lineHeight: 1 }}>{dateStr}</span>
+                        <span style={{ fontSize: '0.6rem', color: mutedText, lineHeight: 1.4 }}>{weekday}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p style={{ fontSize: '0.8rem', fontWeight: 700, color: textColor }}>{timeStr}</p>
+                        <p style={{ fontSize: '0.7rem', color: mutedText }}>Tour Allianz Parque</p>
+                      </div>
+                      <div
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ background: isDark ? 'rgba(125,211,252,0.6)' : '#0284c7' }}
+                      />
+                    </motion.div>
+                  );
+                })
+              )}
+
+              <Link to="/admin/eventos" className="mt-auto">
+                <motion.button
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                  className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm"
                   style={{
-                    background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,107,43,0.04)',
-                    border: `1px solid ${gridBorder}`,
+                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,107,43,0.06)',
+                    border: `1px solid ${cardBorder}`,
+                    color: mutedText,
+                    fontWeight: 600,
                   }}
                 >
-                  <div
-                    className="flex flex-col items-center justify-center w-10 h-10 rounded-lg flex-shrink-0"
-                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.08)' }}
-                  >
-                    <span style={{ fontSize: '0.65rem', color: green, fontWeight: 800, lineHeight: 1 }}>{s.date}</span>
-                    <span style={{ fontSize: '0.6rem', color: mutedText, lineHeight: 1.4 }}>{s.weekday}</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p style={{ fontSize: '0.8rem', fontWeight: 700, color: textColor }}>{s.time}</p>
-                    <p style={{ fontSize: '0.7rem', color: mutedText }}>Tour Allianz Parque</p>
-                  </div>
-                  <div
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{ background: isDark ? 'rgba(125,211,252,0.6)' : '#0284c7' }}
-                  />
-                </motion.div>
-              ))}
-
-              <motion.button
-                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                className="mt-auto flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm"
-                style={{
-                  background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,107,43,0.06)',
-                  border: `1px solid ${cardBorder}`,
-                  color: mutedText,
-                  fontWeight: 600,
-                }}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Nova Sessão
-              </motion.button>
+                  <Plus className="w-3.5 h-3.5" />
+                  Nova Sessão
+                </motion.button>
+              </Link>
             </div>
           </motion.div>
         </div>
@@ -536,7 +580,7 @@ export function AdminDashboard() {
         {/* ── Bottom Row ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-          {/* Bar Chart – Fotos por Sessão */}
+          {/* Bar Chart – Fotos por Sessão (real data) */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -549,7 +593,7 @@ export function AdminDashboard() {
                 <h3 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '0.95rem', fontWeight: 800, color: textColor }}>
                   Fotos & Vendas por Sessão
                 </h3>
-                <p className="text-xs mt-0.5" style={{ color: mutedText }}>Todas as sessões recentes</p>
+                <p className="text-xs mt-0.5" style={{ color: mutedText }}>Baseado nos pedidos recentes</p>
               </div>
               <div className="flex items-center gap-3 text-xs" style={{ color: mutedText }}>
                 <span className="flex items-center gap-1.5">
@@ -563,19 +607,25 @@ export function AdminDashboard() {
               </div>
             </div>
 
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={SESSIONS_BAR} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)'} vertical={false} />
-                <XAxis dataKey="nome" tick={{ fontSize: 9, fill: mutedText }} tickLine={false} axisLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: mutedText }} tickLine={false} axisLine={false} />
-                <Tooltip content={(props) => <CustomTooltipBar {...props} isDark={isDark} />} />
-                <Bar dataKey="fotos" fill={greenBright} radius={[4, 4, 0, 0]} maxBarSize={32} />
-                <Bar dataKey="vendas" fill={cyan} radius={[4, 4, 0, 0]} maxBarSize={32} />
-              </BarChart>
-            </ResponsiveContainer>
+            {sessionsBarData.length === 0 ? (
+              <div className="h-[200px] flex items-center justify-center">
+                <p className="text-sm" style={{ color: mutedText }}>Nenhum pedido registrado ainda</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={sessionsBarData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }} barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.05)'} vertical={false} />
+                  <XAxis dataKey="nome" tick={{ fontSize: 9, fill: mutedText }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: mutedText }} tickLine={false} axisLine={false} />
+                  <Tooltip content={(props) => <CustomTooltipBar {...props} isDark={isDark} />} />
+                  <Bar dataKey="fotos" fill={greenBright} radius={[4, 4, 0, 0]} maxBarSize={32} />
+                  <Bar dataKey="vendas" fill={cyan} radius={[4, 4, 0, 0]} maxBarSize={32} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </motion.div>
 
-          {/* Recent Activity */}
+          {/* Recent Orders — real data */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -586,63 +636,57 @@ export function AdminDashboard() {
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h3 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '0.95rem', fontWeight: 800, color: textColor }}>
-                  Atividade Recente
+                  Pedidos Recentes
                 </h3>
-                <p className="text-xs mt-0.5" style={{ color: mutedText }}>Compras e uploads</p>
+                <p className="text-xs mt-0.5" style={{ color: mutedText }}>
+                  {stats ? `${stats.recentOrders.length} pedidos` : 'Carregando...'}
+                </p>
               </div>
-              <Zap className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#d97706' }} />
+              <Zap className="w-4 h-4" style={{ color: isDark ? '#009ee3' : '#007ab3' }} />
             </div>
 
             <div className="flex flex-col gap-3">
-              {RECENT_ACTIVITY.map((item, i) => (
+              {(!stats || stats.recentOrders.length === 0) && !statsLoading && (
+                <p className="text-xs text-center py-8" style={{ color: mutedText }}>Nenhum pedido ainda</p>
+              )}
+              {statsLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-5 h-5 animate-spin" style={{ color: mutedText }} />
+                </div>
+              )}
+              {(stats?.recentOrders ?? []).slice(0, 5).map((order, i) => (
                 <motion.div
-                  key={item.id}
+                  key={order.id}
                   initial={{ opacity: 0, x: 12 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.45 + i * 0.05 }}
                   className="flex items-start gap-3"
                 >
-                  {/* Icon */}
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                    style={{
-                      background: item.type === 'purchase'
-                        ? isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)'
-                        : isDark ? 'rgba(125,211,252,0.08)' : 'rgba(2,132,199,0.07)',
-                    }}
+                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)' }}
                   >
-                    {item.type === 'purchase'
-                      ? <DollarSign className="w-3.5 h-3.5" style={{ color: green }} />
-                      : <Upload className="w-3.5 h-3.5" style={{ color: cyan }} />}
+                    <DollarSign className="w-3.5 h-3.5" style={{ color: green }} />
                   </div>
-
-                  {/* Content */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between gap-2">
-                      <p style={{ fontSize: '0.78rem', fontWeight: 700, color: textColor, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {item.type === 'purchase' ? item.user : 'Upload automático'}
+                      <p style={{ fontSize: '0.78rem', fontWeight: 700, color: textColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {order.customerName || order.customerEmail}
                       </p>
-                      {item.type === 'purchase' && item.amount != null && (
-                        <span style={{ fontSize: '0.75rem', fontWeight: 800, color: green, whiteSpace: 'nowrap' }}>
-                          R$ {item.amount}
-                        </span>
-                      )}
-                      {item.type === 'upload' && (
-                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: cyan, whiteSpace: 'nowrap' }}>
-                          +{item.count} fotos
-                        </span>
-                      )}
+                      <span style={{ fontSize: '0.75rem', fontWeight: 800, color: green, whiteSpace: 'nowrap' }}>
+                        R$ {order.total}
+                      </span>
                     </div>
                     <p style={{ fontSize: '0.7rem', color: mutedText, marginTop: 1 }} className="truncate">
-                      {item.event}
+                      {order.items?.length ?? 0} {order.items?.length === 1 ? 'foto' : 'fotos'} · {order.paymentMethod?.toUpperCase()}
                     </p>
                     <div className="flex items-center gap-1.5 mt-1">
-                      {item.status === 'success'
+                      {order.status === 'paid' || order.status === 'delivered'
                         ? <CheckCircle2 className="w-2.5 h-2.5" style={{ color: isDark ? 'rgba(134,239,172,0.5)' : 'rgba(0,107,43,0.5)' }} />
-                        : item.status === 'pending'
-                        ? <Clock className="w-2.5 h-2.5" style={{ color: isDark ? 'rgba(252,211,77,0.6)' : '#d97706' }} />
-                        : <AlertCircle className="w-2.5 h-2.5" style={{ color: 'rgba(252,165,165,0.6)' }} />}
-                      <span style={{ fontSize: '0.65rem', color: mutedText }}>{item.time}</span>
+                        : <Clock className="w-2.5 h-2.5" style={{ color: isDark ? 'rgba(0,158,227,0.7)' : '#007ab3' }} />}
+                      <span style={{ fontSize: '0.65rem', color: mutedText }}>
+                        {order.status === 'pending' ? 'Aguardando MP' : order.status === 'paid' ? 'Pago' : 'Entregue'}
+                      </span>
                     </div>
                   </div>
                 </motion.div>
@@ -651,7 +695,7 @@ export function AdminDashboard() {
           </motion.div>
         </div>
 
-        {/* ── Top Sessions Table ── */}
+        {/* ── Top Sessions Table — real data ── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -669,73 +713,79 @@ export function AdminDashboard() {
             <ImageIcon className="w-4 h-4" style={{ color: mutedText }} />
           </div>
 
-          <div className="space-y-3">
-            {/* Header */}
-            <div
-              className="grid text-xs px-3"
-              style={{
-                gridTemplateColumns: '1fr 80px 80px 90px 120px',
-                color: mutedText,
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-              }}
-            >
-              <span>Sessão</span>
-              <span className="text-right">Fotos</span>
-              <span className="text-right">Vendas</span>
-              <span className="text-right">Receita</span>
-              <span className="text-right">Performance</span>
-            </div>
-
-            {/* Divider */}
-            <div style={{ height: 1, background: cardBorder }} />
-
-            {TOP_SESSIONS.map((s, i) => (
-              <motion.div
-                key={s.name}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.5 + i * 0.06 }}
-                className="grid items-center px-3 py-2.5 rounded-xl"
+          {topSessionsData.length === 0 ? (
+            <p className="text-sm text-center py-6" style={{ color: mutedText }}>
+              Nenhum pedido registrado ainda. Os dados aparecerão aqui após as primeiras vendas.
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {/* Header */}
+              <div
+                className="grid text-xs px-3"
                 style={{
                   gridTemplateColumns: '1fr 80px 80px 90px 120px',
-                  background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,107,43,0.03)',
+                  color: mutedText,
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
                 }}
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span
-                    className="w-5 h-5 rounded-md flex items-center justify-center text-xs flex-shrink-0"
-                    style={{
-                      background: i === 0
-                        ? isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'
-                        : isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
-                      color: i === 0 ? green : mutedText,
-                      fontWeight: 800,
-                    }}
-                  >
-                    {i + 1}
-                  </span>
-                  <span className="text-sm truncate" style={{ color: textColor, fontWeight: 600 }}>{s.name}</span>
-                </div>
-                <span className="text-sm text-right" style={{ color: textColor, fontWeight: 600 }}>{s.fotos}</span>
-                <span className="text-sm text-right" style={{ color: textColor, fontWeight: 600 }}>{s.vendas}</span>
-                <span className="text-sm text-right" style={{ color: green, fontWeight: 700 }}>R$ {s.receita}</span>
-                <div className="flex items-center justify-end gap-2">
-                  <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', maxWidth: 80 }}>
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${s.pct}%` }}
-                      transition={{ duration: 0.8, delay: 0.55 + i * 0.06 }}
-                      className="h-full rounded-full"
-                      style={{ background: `linear-gradient(90deg, ${greenBright}80, ${greenBright})` }}
-                    />
+                <span>Sessão</span>
+                <span className="text-right">Fotos</span>
+                <span className="text-right">Vendas</span>
+                <span className="text-right">Receita</span>
+                <span className="text-right">Performance</span>
+              </div>
+
+              {/* Divider */}
+              <div style={{ height: 1, background: cardBorder }} />
+
+              {topSessionsData.map((s, i) => (
+                <motion.div
+                  key={s.name}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.5 + i * 0.06 }}
+                  className="grid items-center px-3 py-2.5 rounded-xl"
+                  style={{
+                    gridTemplateColumns: '1fr 80px 80px 90px 120px',
+                    background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,107,43,0.03)',
+                  }}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="w-5 h-5 rounded-md flex items-center justify-center text-xs flex-shrink-0"
+                      style={{
+                        background: i === 0
+                          ? isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'
+                          : isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                        color: i === 0 ? green : mutedText,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="text-sm truncate" style={{ color: textColor, fontWeight: 600 }}>{s.name}</span>
                   </div>
-                  <span className="text-xs w-8 text-right" style={{ color: mutedText }}>{s.pct}%</span>
-                </div>
-              </motion.div>
-            ))}
-          </div>
+                  <span className="text-sm text-right" style={{ color: textColor, fontWeight: 600 }}>{s.fotos}</span>
+                  <span className="text-sm text-right" style={{ color: textColor, fontWeight: 600 }}>{s.vendas}</span>
+                  <span className="text-sm text-right" style={{ color: green, fontWeight: 700 }}>R$ {s.receita}</span>
+                  <div className="flex items-center justify-end gap-2">
+                    <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)', maxWidth: 80 }}>
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${s.pct}%` }}
+                        transition={{ duration: 0.8, delay: 0.55 + i * 0.06 }}
+                        className="h-full rounded-full"
+                        style={{ background: `linear-gradient(90deg, ${greenBright}80, ${greenBright})` }}
+                      />
+                    </div>
+                    <span className="text-xs w-8 text-right" style={{ color: mutedText }}>{s.pct}%</span>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          )}
         </motion.div>
 
       </div>

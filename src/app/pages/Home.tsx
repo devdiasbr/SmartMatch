@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { Link } from 'react-router';
 import {
   Camera,
@@ -7,36 +7,22 @@ import {
   ChevronRight,
   Star,
   Shield,
-  Zap,
   Download,
-  CheckCircle2,
   ArrowRight,
   Play,
-  Users,
-  Image,
-  Clock,
   Trophy,
 } from 'lucide-react';
 import { motion, useScroll, useTransform } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
+import { api } from '../lib/api';
 
 /* ─── Images ─── */
 const IMG_STADIUM =
   'https://images.unsplash.com/photo-1587565276758-0076cff659b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
-const IMG_CONCERT =
-  'https://images.unsplash.com/photo-1771865107543-3e6b77bee2e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
-const IMG_TRAIL =
-  'https://images.unsplash.com/photo-1762375212814-21dfcb0bfb38?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
-const IMG_CYCLING =
-  'https://images.unsplash.com/photo-1753516231269-2a676b28f6fc?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
-const IMG_MARATHON =
-  'https://images.unsplash.com/photo-1745818016652-a890846ed361?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
 const IMG_FAN_FULL =
   'https://images.unsplash.com/photo-1693517413656-d3445182b2e2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=800';
 const IMG_FAN_PORTRAIT =
   'https://images.unsplash.com/photo-1757773873005-bf25cc5dc45b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=400';
-const IMG_TRIATHLON =
-  'https://images.unsplash.com/photo-1508730328641-47c1616341b7?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
 
 /* ─── FaceScan Widget ─── */
 function FaceScanWidget() {
@@ -204,7 +190,7 @@ function FaceScanWidget() {
       >
         <span style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)' }}>Fotos encontradas: </span>
         <motion.span
-          style={{ color: '#FFB800', fontWeight: 700 }}
+          style={{ color: '#00D4FF', fontWeight: 700 }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 2.5 }}
@@ -222,6 +208,29 @@ function HeroSection() {
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end start'] });
   const y = useTransform(scrollYProgress, [0, 1], ['0%', '25%']);
   const opacity = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
+
+  const [stats, setStats] = useState<{ totalEvents: number; totalPhotos: number } | null>(null);
+
+  useEffect(() => {
+    api.getPublicStats()
+      .then((data) => setStats(data))
+      .catch(() => {/* fail silently */});
+  }, []);
+
+  const statsRow = [
+    {
+      value: stats ? (stats.totalPhotos > 0 ? `${stats.totalPhotos.toLocaleString('pt-BR')}` : '—') : '...',
+      label: 'Fotos no acervo',
+      color: '#86efac',
+    },
+    {
+      value: stats ? (stats.totalEvents > 0 ? `${stats.totalEvents}` : '—') : '...',
+      label: 'Eventos cobertos',
+      color: '#7dd3fc',
+    },
+    { value: '< 3s', label: 'Tempo de busca', color: '#fcd34d' },
+    { value: '98.7%', label: 'Precisão da IA', color: '#f9a8d4' },
+  ];
 
   return (
     <section ref={ref} className="relative min-h-screen flex items-center overflow-hidden">
@@ -320,38 +329,22 @@ function HeroSection() {
               transition={{ duration: 0.6, delay: 0.35 }}
               className="mt-10 flex flex-wrap gap-4"
             >
-              <motion.button
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.97 }}
-                className="flex items-center gap-3 px-7 py-4 rounded-2xl text-base"
-                style={{
-                  background: 'linear-gradient(135deg, #006B2B, #00843D)',
-                  color: '#fff',
-                  fontWeight: 800,
-                  fontFamily: "'Montserrat', sans-serif",
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
-                }}
-              >
-                <Camera className="w-5 h-5" />
-                Encontrar minhas fotos
-                <ChevronRight className="w-4 h-4" />
-              </motion.button>
-
               <Link to="/eventos">
                 <motion.button
                   whileHover={{ scale: 1.04 }}
                   whileTap={{ scale: 0.97 }}
                   className="flex items-center gap-3 px-7 py-4 rounded-2xl text-base"
                   style={{
-                    background: 'rgba(255,255,255,0.05)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                    color: 'rgba(255,255,255,0.85)',
-                    fontWeight: 600,
-                    backdropFilter: 'blur(10px)',
+                    background: 'linear-gradient(135deg, #006B2B, #00843D)',
+                    color: '#fff',
+                    fontWeight: 800,
+                    fontFamily: "'Montserrat', sans-serif",
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
                   }}
                 >
                   <Play className="w-4 h-4" />
                   Ver eventos
+                  <ChevronRight className="w-4 h-4" />
                 </motion.button>
               </Link>
             </motion.div>
@@ -391,7 +384,7 @@ function HeroSection() {
           </motion.div>
         </div>
 
-        {/* Stats row */}
+        {/* Stats row — real data from backend */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -404,12 +397,7 @@ function HeroSection() {
             overflow: 'hidden',
           }}
         >
-          {[
-            { value: '2.3M+', label: 'Fotos entregues', color: '#86efac' },
-            { value: '847', label: 'Eventos cobertos', color: '#7dd3fc' },
-            { value: '< 3s', label: 'Tempo de busca', color: '#fcd34d' },
-            { value: '98.7%', label: 'Precisão da IA', color: '#f9a8d4' },
-          ].map(({ value, label, color }, i) => (
+          {statsRow.map(({ value, label, color }, i) => (
             <div
               key={label}
               className="flex flex-col items-center justify-center py-6 px-4"
@@ -522,7 +510,7 @@ function HowItWorks() {
       number: '03',
       title: 'Escolha e compre',
       desc: 'Selecione suas favoritas, adicione ao carrinho e faça download em alta resolução.',
-      color: '#FFB800',
+      color: '#00D4FF',
     },
   ];
 
@@ -649,667 +637,6 @@ function HowItWorks() {
   );
 }
 
-/* ─── Featured Events ─── */
-const EVENTS = [
-  {
-    id: 'tour-allianz-parque',
-    title: 'Tour Oficial do Palmeiras · Allianz Parque',
-    date: '15 Mar 2025',
-    location: 'São Paulo, SP',
-    photos: 18400,
-    price: 39,
-    tag: 'TOUR',
-    tagColor: '#00FF7F',
-    image: IMG_STADIUM,
-    large: true,
-  },
-  {
-    id: 'ultra-trail-mantiqueira',
-    title: 'Ultra Trail Mantiqueira',
-    date: '25 Jun 2024',
-    location: 'Campos do Jordão, SP',
-    photos: 8640,
-    price: 39,
-    tag: 'TRAIL',
-    tagColor: '#00D4FF',
-    image: IMG_TRAIL,
-    large: false,
-  },
-  {
-    id: 'ironman-floripa',
-    title: 'IRONMAN Florianópolis',
-    date: '03 Ago 2024',
-    location: 'Florianópolis, SC',
-    photos: 15200,
-    price: 49,
-    tag: 'TRIATHLON',
-    tagColor: '#FFB800',
-    image: IMG_TRIATHLON,
-    large: false,
-  },
-  {
-    id: 'rock-in-rio-2024',
-    title: 'Rock in Rio 2024',
-    date: '14-22 Set 2024',
-    location: 'Rio de Janeiro, RJ',
-    photos: 28900,
-    price: 59,
-    tag: 'FESTIVAL',
-    tagColor: '#FF6B9D',
-    image: IMG_CONCERT,
-    large: false,
-  },
-  {
-    id: 'maratona-sp-2024',
-    title: 'Maratona de São Paulo 2024',
-    date: '12 Mai 2024',
-    location: 'São Paulo, SP',
-    photos: 12480,
-    price: 29,
-    tag: 'CORRIDA',
-    tagColor: '#A78BFA',
-    image: IMG_MARATHON,
-    large: false,
-  },
-];
-
-function EventCard({
-  event,
-  large = false,
-}: {
-  event: (typeof EVENTS)[0];
-  large?: boolean;
-}) {
-  return (
-    <motion.div
-      whileHover={{ scale: large ? 1.01 : 1.03 }}
-      transition={{ duration: 0.3 }}
-      className="relative group overflow-hidden cursor-pointer"
-      style={{
-        borderRadius: 20,
-        gridRow: large ? 'span 2' : 'span 1',
-        minHeight: large ? 480 : 220,
-      }}
-    >
-      {/* Image */}
-      <img
-        src={event.image}
-        alt={event.title}
-        className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-        style={{ filter: 'brightness(0.6) saturate(0.85)' }}
-      />
-
-      {/* Overlays */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            'linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.2) 50%, transparent 100%)',
-        }}
-      />
-      <div
-        className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-        style={{ background: `radial-gradient(ellipse at center, ${event.tagColor}14 0%, transparent 70%)` }}
-      />
-
-      {/* Tags top */}
-      <div className="absolute top-4 left-4 right-4 flex items-center justify-between">
-        <span
-          className="px-3 py-1 rounded-full text-[10px] tracking-widest"
-          style={{
-            background: `${event.tagColor}33`,
-            border: `1px solid ${event.tagColor}80`,
-            color: event.tagColor,
-            fontWeight: 700,
-            backdropFilter: 'blur(10px)',
-            fontFamily: "'Montserrat', sans-serif",
-          }}
-        >
-          {event.tag}
-        </span>
-        <span
-          className="px-3 py-1 rounded-full text-xs"
-          style={{
-            background: 'rgba(0,0,0,0.5)',
-            border: '1px solid rgba(255,255,255,0.1)',
-            color: 'rgba(255,255,255,0.7)',
-            backdropFilter: 'blur(10px)',
-          }}
-        >
-          <Image className="w-3 h-3 inline mr-1" />
-          {event.photos.toLocaleString('pt-BR')} fotos
-        </span>
-      </div>
-
-      {/* Bottom content */}
-      <div className="absolute bottom-0 left-0 right-0 p-5">
-        <h3
-          className="text-white mb-1"
-          style={{
-            fontFamily: "'Montserrat', sans-serif",
-            fontSize: large ? '1.5rem' : '1.05rem',
-            fontWeight: 700,
-            lineHeight: 1.2,
-          }}
-        >
-          {event.title}
-        </h3>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
-            {event.date}
-          </span>
-          <span style={{ color: 'rgba(255,255,255,0.2)' }}>·</span>
-          <span className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
-            {event.location}
-          </span>
-        </div>
-
-        {/* Price + CTA */}
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
-              a partir de{' '}
-            </span>
-            <span
-              style={{
-                fontFamily: "'Montserrat', sans-serif",
-                fontSize: '1.2rem',
-                fontWeight: 700,
-                color: '#FFB800',
-              }}
-            >
-              R$ {event.price}
-            </span>
-          </div>
-
-          <Link to={`/eventos/${event.id}`}>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm opacity-0 group-hover:opacity-100 transition-opacity"
-              style={{
-                background: 'rgba(255,255,255,0.1)',
-                border: '1px solid rgba(255,255,255,0.2)',
-                color: 'white',
-                backdropFilter: 'blur(10px)',
-              }}
-            >
-              Ver fotos
-              <ArrowRight className="w-3.5 h-3.5" />
-            </motion.button>
-          </Link>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function FeaturedEvents() {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
-
-  return (
-    <section className="py-24 px-6">
-      <div className="max-w-7xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12"
-        >
-          <div>
-            <span
-              className="text-xs tracking-widest"
-              style={{ color: isDark ? '#00FF7F' : '#006B2B', fontWeight: 700, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
-            >
-              Eventos em destaque
-            </span>
-            <h2
-              style={{
-                fontFamily: "'Montserrat', sans-serif",
-                fontSize: 'clamp(2rem, 4vw, 3.2rem)',
-                fontWeight: 800,
-                lineHeight: 1.1,
-                letterSpacing: '-0.02em',
-                marginTop: '0.5rem',
-                color: isDark ? '#ffffff' : '#0D2818',
-              }}
-            >
-              Seus próximos
-              <br />
-              <span style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>momentos épicos</span>
-            </h2>
-          </div>
-          <Link to="/eventos">
-            <motion.button
-              whileHover={{ scale: 1.04 }}
-              className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm"
-              style={{
-                border: `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,107,43,0.2)'}`,
-                color: isDark ? 'rgba(255,255,255,0.6)' : '#006B2B',
-                fontWeight: 600,
-              }}
-            >
-              Ver todos os eventos
-              <ChevronRight className="w-4 h-4" />
-            </motion.button>
-          </Link>
-        </motion.div>
-
-        {/* Mosaic grid */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-4"
-          style={{ gridAutoRows: '220px' }}
-        >
-          <EventCard event={EVENTS[0]} large />
-          <EventCard event={EVENTS[1]} />
-          <EventCard event={EVENTS[2]} />
-          <EventCard event={EVENTS[3]} />
-          <EventCard event={EVENTS[4]} />
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
-/* ─── Photo Packages ─── */
-function PhotoPackages() {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
-
-  const headingColor = isDark ? '#ffffff' : '#0D2818';
-  const bodyColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(13,40,24,0.5)';
-
-  const packages = [
-    {
-      name: 'Digital',
-      price: 29,
-      perks: '1 foto em alta resolução',
-      features: [
-        'Download imediato',
-        'Uso pessoal',
-        'Até 5000px resolução',
-        'Formato JPG',
-      ],
-      cta: 'Comprar foto',
-      highlight: false,
-      color: '#00D4FF',
-      bgImage: IMG_FAN_FULL,
-    },
-    {
-      name: 'Coleção',
-      price: 79,
-      perks: 'Até 6 fotos selecionadas',
-      features: [
-        'Download imediato',
-        'Uso pessoal e redes sociais',
-        'Resolução máxima',
-        'JPG + PNG',
-        'Sem marca d\'água',
-      ],
-      cta: 'Mais popular',
-      highlight: true,
-      color: isDark ? '#00FF7F' : '#006B2B',
-      bgImage: IMG_TRIATHLON,
-    },
-    {
-      name: 'Álbum Premium',
-      price: 149,
-      perks: 'Fotos ilimitadas do evento',
-      features: [
-        'Download ilimitado',
-        'Uso comercial permitido',
-        'Resolução máxima',
-        'Todos os formatos',
-        'Álbum digital exclusivo',
-        'Suporte prioritário',
-      ],
-      cta: 'Ter tudo',
-      highlight: false,
-      color: '#FFB800',
-      bgImage: IMG_STADIUM,
-    },
-  ];
-
-  return (
-    <section id="precos" className="py-32 px-6 relative">
-      {/* BG gradient */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background: isDark
-            ? 'radial-gradient(ellipse at 50% 0%, rgba(0,107,43,0.06) 0%, transparent 60%)'
-            : 'radial-gradient(ellipse at 50% 0%, rgba(0,107,43,0.04) 0%, transparent 60%)',
-        }}
-      />
-
-      <div className="relative z-10 max-w-7xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="text-center mb-16"
-        >
-          <span
-            className="text-xs tracking-widest"
-            style={{ color: '#FFB800', fontWeight: 700, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
-          >
-            Pacotes de fotos
-          </span>
-          <h2
-            style={{
-              fontFamily: "'Montserrat', sans-serif",
-              fontSize: 'clamp(2.5rem, 5vw, 4rem)',
-              fontWeight: 800,
-              lineHeight: 1.1,
-              letterSpacing: '-0.02em',
-              marginTop: '0.5rem',
-              color: headingColor,
-            }}
-          >
-            Sua torcida merece
-            <br />
-            <span style={{ color: '#FFB800' }}>ser lembrada</span>
-          </h2>
-          <p
-            className="mt-4 text-base max-w-md mx-auto"
-            style={{ color: bodyColor }}
-          >
-            Escolha o pacote ideal e leve suas fotos em alta resolução para sempre.
-          </p>
-        </motion.div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {packages.map((pkg, i) => (
-            <motion.div
-              key={pkg.name}
-              initial={{ opacity: 0, y: 40 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6, delay: i * 0.12 }}
-              whileHover={{ y: -8, scale: 1.01 }}
-              className="relative overflow-hidden group"
-              style={{
-                borderRadius: 24,
-                border: pkg.highlight
-                  ? `2px solid ${pkg.color}80`
-                  : `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.12)'}`,
-                background: pkg.highlight
-                  ? isDark ? `rgba(0,107,43,0.06)` : 'rgba(0,107,43,0.04)'
-                  : isDark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.8)',
-                boxShadow: pkg.highlight ? `0 0 60px ${pkg.color}1A` : 'none',
-              }}
-            >
-              {/* Background image subtle */}
-              <div
-                className="absolute inset-0 opacity-10 group-hover:opacity-20 transition-opacity duration-500"
-                style={{
-                  backgroundImage: `url(${pkg.bgImage})`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }}
-              />
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: isDark
-                    ? pkg.highlight
-                      ? 'linear-gradient(to bottom, rgba(8,8,14,0.8), rgba(8,8,14,0.95))'
-                      : 'linear-gradient(to bottom, rgba(8,8,14,0.85), rgba(8,8,14,0.97))'
-                    : pkg.highlight
-                      ? 'linear-gradient(to bottom, rgba(242,248,244,0.85), rgba(242,248,244,0.97))'
-                      : 'linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0.97))',
-                }}
-              />
-
-              {/* Popular badge */}
-              {pkg.highlight && (
-                <div
-                  className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-0 px-5 py-1 text-xs rounded-b-xl"
-                  style={{
-                    background: isDark
-                      ? 'linear-gradient(135deg, #00FF7F, #00CC64)'
-                      : 'linear-gradient(135deg, #006B2B, #00843D)',
-                    color: '#fff',
-                    fontWeight: 800,
-                    letterSpacing: '0.08em',
-                    fontFamily: "'Montserrat', sans-serif",
-                  }}
-                >
-                  MAIS POPULAR
-                </div>
-              )}
-
-              <div className="relative z-10 p-8 pt-10">
-                {/* Name */}
-                <div
-                  className="inline-block px-3 py-1 rounded-full text-xs mb-4"
-                  style={{
-                    background: `${pkg.color}26`,
-                    border: `1px solid ${pkg.color}4D`,
-                    color: pkg.color,
-                    fontWeight: 700,
-                    fontFamily: "'Montserrat', sans-serif",
-                  }}
-                >
-                  {pkg.name}
-                </div>
-
-                {/* Price */}
-                <div className="mb-2">
-                  <span
-                    style={{
-                      fontFamily: "'Montserrat', sans-serif",
-                      fontSize: '3.5rem',
-                      fontWeight: 900,
-                      color: pkg.color,
-                      lineHeight: 1,
-                    }}
-                  >
-                    R$ {pkg.price}
-                  </span>
-                </div>
-                <p className="text-sm mb-8" style={{ color: bodyColor }}>
-                  {pkg.perks}
-                </p>
-
-                {/* CTA */}
-                <motion.button
-                  whileHover={{ scale: 1.04 }}
-                  whileTap={{ scale: 0.96 }}
-                  className="w-full py-3 rounded-xl text-sm mb-8"
-                  style={{
-                    background: pkg.highlight
-                      ? isDark
-                        ? 'linear-gradient(135deg, #00FF7F, #00CC64)'
-                        : 'linear-gradient(135deg, #006B2B, #00843D)'
-                      : `${pkg.color}26`,
-                    border: pkg.highlight ? 'none' : `1px solid ${pkg.color}4D`,
-                    color: pkg.highlight ? '#fff' : pkg.color,
-                    fontWeight: 700,
-                    fontFamily: "'Montserrat', sans-serif",
-                  }}
-                >
-                  {pkg.cta}
-                </motion.button>
-
-                {/* Features */}
-                <ul className="flex flex-col gap-3">
-                  {pkg.features.map((f) => (
-                    <li key={f} className="flex items-center gap-3 text-sm">
-                      <CheckCircle2
-                        className="w-4 h-4 flex-shrink-0"
-                        style={{ color: pkg.color }}
-                      />
-                      <span style={{ color: isDark ? 'rgba(255,255,255,0.6)' : 'rgba(13,40,24,0.65)' }}>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ─── Social Proof ─── */
-function Testimonials() {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
-
-  const headingColor = isDark ? '#ffffff' : '#0D2818';
-  const cardBg = isDark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.85)';
-  const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,107,43,0.1)';
-
-  const testimonials = [
-    {
-      quote:
-        '"Fiz o Tour do Allianz Parque com minha filha e encontramos nossas fotos em segundos. A qualidade é absurda — até o gramado aparece com uma nitidez incrível. Vale cada centavo!"',
-      name: 'Fernanda Luz',
-      role: 'Torcedora Palmeirense · Tour Allianz Parque',
-      stars: 5,
-    },
-    {
-      quote:
-        '"Organizamos o Tour com mais de 12 mil fotos. A plataforma indexou tudo automaticamente e os visitantes ficaram encantados com a rapidez. Nunca mais faço evento sem o EventFace."',
-      name: 'Ricardo Torres',
-      role: 'Coordenador · Tour do Palmeiras Oficial',
-      stars: 5,
-    },
-    {
-      quote:
-        '"Fui ao jogo do Derby e o EventFace me mandou minhas fotos da arquibancada antes mesmo de eu chegar em casa. Tecnologia incrível, fui encontrado entre 20 mil torcedores!"',
-      name: 'Carlos Menezes',
-      role: 'Sócio · Avanti Palmeiras',
-      stars: 5,
-    },
-  ];
-
-  return (
-    <section className="py-24 px-6">
-      <div className="max-w-7xl mx-auto">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="text-center mb-16"
-        >
-          <span
-            className="text-xs tracking-widest"
-            style={{ color: '#FF6B9D', fontWeight: 700, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
-          >
-            O que dizem os torcedores
-          </span>
-          <h2
-            style={{
-              fontFamily: "'Montserrat', sans-serif",
-              fontSize: 'clamp(2rem, 4vw, 3.2rem)',
-              fontWeight: 800,
-              lineHeight: 1.1,
-              letterSpacing: '-0.02em',
-              marginTop: '0.5rem',
-              color: headingColor,
-            }}
-          >
-            Histórias que nos
-            <br />
-            <span style={{ color: '#FF6B9D' }}>movem</span>
-          </h2>
-        </motion.div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {testimonials.map((t, i) => (
-            <motion.div
-              key={t.name}
-              initial={{ opacity: 0, y: 40 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6, delay: i * 0.1 }}
-              className="flex flex-col justify-between p-8"
-              style={{
-                background: cardBg,
-                border: `1px solid ${cardBorder}`,
-                borderRadius: 24,
-                backdropFilter: isDark ? 'none' : 'blur(8px)',
-              }}
-            >
-              {/* Stars */}
-              <div className="flex gap-1 mb-6">
-                {[...Array(t.stars)].map((_, j) => (
-                  <Star key={j} className="w-4 h-4 fill-[#FFB800] text-[#FFB800]" />
-                ))}
-              </div>
-
-              <p
-                className="text-base mb-8"
-                style={{
-                  color: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(13,40,24,0.65)',
-                  lineHeight: 1.7,
-                  fontStyle: 'italic',
-                }}
-              >
-                {t.quote}
-              </p>
-
-              <div>
-                <div
-                  className="text-sm"
-                  style={{ color: headingColor, fontWeight: 600 }}
-                >
-                  {t.name}
-                </div>
-                <div className="text-xs mt-1" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.4)' }}>
-                  {t.role}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Aggregate stats */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          className="flex flex-wrap justify-center gap-12 mt-16 pt-16"
-          style={{ borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,107,43,0.1)'}` }}
-        >
-          {[
-            { icon: Star, value: '4.9/5', label: 'Avaliação média', color: '#FFB800' },
-            { icon: Users, value: '140K+', label: 'Torcedores satisfeitos', color: isDark ? '#00FF7F' : '#006B2B' },
-            { icon: Image, value: '2.3M', label: 'Fotos vendidas', color: '#00D4FF' },
-            { icon: Clock, value: '< 3s', label: 'Tempo de busca', color: '#FF6B9D' },
-          ].map(({ icon: Icon, value, label, color }) => (
-            <div key={label} className="flex flex-col items-center gap-2">
-              <Icon className="w-5 h-5" style={{ color }} />
-              <span
-                style={{
-                  fontFamily: "'Montserrat', sans-serif",
-                  fontSize: '2rem',
-                  fontWeight: 800,
-                  color,
-                  lineHeight: 1,
-                }}
-              >
-                {value}
-              </span>
-              <span className="text-sm" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)' }}>
-                {label}
-              </span>
-            </div>
-          ))}
-        </motion.div>
-      </div>
-    </section>
-  );
-}
-
 /* ─── CTA Banner ─── */
 function CtaBanner() {
   const { theme } = useTheme();
@@ -1327,8 +654,8 @@ function CtaBanner() {
           style={{
             borderRadius: 28,
             background: isDark
-              ? 'linear-gradient(135deg, #006B2B1A 0%, #00D4FF0D 50%, #FFB8000D 100%)'
-              : 'linear-gradient(135deg, #006B2B0F 0%, #00843D0A 50%, #FFB8000A 100%)',
+              ? 'linear-gradient(135deg, #006B2B1A 0%, #00D4FF0D 50%, #006B2B0D 100%)'
+              : 'linear-gradient(135deg, #006B2B0F 0%, #00843D0A 50%, #006B2B0A 100%)',
             border: `1px solid ${isDark ? 'rgba(0,107,43,0.25)' : 'rgba(0,107,43,0.18)'}`,
             padding: 'clamp(2rem, 5vw, 5rem)',
           }}
@@ -1397,7 +724,7 @@ function CtaBanner() {
               Tire uma selfie e nossa IA encontra você em segundos entre milhares de fotos do Tour do Allianz Parque.
             </p>
 
-            <div className="flex flex-wrap gap-4">
+            <Link to="/eventos">
               <motion.button
                 whileHover={{ scale: 1.04 }}
                 whileTap={{ scale: 0.97 }}
@@ -1412,27 +739,10 @@ function CtaBanner() {
                   boxShadow: `0 0 40px rgba(0,107,43,0.35), 0 4px 20px rgba(0,0,0,0.15)`,
                 }}
               >
-                <Camera className="w-5 h-5" />
-                Começar agora
+                Ver eventos
                 <ChevronRight className="w-4 h-4" />
               </motion.button>
-
-              <Link to="/eventos">
-                <motion.button
-                  whileHover={{ scale: 1.04 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="flex items-center gap-3 px-7 py-4 rounded-2xl text-base"
-                  style={{
-                    background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,107,43,0.06)',
-                    border: `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,107,43,0.15)'}`,
-                    color: isDark ? 'rgba(255,255,255,0.7)' : '#006B2B',
-                    fontWeight: 600,
-                  }}
-                >
-                  Ver eventos
-                </motion.button>
-              </Link>
-            </div>
+            </Link>
           </div>
         </motion.div>
       </div>
@@ -1447,9 +757,6 @@ export function Home() {
       <HeroSection />
       <MarqueeStrip />
       <HowItWorks />
-      <FeaturedEvents />
-      <PhotoPackages />
-      <Testimonials />
       <CtaBanner />
     </main>
   );
