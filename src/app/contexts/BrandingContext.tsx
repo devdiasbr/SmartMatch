@@ -11,6 +11,7 @@ export interface BrandingConfig {
   logoUrl: string | null;
   faviconUrl: string | null;
   backgroundUrls: string[];
+  ctaBgUrl: string | null;
   hasLogo: boolean;
   hasFavicon: boolean;
   backgroundCount: number;
@@ -49,6 +50,7 @@ export const DEFAULT_BRANDING: BrandingConfig = {
   logoUrl: null,
   faviconUrl: null,
   backgroundUrls: [],
+  ctaBgUrl: null,
   hasLogo: false,
   hasFavicon: false,
   backgroundCount: 0,

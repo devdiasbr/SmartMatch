@@ -8,7 +8,7 @@ import {
   Camera, Scan, ShoppingCart, CheckCircle2, AlertCircle,
   Loader2, X, RefreshCw, Zap, Lock, Users, ImageIcon, Upload,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'motion/react';
 import * as faceService from '../lib/faceService';
 import { useCart } from '../contexts/CartContext';
 import { api } from '../lib/api';
@@ -33,9 +33,61 @@ interface Props {
 /* ── helpers ────────────────────────────────────────────────────────────── */
 
 const GREEN = '#86efac';
+const ELECTRIC = '#00FF7F';
 const MUTED = 'rgba(255,255,255,0.4)';
 const CARD  = 'rgba(255,255,255,0.03)';
 const BORD  = 'rgba(255,255,255,0.07)';
+
+/* ── AnimatedCounter ─────────────────────────────────────────────────────── */
+function AnimatedCounter({ from, to, duration = 1.8 }: { from: number; to: number; duration?: number }) {
+  const count = useMotionValue(from);
+  const rounded = useTransform(count, (v) => Math.round(v));
+  const [display, setDisplay] = useState(from);
+
+  useEffect(() => {
+    const controls = animate(count, to, { duration, ease: 'easeOut' });
+    const unsub = rounded.on('change', setDisplay);
+    return () => { controls.stop(); unsub(); };
+  }, [to]);
+
+  return <span>{display}</span>;
+}
+
+/* ── ScanRect ─────────────────────────────────────────────────────────────── */
+function ScanRect() {
+  const size = 140;
+  const corner = 20;
+  const stroke = 2.5;
+  const color = ELECTRIC;
+
+  return (
+    <svg
+      width={size} height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}
+    >
+      {/* top-left */}
+      <motion.path d={`M ${corner} 0 L 0 0 L 0 ${corner}`} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+        animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }} />
+      {/* top-right */}
+      <motion.path d={`M ${size - corner} 0 L ${size} 0 L ${size} ${corner}`} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+        animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 0.35 }} />
+      {/* bottom-right */}
+      <motion.path d={`M ${size} ${size - corner} L ${size} ${size} L ${size - corner} ${size}`} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+        animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 0.7 }} />
+      {/* bottom-left */}
+      <motion.path d={`M ${corner} ${size} L 0 ${size} L 0 ${size - corner}`} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
+        animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut', delay: 1.05 }} />
+
+      {/* horizontal scan line */}
+      <motion.line x1="6" x2={size - 6} stroke={color} strokeWidth={1}
+        animate={{ y1: [18, size - 18, 18], y2: [18, size - 18, 18], opacity: [0.8, 0.8, 0.8] }}
+        transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ filter: `drop-shadow(0 0 4px ${color})` }}
+      />
+    </svg>
+  );
+}
 
 /* ── componente ─────────────────────────────────────────────────────────── */
 
@@ -452,35 +504,100 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
         {stage === 'processing' && (
           <motion.div key="processing"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="text-center py-16 max-w-sm mx-auto"
+            className="flex flex-col items-center gap-6 py-6 max-w-sm mx-auto"
           >
-            {/* preview da foto enviada */}
-            {previewSrc && (
-              <div className="w-20 h-20 rounded-2xl overflow-hidden mx-auto mb-6 border-2"
-                style={{ borderColor: 'rgba(134,239,172,0.3)' }}>
-                <img src={previewSrc} alt="selfie" className="w-full h-full object-cover" />
-              </div>
-            )}
-            {!previewSrc && (
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }}
-                className="w-16 h-16 rounded-full border-2 border-transparent mx-auto mb-6"
-                style={{ borderTopColor: GREEN, borderRightColor: 'rgba(134,239,172,0.15)' }}
-              />
-            )}
-            <p style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1.2rem', fontWeight: 900, color: '#fff' }} className="mb-2">
-              Buscando suas fotos…
-            </p>
-            <p className="text-xs" style={{ color: MUTED }}>Comparando seu rosto com {photos.length} fotos do evento</p>
+            {/* ── card visual ── */}
+            <div className="relative w-72 h-72 rounded-3xl overflow-hidden"
+              style={{ background: 'linear-gradient(145deg,rgba(0,20,12,0.95),rgba(0,40,24,0.85))', border: '1px solid rgba(0,255,127,0.12)' }}>
 
-            <div className="mt-8 max-w-xs mx-auto h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.07)' }}>
-              <motion.div
-                className="h-full rounded-full"
-                style={{ background: `linear-gradient(90deg, ${GREEN}, #7dd3fc)` }}
-                animate={{ width: ['0%', '100%'] }}
-                transition={{ duration: 2.5, ease: 'easeInOut' }}
-              />
+              {/* background glow */}
+              <div className="absolute inset-0" style={{
+                background: 'radial-gradient(ellipse at 40% 60%, rgba(0,180,90,0.18) 0%, transparent 65%), radial-gradient(ellipse at 65% 35%, rgba(0,200,200,0.10) 0%, transparent 60%)',
+              }} />
+
+              {/* circular face frame */}
+              <div className="absolute" style={{ top: '50%', left: '50%', transform: 'translate(-50%,-52%)', width: 180, height: 180 }}>
+                {/* outer glow ring */}
+                <motion.div
+                  animate={{ boxShadow: ['0 0 0 0 rgba(0,255,127,0)', '0 0 0 10px rgba(0,255,127,0.12)', '0 0 0 0 rgba(0,255,127,0)'] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  style={{ borderRadius: '50%', width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }}
+                />
+
+                {/* photo or placeholder */}
+                <div className="rounded-full overflow-hidden" style={{ width: '100%', height: '100%', border: '2px solid rgba(0,255,127,0.25)' }}>
+                  {previewSrc ? (
+                    <img src={previewSrc} alt="selfie" className="w-full h-full object-cover object-top" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center"
+                      style={{ background: 'rgba(0,255,127,0.05)' }}>
+                      <Scan className="w-12 h-12" style={{ color: 'rgba(0,255,127,0.3)' }} />
+                    </div>
+                  )}
+                </div>
+
+                {/* scanning rectangle overlay */}
+                <ScanRect />
+              </div>
+
+              {/* ANALISANDO badge */}
+              <div className="absolute top-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+                style={{ background: 'rgba(0,20,12,0.75)', border: '1px solid rgba(0,255,127,0.35)', backdropFilter: 'blur(10px)' }}>
+                <motion.span
+                  animate={{ opacity: [1, 0.3, 1] }}
+                  transition={{ duration: 1, repeat: Infinity }}
+                  style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: ELECTRIC, boxShadow: `0 0 6px ${ELECTRIC}` }}
+                />
+                <span style={{ color: ELECTRIC, fontSize: '0.65rem', fontWeight: 800, fontFamily: "'Montserrat',sans-serif", letterSpacing: '0.08em' }}>
+                  ANALISANDO
+                </span>
+              </div>
+
+              {/* bottom stats row */}
+              <div className="absolute bottom-4 inset-x-3 flex items-end justify-between gap-2">
+                {/* confidence */}
+                <div className="flex-1 px-3 py-2 rounded-xl"
+                  style={{ background: 'rgba(0,10,6,0.75)', border: '1px solid rgba(0,255,127,0.2)', backdropFilter: 'blur(8px)' }}>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <motion.span
+                      animate={{ opacity: [1, 0.4, 1] }}
+                      transition={{ duration: 1, repeat: Infinity, delay: 0.3 }}
+                      style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: ELECTRIC }}
+                    />
+                    <span style={{ color: ELECTRIC, fontSize: '0.6rem', fontWeight: 700, fontFamily: "'Montserrat',sans-serif" }}>
+                      Confiança: <AnimatedCounter from={0} to={98} duration={2} />.<AnimatedCounter from={0} to={7} duration={2.2} />%
+                    </span>
+                  </div>
+                  {/* progress bar */}
+                  <div className="h-1 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                    <motion.div
+                      className="h-full rounded-full"
+                      style={{ background: `linear-gradient(90deg, ${ELECTRIC}, #00D4FF)`, boxShadow: `0 0 8px ${ELECTRIC}` }}
+                      animate={{ width: ['0%', '98.7%'] }}
+                      transition={{ duration: 2, ease: 'easeOut' }}
+                    />
+                  </div>
+                </div>
+
+                {/* photo count */}
+                <div className="px-3 py-2 rounded-xl flex items-center gap-1.5"
+                  style={{ background: 'rgba(0,10,6,0.75)', border: '1px solid rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.6rem', fontWeight: 600 }}>Fotos encontradas:</span>
+                  <span style={{ color: '#fff', fontSize: '0.72rem', fontWeight: 900, fontFamily: "'Montserrat',sans-serif" }}>
+                    <AnimatedCounter from={0} to={photos.length} duration={2} />
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* ── texto abaixo ── */}
+            <div className="text-center">
+              <p style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1.1rem', fontWeight: 900, color: '#fff' }} className="mb-1">
+                Buscando suas fotos…
+              </p>
+              <p className="text-xs" style={{ color: MUTED }}>
+                Comparando seu rosto com {photos.length} fotos do evento
+              </p>
             </div>
           </motion.div>
         )}

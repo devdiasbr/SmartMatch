@@ -1,4 +1,3 @@
-import { Link } from 'react-router';
 import { Camera, Instagram, Twitter, Youtube, Zap } from 'lucide-react';
 import { useTheme } from './ThemeProvider';
 
@@ -15,9 +14,9 @@ export function Footer() {
       }}
     >
       <div className="max-w-7xl mx-auto px-6 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-12">
+        <div className="grid grid-cols-1 gap-12">
           {/* Brand */}
-          <div className="md:col-span-1">
+          <div className="max-w-md">
             <div className="flex items-center gap-2 mb-4">
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -50,40 +49,6 @@ export function Footer() {
               ))}
             </div>
           </div>
-
-          {/* Links */}
-          {[
-            { title: 'Produto', links: ['Como funciona', 'Precos', 'Eventos', 'Para organizadores'] },
-            { title: 'Suporte', links: ['Central de ajuda', 'Contato', 'Politica de privacidade', 'Termos de uso'] },
-            { title: 'Empresa', links: ['Sobre nos', 'Blog', 'Parceiros', 'Carreiras'] },
-          ].map((col) => (
-            <div key={col.title}>
-              <h4
-                className="text-xs tracking-widest mb-4"
-                style={{
-                  color: isDark ? 'rgba(255,255,255,0.28)' : 'rgba(13,40,24,0.4)',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  fontFamily: "'Montserrat', sans-serif",
-                }}
-              >
-                {col.title}
-              </h4>
-              <ul className="flex flex-col gap-3">
-                {col.links.map((link) => (
-                  <li key={link}>
-                    <Link
-                      to="#"
-                      className="text-sm transition-colors"
-                      style={{ color: isDark ? 'rgba(255,255,255,0.4)' : 'rgba(13,40,24,0.55)' }}
-                    >
-                      {link}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
         </div>
 
         {/* Bottom */}

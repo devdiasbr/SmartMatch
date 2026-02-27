@@ -271,7 +271,7 @@ body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
   /* ── Imprimir fotos com rodapé ── */
   const handlePrintPhotos = async () => {
     if (!footerSrc || !lastOrder) return;
-    const pw = window.open('', '_blank', 'width=900,height=700');
+    const pw = window.open('', '_blank');
     if (!pw) return;
     const items = lastOrder.items ?? [];
 
@@ -291,26 +291,37 @@ body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
       }
     }
 
-    // Busca URLs frescas + converte para data URL (evita expiração e problema de timing)
+    // Detecta orientação real da imagem via naturalWidth/naturalHeight
+    async function getOrientation(dataUrl: string): Promise<'landscape' | 'portrait'> {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload  = () => resolve(img.naturalWidth >= img.naturalHeight ? 'landscape' : 'portrait');
+        img.onerror = () => resolve('landscape'); // fallback padrão paisagem
+        img.src = dataUrl;
+      });
+    }
+
+    // Busca URLs frescas + converte para data URL + detecta orientação
     const freshItems = await Promise.all(
       items.map(async (it: any) => {
-        const freshUrl = await fetchFreshPhotoUrl(lastOrder.id, String(it.photoId));
-        const dataUrl  = await toDataUrl(freshUrl ?? it.src);
-        return { ...it, src: dataUrl };
+        const freshUrl    = await fetchFreshPhotoUrl(lastOrder.id, String(it.photoId));
+        const dataUrl     = await toDataUrl(freshUrl ?? it.src);
+        const orientation = await getOrientation(dataUrl);
+        return { ...it, src: dataUrl, orientation };
       })
     );
 
-    // Footer também vira data URL (já é base64 do localStorage, mas por garantia)
+    // Footer também vira data URL
     const footerDataUrl = await toDataUrl(footerSrc);
-    // Usa qrRight salvo no estado para posicionar o QR na impressão
     const qrRightPct = qrRight;
 
     const photosHtml = freshItems.map((it: any, idx: number) => {
       const publicUrl = getPublicPhotoUrl(lastOrder.id, String(it.photoId));
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicUrl)}&color=ffffff&bgcolor=006B2B`;
+      const pageClass = it.orientation === 'portrait' ? 'page-portrait' : 'page-landscape';
 
       return `
-        <div class="page"${idx > 0 ? ' style="page-break-before:always"' : ''}>
+        <div class="page ${pageClass}"${idx > 0 ? ' style="page-break-before:always"' : ''}>
           <img src="${it.src}" class="photo"/>
           <div class="footer-wrap">
             <img src="${footerDataUrl}" class="footer-img"/>
@@ -321,23 +332,51 @@ body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
 
     pw.document.write(`<!DOCTYPE html><html><head><title>Fotos Smart Match</title>
 <style>
-@page { margin: 0; size: A4 portrait; }
+/* Named pages — permitem orientação diferente por folha */
+@page { margin: 0; }
+@page landscape-page { size: 200mm 150mm; margin: 0; }
+@page portrait-page  { size: 150mm 200mm; margin: 0; }
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body { width: 100%; height: 100%; background: #fff; }
+html, body { margin: 0; padding: 0; background: white; }
+
+/* Base da página */
 .page {
-  width: 100%; height: 100vh;
   display: flex; flex-direction: column;
-  page-break-after: always; page-break-inside: avoid; overflow: hidden;
+  overflow: hidden;
+  page-break-after: always; break-after: page;
 }
-.page:last-child { page-break-after: avoid; }
-.photo { flex: 1 1 0; width: 100%; min-height: 0; object-fit: cover; display: block; }
+.page:last-child { page-break-after: avoid; break-after: avoid; }
+
+/* Paisagem (padrão) — 200 × 150 mm (papel 15×20 deitado) */
+.page-landscape {
+  page: landscape-page;
+  width: 200mm; height: 150mm;
+}
+
+/* Retrato — 150 × 200 mm (papel 15×20 em pé) */
+.page-portrait {
+  page: portrait-page;
+  width: 150mm; height: 200mm;
+}
+
+/* Foto ocupa o espaço restante */
+.photo {
+  display: block;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  object-fit: cover;
+  object-position: center center;
+}
+
+/* Rodapé sempre 100% da largura da folha, QR posicionado via % */
 .footer-wrap { flex-shrink: 0; position: relative; width: 100%; line-height: 0; }
-.footer-img { width: 100%; display: block; }
-.footer-qr { position: absolute; top: 6%; height: 88%; width: auto; object-fit: contain; }
-@media print { html, body { height: 100%; } .page { height: 100vh; } }
+.footer-img  { width: 100%; display: block; }
+.footer-qr   { position: absolute; top: 6%; height: 88%; width: auto; object-fit: contain; }
 </style>
 </head><body>${photosHtml}<script>
-window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 150); });
+window.addEventListener('load', function() { setTimeout(function() { window.print(); }, 300); });
 <\/script></body></html>`);
     pw.document.close();
   };
@@ -387,7 +426,6 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
           { key:'financeiro', label:'Financeiro',  icon:DollarSign,   to:'/admin/financeiro' },
           { key:'pedidos',    label:'Pedidos',     icon:ClipboardList, to:'/admin/pedidos' },
           { key:'pdv',        label:'PDV',         icon:Store,        to:'/admin/pdv' },
-          { key:'config',     label:'Config',      icon:Settings,     to:'/admin/config' },
         ]} />
 
         {/* ── ESTADO DE SUCESSO ── */}
@@ -431,7 +469,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                         key={i}
                         src={item.src}
                         footerSrc={footerSrc || undefined}
-                        downloadUrl={getApiDownloadUrl(lastOrder.id, String(item.photoId))}
+                        downloadUrl={getPublicPhotoUrl(lastOrder.id, String(item.photoId))}
                         compact={(lastOrder.items?.length ?? 0) > 1}
                         qrRight={qrRight}
                       />

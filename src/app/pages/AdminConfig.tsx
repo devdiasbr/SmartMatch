@@ -188,6 +188,61 @@ function SectionCard({ icon: Icon, title, subtitle, children, isDark, cardBg, ca
   );
 }
 
+// ── PageSection ───────────────────────────────────────────────────────────────
+// Cada seção da página com campos à esquerda e preview ao vivo à direita
+
+function PageSection({ number, icon: Icon, title, desc, preview, children, isDark, cardBg, cardBorder, green, text, muted }: {
+  number: number; icon: React.ElementType; title: string; desc?: string;
+  preview: React.ReactNode; children: React.ReactNode;
+  isDark: boolean; cardBg: string; cardBorder: string; green: string; text: string; muted: string;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+      className="rounded-2xl overflow-hidden"
+      style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+    >
+      {/* ── Header da seção ── */}
+      <div className="flex items-center gap-3 px-5 py-4"
+        style={{ borderBottom: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,107,43,0.02)' }}>
+        <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0"
+          style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)', color: green }}>
+          {number}
+        </span>
+        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)' }}>
+          <Icon className="w-3.5 h-3.5" style={{ color: green }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.9rem', color: text }}>{title}</h3>
+          {desc && <p className="text-[11px] mt-0.5" style={{ color: muted }}>{desc}</p>}
+        </div>
+      </div>
+
+      {/* ── Corpo: campos + preview ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-5">
+        {/* Campos editáveis */}
+        <div className="lg:col-span-3 p-5 space-y-4">
+          {children}
+        </div>
+        {/* Preview ao vivo */}
+        <div className="lg:col-span-2 p-5"
+          style={{
+            borderTop: `1px solid ${cardBorder}`,
+            background: isDark ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.015)',
+          }}
+        >
+          <p className="text-[10px] uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5"
+            style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,40,20,0.3)' }}>
+            <Eye className="w-3 h-3" /> Prévia ao vivo
+          </p>
+          {preview}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // ── ADMIN TABS ────────────────────────────────────────────────────────────────
 
 const ADMIN_TABS = [
@@ -276,6 +331,8 @@ export function AdminConfig() {
   const [deletingFavicon, setDeletingFavicon] = useState(false);
   const [uploadingBg, setUploadingBg] = useState(false);
   const [deletingBgIdx, setDeletingBgIdx] = useState<number | null>(null);
+  const [uploadingCtaBg, setUploadingCtaBg] = useState(false);
+  const [deletingCtaBg, setDeletingCtaBg] = useState(false);
 
   // Toast
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -451,6 +508,30 @@ export function AdminConfig() {
       await refreshBranding(); await loadBranding();
     } catch (err: any) { showToast('err', err.message); }
     finally { setDeletingBgIdx(null); }
+  };
+
+  const uploadCtaBg = async (file: File) => {
+    const t = await getToken(); if (!t) return;
+    setUploadingCtaBg(true);
+    try {
+      const base64 = await fileToBase64(file);
+      await api.uploadBrandingAsset({ type: 'cta-background', base64, mimeType: file.type }, t);
+      showToast('ok', 'Imagem do banner CTA enviada!');
+      await refreshBranding();
+      await loadBranding();
+    } catch (err: any) { showToast('err', `Upload falhou: ${err.message}`); }
+    finally { setUploadingCtaBg(false); }
+  };
+
+  const deleteCtaBg = async () => {
+    const t = await getToken(); if (!t) return;
+    setDeletingCtaBg(true);
+    try {
+      await api.deleteBrandingAsset('cta-background', t);
+      showToast('ok', 'Imagem do banner CTA removida.');
+      await refreshBranding(); await loadBranding();
+    } catch (err: any) { showToast('err', err.message); }
+    finally { setDeletingCtaBg(false); }
   };
 
   // ── Render ──
@@ -677,108 +758,239 @@ export function AdminConfig() {
           {/* ════════════════════ TAB: HOME ════════════════════ */}
           {activeTab === 'home' && (
             <motion.div key="home" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="space-y-5">
 
-                {/* Hero texts */}
-                <SectionCard icon={FileText} title="Hero — Manchete"
-                  subtitle="As 3 linhas do headline principal (a última fica em verde)"
-                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
-                  <div className="space-y-4">
-                    <FieldRow label="Linha 1 (branca)"
+                {/* ── Aviso informativo ── */}
+                <div className="flex items-start gap-3 px-4 py-3 rounded-xl text-sm"
+                  style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.04)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.12)'}` }}>
+                  <Eye className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: green }} />
+                  <p className="text-xs leading-relaxed" style={{ color: muted }}>
+                    As seções abaixo estão na mesma ordem em que aparecem na página Home. Edite os campos e veja a prévia ao vivo antes de salvar.
+                  </p>
+                </div>
+
+                {/* ══ SEÇÃO 1: HERO ══ */}
+                <PageSection
+                  number={1}
+                  icon={FileText}
+                  title="Hero — Tela inicial"
+                  desc="Primeira coisa que o visitante vê ao abrir o site"
+                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text} muted={muted}
+                  preview={
+                    <div className="rounded-xl overflow-hidden relative" style={{ aspectRatio: '4/3', background: '#07070d', minHeight: 160 }}>
+                      {branding?.backgroundUrls?.[0] && (
+                        <img src={branding.backgroundUrls[0]} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                      )}
+                      <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg,rgba(8,8,14,0.95) 0%,rgba(8,8,14,0.7) 100%)' }} />
+                      <div className="absolute inset-0 flex flex-col justify-center px-5 py-4">
+                        {/* Badge */}
+                        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full mb-3 self-start"
+                          style={{ background: 'rgba(0,107,43,0.18)', border: '1px solid rgba(0,107,43,0.4)' }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#00FF7F' }} />
+                          <span className="text-[8px] tracking-widest uppercase font-bold" style={{ color: '#00FF7F' }}>
+                            {heroBadge || 'Allianz Parque · Tour Oficial'}
+                          </span>
+                        </div>
+                        {/* Headline */}
+                        <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, lineHeight: 1.08, fontSize: '1.15rem' }}>
+                          <div style={{ color: '#fff' }}>{heroLine1 || 'Você vibrou.'}</div>
+                          <div style={{ color: '#fff' }}>{heroLine2 || 'Você torceu.'}</div>
+                          <div style={{ color: '#00FF7F' }}>{heroLine3 || 'Encontre-se.'}</div>
+                        </div>
+                        {/* Subtítulo */}
+                        <p className="text-[9px] mt-2 leading-relaxed" style={{ color: 'rgba(255,255,255,0.42)', maxWidth: '80%' }}>
+                          {heroSubtitle || 'Nossa IA varre milhares de fotos e encontra você em segundos.'}
+                        </p>
+                        {/* CTA */}
+                        <div className="mt-3">
+                          <span className="text-[9px] px-3 py-1.5 rounded-lg font-bold inline-block"
+                            style={{ background: 'linear-gradient(135deg,#006B2B,#00843D)', color: '#fff' }}>
+                            {heroCTA || 'Ver eventos'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  }
+                >
+                  {/* Badge */}
+                  <FieldRow
+                    label="🏷️ Etiqueta acima do título"
+                    hint="Texto pequeno em VERDE sobre o headline. Ex: Allianz Parque · Tour Oficial"
+                    value={heroBadge} onChange={v => { setHeroBadge(v); setHomeDirty(true); }}
+                    placeholder="Allianz Parque · Tour Oficial do Palmeiras"
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                  {/* Headline */}
+                  <div className="rounded-xl p-3 space-y-3" style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${cardBorder}` }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: muted }}>📝 Título principal (3 linhas)</p>
+                    <FieldRow
+                      label="Linha 1 — texto branco"
                       value={heroLine1} onChange={v => { setHeroLine1(v); setHomeDirty(true); }}
                       placeholder="Você vibrou." isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                    <FieldRow label="Linha 2 (branca)"
+                    <FieldRow
+                      label="Linha 2 — texto branco"
                       value={heroLine2} onChange={v => { setHeroLine2(v); setHomeDirty(true); }}
                       placeholder="Você torceu." isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                    <FieldRow label="Linha 3 (verde — destaque)"
+                    <FieldRow
+                      label="Linha 3 — destaque VERDE"
+                      hint="Esta linha aparece em verde elétrico para chamar atenção"
                       value={heroLine3} onChange={v => { setHeroLine3(v); setHomeDirty(true); }}
                       placeholder="Encontre-se." isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                    <SaveBar dirty={homeDirty} saving={savingHome} onSave={saveHome} green={green} isDark={isDark} />
                   </div>
-                </SectionCard>
+                  {/* Subtítulo */}
+                  <FieldRow
+                    label="📄 Subtítulo / texto de apoio"
+                    hint="Parágrafo curto abaixo do título, explica o serviço"
+                    value={heroSubtitle} onChange={v => { setHeroSubtitle(v); setHomeDirty(true); }}
+                    placeholder="Nossa IA varre milhares de fotos e encontra você em segundos." textarea
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                  {/* Botão */}
+                  <FieldRow
+                    label="🔘 Texto do botão principal"
+                    hint="Botão verde que leva para a página de eventos"
+                    value={heroCTA} onChange={v => { setHeroCTA(v); setHomeDirty(true); }}
+                    placeholder="Ver eventos"
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                  <SaveBar dirty={homeDirty} saving={savingHome} onSave={saveHome} green={green} isDark={isDark} />
+                </PageSection>
 
-                {/* Preview hero */}
-                <SectionCard icon={Eye} title="Prévia do Hero"
-                  subtitle="Simulação do cabeçalho da Home"
-                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
-                  <div className="rounded-xl overflow-hidden relative" style={{ aspectRatio: '16/7', background: '#0a0a12' }}>
-                    {branding?.backgroundUrls?.[0] && (
-                      <img src={branding.backgroundUrls[0]} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25" />
-                    )}
-                    <div className="absolute inset-0 flex flex-col justify-center px-6">
-                      <span className="text-[9px] tracking-widest uppercase mb-2" style={{ color: '#00FF7F', fontWeight: 700 }}>
-                        {heroBadge || 'Allianz Parque · Tour Oficial'}
-                      </span>
-                      <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, lineHeight: 1.1 }}>
-                        <div className="text-white text-lg">{heroLine1 || 'Você vibrou.'}</div>
-                        <div className="text-white text-lg">{heroLine2 || 'Você torceu.'}</div>
-                        <div className="text-lg" style={{ color: '#00FF7F' }}>{heroLine3 || 'Encontre-se.'}</div>
+                {/* ══ SEÇÃO 2: BANNER CTA ══ */}
+                <PageSection
+                  number={2}
+                  icon={Layout}
+                  title="Banner de Chamada para Ação (CTA)"
+                  desc="Seção na parte inferior da Home que convida o usuário a comprar"
+                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text} muted={muted}
+                  preview={
+                    <div className="rounded-xl overflow-hidden relative" style={{ background: isDark ? 'rgba(0,107,43,0.08)' : 'rgba(0,107,43,0.05)', border: `1px solid ${isDark ? 'rgba(0,107,43,0.2)' : 'rgba(0,107,43,0.12)'}` }}>
+                      {/* BG image thumbnail */}
+                      {branding?.ctaBgUrl && (
+                        <div className="absolute inset-0 rounded-xl overflow-hidden">
+                          <img src={branding.ctaBgUrl} alt="" className="w-full h-full object-cover" style={{ opacity: isDark ? 0.07 : 0.05 }} />
+                        </div>
+                      )}
+                      <div className="relative z-10 p-4">
+                        {/* exclusive badge */}
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full mb-3"
+                          style={{ background: isDark ? 'rgba(0,107,43,0.18)' : 'rgba(0,107,43,0.08)', border: `1px solid ${isDark ? 'rgba(0,107,43,0.4)' : 'rgba(0,107,43,0.2)'}` }}>
+                          <span className="text-[8px] tracking-widest uppercase font-bold" style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>
+                            {homeExclusiveText || 'Exclusivo Allianz Parque'}
+                          </span>
+                        </div>
+                        {/* Title */}
+                        <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, lineHeight: 1.1, fontSize: '0.95rem' }}>
+                          <div style={{ color: isDark ? '#fff' : '#0D2818' }}>{ctaTitle1 || 'Pronto para encontrar'}</div>
+                          <div style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>{ctaTitle2 || 'seus momentos?'}</div>
+                        </div>
+                        {/* Subtitle */}
+                        <p className="text-[8px] mt-2 leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(13,40,24,0.5)', maxWidth: 200 }}>
+                          {ctaSubtitle || 'Tire uma selfie e nossa IA encontra você em segundos.'}
+                        </p>
+                        {/* Button */}
+                        <div className="mt-3">
+                          <span className="text-[9px] px-3 py-1.5 rounded-lg font-bold inline-block"
+                            style={{ background: isDark ? 'linear-gradient(135deg,#00FF7F,#00CC64)' : 'linear-gradient(135deg,#006B2B,#00843D)', color: isDark ? '#000' : '#fff' }}>
+                            {ctaButton || 'Ver eventos'}
+                          </span>
+                        </div>
+                        {/* BG image indicator */}
+                        {branding?.ctaBgUrl && (
+                          <p className="text-[8px] mt-3 flex items-center gap-1" style={{ color: green }}>
+                            <CheckCircle2 className="w-2.5 h-2.5" /> Imagem de fundo configurada
+                          </p>
+                        )}
                       </div>
-                      <p className="text-[10px] mt-2 max-w-[60%] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                        {heroSubtitle || 'Nossa IA varre milhares de fotos...'}
-                      </p>
-                      <div className="mt-3">
-                        <span className="text-[10px] px-3 py-1.5 rounded-lg font-bold" style={{ background: '#006B2B', color: '#fff' }}>
-                          {heroCTA || 'Ver eventos'}
-                        </span>
-                      </div>
+                    </div>
+                  }
+                >
+                  {/* Badge exclusivo */}
+                  <FieldRow
+                    label="🏆 Etiqueta do badge 'Exclusivo'"
+                    hint="Badge verde no topo do CTA. Ex: Exclusivo Allianz Parque"
+                    value={homeExclusiveText} onChange={v => { setHomeExclusiveText(v); setVenueDirty(true); }}
+                    placeholder="Exclusivo Allianz Parque"
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+
+                  {/* Títulos */}
+                  <div className="rounded-xl p-3 space-y-3" style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${cardBorder}` }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: muted }}>📝 Título do banner (2 linhas)</p>
+                    <FieldRow
+                      label="Linha 1 — texto normal"
+                      value={ctaTitle1} onChange={v => { setCtaTitle1(v); setHomeDirty(true); }}
+                      placeholder="Pronto para encontrar"
+                      isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                    <FieldRow
+                      label="Linha 2 — destaque VERDE"
+                      hint="Esta linha aparece em verde para criar contraste"
+                      value={ctaTitle2} onChange={v => { setCtaTitle2(v); setHomeDirty(true); }}
+                      placeholder="seus momentos?"
+                      isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                  </div>
+
+                  {/* Subtítulo */}
+                  <FieldRow
+                    label="📄 Subtítulo de apoio"
+                    hint="Texto descritivo abaixo do título"
+                    value={ctaSubtitle} onChange={v => { setCtaSubtitle(v); setHomeDirty(true); }}
+                    placeholder="Tire uma selfie e nossa IA encontra você em segundos." textarea
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+
+                  {/* Botão */}
+                  <FieldRow
+                    label="🔘 Texto do botão"
+                    value={ctaButton} onChange={v => { setCtaButton(v); setHomeDirty(true); }}
+                    placeholder="Ver eventos"
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+
+                  {/* Imagem de fundo */}
+                  <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${cardBorder}` }}>
+                    <div className="px-3 py-2 flex items-center gap-2"
+                      style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', borderBottom: `1px solid ${cardBorder}` }}>
+                      <Upload className="w-3.5 h-3.5" style={{ color: muted }} />
+                      <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: muted }}>🖼️ Imagem de fundo do banner</span>
+                    </div>
+                    <div className="p-3">
+                      {branding?.ctaBgUrl ? (
+                        <div className="space-y-2">
+                          <div className="relative rounded-lg overflow-hidden group" style={{ aspectRatio: '16/5', border: `1px solid ${cardBorder}` }}>
+                            <img src={branding.ctaBgUrl} alt="CTA background" className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/55 transition-all flex items-center justify-center gap-2">
+                              <motion.button
+                                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                onClick={deleteCtaBg} disabled={deletingCtaBg}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold"
+                                style={{ background: 'rgba(239,68,68,0.9)', color: '#fff' }}
+                              >
+                                {deletingCtaBg ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                                Remover
+                              </motion.button>
+                              <label
+                                className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
+                                style={{ background: 'rgba(0,107,43,0.9)', color: '#fff' }}
+                              >
+                                <Upload className="w-3 h-3" /> Trocar
+                                <input type="file" accept="image/*" className="hidden"
+                                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadCtaBg(f); e.target.value = ''; }} />
+                              </label>
+                            </div>
+                          </div>
+                          <p className="text-[11px]" style={{ color: muted }}>Passe o mouse para trocar ou remover. Sem imagem usa o padrão.</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <DropZone label="Clique ou arraste a foto de fundo do banner (JPG/PNG · 1920×600 px recomendado)"
+                            accept="image/*" onFile={uploadCtaBg} uploading={uploadingCtaBg}
+                            isDark={isDark} green={green} muted={muted} inputBg={inputBg} border={inputBrd} />
+                          <p className="text-[11px] mt-2" style={{ color: muted }}>
+                            Sem imagem, usa a foto padrão embutida.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </SectionCard>
 
-                {/* Subtitle + badge + CTA */}
-                <div className="lg:col-span-2">
-                  <SectionCard icon={Layout} title="Hero — Subtítulo, Badge e CTA"
-                    subtitle="Texto de apoio, etiqueta acima do headline e botão principal"
-                    isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="sm:col-span-2">
-                        <FieldRow label="Subtítulo" hint="Parágrafo exibido abaixo da manchete"
-                          value={heroSubtitle} onChange={v => { setHeroSubtitle(v); setHomeDirty(true); }}
-                          placeholder="Nossa IA varre milhares de fotos..." textarea
-                          isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                      </div>
-                      <div className="space-y-4">
-                        <FieldRow label="Badge acima do título" hint="Ex: Allianz Parque · Tour Oficial"
-                          value={heroBadge} onChange={v => { setHeroBadge(v); setHomeDirty(true); }}
-                          placeholder="Allianz Parque · Tour Oficial do Palmeiras"
-                          isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                        <FieldRow label="Texto do botão CTA"
-                          value={heroCTA} onChange={v => { setHeroCTA(v); setHomeDirty(true); }}
-                          placeholder="Ver eventos" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                      </div>
-                    </div>
-                    <SaveBar dirty={homeDirty} saving={savingHome} onSave={saveHome} green={green} isDark={isDark} />
-                  </SectionCard>
-                </div>
+                  <SaveBar dirty={homeDirty || venueDirty} saving={savingHome || savingVenue} onSave={async () => { await saveHome(); if (venueDirty) await saveVenue(); }} green={green} isDark={isDark} />
+                </PageSection>
 
-                {/* CTA Banner */}
-                <div className="lg:col-span-2">
-                  <SectionCard icon={Layout} title="Banner de CTA"
-                    subtitle="Texto e botão exibidos na seção de CTA da Home"
-                    isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="sm:col-span-2">
-                        <FieldRow label="Título 1" hint="Primeira linha do título"
-                          value={ctaTitle1} onChange={v => { setCtaTitle1(v); setHomeDirty(true); }}
-                          placeholder="Encontre seu" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                        <FieldRow label="Título 2" hint="Segunda linha do título"
-                          value={ctaTitle2} onChange={v => { setCtaTitle2(v); setHomeDirty(true); }}
-                          placeholder="momento" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                        <FieldRow label="Subtítulo" hint="Parágrafo exibido abaixo do título"
-                          value={ctaSubtitle} onChange={v => { setCtaSubtitle(v); setHomeDirty(true); }}
-                          placeholder="Reviva seus momentos especiais com a Smart Match." textarea
-                          isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                      </div>
-                      <div className="space-y-4">
-                        <FieldRow label="Texto do botão CTA"
-                          value={ctaButton} onChange={v => { setCtaButton(v); setHomeDirty(true); }}
-                          placeholder="Ver eventos" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                      </div>
-                    </div>
-                    <SaveBar dirty={homeDirty} saving={savingHome} onSave={saveHome} green={green} isDark={isDark} />
-                  </SectionCard>
-                </div>
               </div>
             </motion.div>
           )}
@@ -786,101 +998,172 @@ export function AdminConfig() {
           {/* ════════════════════ TAB: EVENTOS ════════════════════ */}
           {activeTab === 'eventos' && (
             <motion.div key="eventos" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div className="space-y-5">
 
-                {/* Events hero texts */}
-                <SectionCard icon={CalendarDays} title="Hero da Página de Eventos"
-                  subtitle="Título e subtítulo exibidos no topo da listagem de tours"
-                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
-                  <div className="space-y-4">
-                    <FieldRow label="Título — parte principal (branca)"
-                      hint="Ex: Reviva seus"
-                      value={eventsHeroTitle} onChange={v => { setEventsHeroTitle(v); setEventsDirty(true); }}
-                      placeholder="Reviva seus" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                    <FieldRow label="Título — parte em destaque (verde)"
-                      hint="Ex: Momentos no Allianz"
-                      value={eventsHeroTitleAccent} onChange={v => { setEventsHeroTitleAccent(v); setEventsDirty(true); }}
-                      placeholder="Momentos no Allianz" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                    <FieldRow label="Subtítulo" hint="Parágrafo de apoio abaixo do título"
-                      value={eventsHeroSubtitle} onChange={v => { setEventsHeroSubtitle(v); setEventsDirty(true); }}
-                      placeholder="Busca com reconhecimento facial..." textarea
-                      isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                    <FieldRow label="Título da lista de eventos"
-                      value={eventsListTitle} onChange={v => { setEventsListTitle(v); setEventsDirty(true); }}
-                      placeholder="Eventos" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                    <SaveBar dirty={eventsDirty} saving={savingEvents} onSave={saveEvents} green={green} isDark={isDark} />
-                  </div>
-                </SectionCard>
-
-                {/* Preview events hero */}
-                <SectionCard icon={Eye} title="Prévia do Hero de Eventos"
-                  subtitle="Simulação do topo da página /eventos"
-                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
-                  <div className="rounded-xl overflow-hidden relative" style={{ aspectRatio: '16/7', background: '#0a0a12' }}>
-                    {branding?.backgroundUrls?.[0] && (
-                      <img src={branding.backgroundUrls[0]} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
-                    )}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-6">
-                      <span className="text-[9px] tracking-widest uppercase mb-2" style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>
-                        {heroBadge || 'Allianz Parque · Tour Oficial'}
-                      </span>
-                      <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, fontSize: '1.1rem', lineHeight: 1.1 }}>
-                        <span className="text-white">{eventsHeroTitle || 'Reviva seus'} </span>
-                        <span style={{ color: '#86efac' }}>{eventsHeroTitleAccent || 'Momentos no Allianz'}</span>
-                      </div>
-                      <p className="text-[10px] mt-2 max-w-[60%] leading-relaxed" style={{ color: 'rgba(255,255,255,0.42)' }}>
-                        {eventsHeroSubtitle || 'Busca com reconhecimento facial...'}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="text-[11px] mt-3" style={{ color: muted }}>
-                    O background é compartilhado com a Home (configurado na aba Marca).
+                {/* ── Aviso informativo ── */}
+                <div className="flex items-start gap-3 px-4 py-3 rounded-xl text-sm"
+                  style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.04)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.12)'}` }}>
+                  <Eye className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: green }} />
+                  <p className="text-xs leading-relaxed" style={{ color: muted }}>
+                    As seções abaixo estão na mesma ordem em que aparecem na página <strong style={{ color: text }}>/eventos</strong>. O background desta página é compartilhado com a Home — configure-o na aba <strong style={{ color: text }}>Marca</strong>.
                   </p>
-                </SectionCard>
+                </div>
 
-                {/* Venue / Tour identity — full width */}
-                <div className="lg:col-span-2">
-                  <SectionCard icon={Tag} title="Identidade do Local e Tour"
-                    subtitle="Defina o nome do local, cidade e label do tipo de evento — afeta cards, Home e marca d'água"
-                    isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text}>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <FieldRow label="Nome do local / venue"
-                        hint="Ex: Allianz Parque, Maracanã, Arena BRB"
-                        value={venueName} onChange={v => { setVenueName(v); setVenueDirty(true); }}
-                        placeholder="Allianz Parque" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                      <FieldRow label="Cidade e estado"
-                        hint="Exibido nos cards de evento"
-                        value={venueLocation} onChange={v => { setVenueLocation(v); setVenueDirty(true); }}
-                        placeholder="São Paulo, SP" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                      <FieldRow label="Label do tipo de evento"
-                        hint="Palavra exibida acima da data nos cards (ex: Tour, Jogo, Show)"
-                        value={tourLabel} onChange={v => { setTourLabel(v); setVenueDirty(true); }}
-                        placeholder="Tour" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
-                      <FieldRow label="Texto do badge 'Exclusivo' (Home)"
-                        hint="Badge verde exibido na seção CTA da Home"
-                        value={homeExclusiveText} onChange={v => { setHomeExclusiveText(v); setVenueDirty(true); }}
-                        placeholder="Exclusivo Allianz Parque" isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                {/* ══ SEÇÃO 1: HERO DE EVENTOS ══ */}
+                <PageSection
+                  number={1}
+                  icon={CalendarDays}
+                  title="Hero — Topo da página de Eventos"
+                  desc="Cabeçalho com imagem de fundo e título que aparece ao abrir /eventos"
+                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text} muted={muted}
+                  preview={
+                    <div className="rounded-xl overflow-hidden relative" style={{ background: '#07070d', minHeight: 180, aspectRatio: '4/3' }}>
+                      {branding?.backgroundUrls?.[0] && (
+                        <img src={branding.backgroundUrls[0]} alt="" className="absolute inset-0 w-full h-full object-cover opacity-20" />
+                      )}
+                      <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, rgba(8,8,14,0.55) 0%, rgba(8,8,14,0.88) 100%)' }} />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-5 py-4">
+                        {/* badge */}
+                        <span className="text-[8px] tracking-widest uppercase mb-2" style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 600, letterSpacing: '0.12em' }}>
+                          {heroBadge || 'Allianz Parque · Tour Oficial'}
+                        </span>
+                        {/* título */}
+                        <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, lineHeight: 1.08, fontSize: '1rem' }}>
+                          <span style={{ color: '#fff' }}>{eventsHeroTitle || 'Reviva seus'} </span>
+                          <span style={{ color: '#86efac' }}>{eventsHeroTitleAccent || 'Momentos no Allianz'}</span>
+                        </div>
+                        {/* subtítulo */}
+                        <p className="text-[9px] mt-2 leading-relaxed" style={{ color: 'rgba(255,255,255,0.4)', maxWidth: '85%' }}>
+                          {eventsHeroSubtitle || 'Busca com reconhecimento facial...'}
+                        </p>
+                        {/* search mock */}
+                        <div className="mt-3 w-full max-w-[180px] flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+                          style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
+                          <span className="text-[8px]" style={{ color: 'rgba(255,255,255,0.35)' }}>🔍 Buscar por data ou horário...</span>
+                        </div>
+                      </div>
                     </div>
-                    {/* Live card preview */}
-                    <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,107,43,0.08)'}` }}>
-                      <p className="text-[11px] uppercase tracking-wider font-bold mb-3" style={{ color: muted }}>Prévia do card de evento</p>
-                      <div className="inline-block rounded-xl overflow-hidden" style={{ minWidth: 200, border: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.85)' }}>
+                  }
+                >
+                  {/* Badge compartilhado com Home */}
+                  <div className="flex items-start gap-2 px-3 py-2 rounded-lg text-xs"
+                    style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${cardBorder}` }}>
+                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: muted }} />
+                    <p style={{ color: muted }}>
+                      A <strong style={{ color: text }}>etiqueta de badge</strong> (ex: "Allianz Parque · Tour Oficial") é compartilhada com a Home. Altere-a na <strong style={{ color: text }}>aba Home → Seção 1</strong>.
+                    </p>
+                  </div>
+
+                  {/* Título */}
+                  <div className="rounded-xl p-3 space-y-3" style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${cardBorder}` }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: muted }}>📝 Título principal da página</p>
+                    <FieldRow
+                      label="Texto normal (branco)"
+                      hint="Primeira parte do título. Ex: Reviva seus"
+                      value={eventsHeroTitle} onChange={v => { setEventsHeroTitle(v); setEventsDirty(true); }}
+                      placeholder="Reviva seus"
+                      isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                    <FieldRow
+                      label="Destaque em VERDE"
+                      hint="Segunda parte do título, aparece em verde. Ex: Momentos no Allianz"
+                      value={eventsHeroTitleAccent} onChange={v => { setEventsHeroTitleAccent(v); setEventsDirty(true); }}
+                      placeholder="Momentos no Allianz"
+                      isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                  </div>
+
+                  {/* Subtítulo */}
+                  <FieldRow
+                    label="📄 Subtítulo de apoio"
+                    hint="Texto descritivo abaixo do título"
+                    value={eventsHeroSubtitle} onChange={v => { setEventsHeroSubtitle(v); setEventsDirty(true); }}
+                    placeholder="Busca com reconhecimento facial em todos os tours disponíveis." textarea
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+
+                  <SaveBar dirty={eventsDirty} saving={savingEvents} onSave={saveEvents} green={green} isDark={isDark} />
+                </PageSection>
+
+                {/* ══ SEÇÃO 2: LISTAGEM DE TOURS ══ */}
+                <PageSection
+                  number={2}
+                  icon={Tag}
+                  title="Listagem de Tours — Identidade do Local"
+                  desc="Título da seção, label dos cards e dados do local/venue"
+                  isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text} muted={muted}
+                  preview={
+                    <div className="space-y-3">
+                      {/* Section header mock */}
+                      <div className="rounded-xl p-3" style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.7)', border: `1px solid ${cardBorder}` }}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="w-2 h-2 rounded-full" style={{ background: green }} />
+                          <span style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '0.75rem', fontWeight: 800, color: text }}>
+                            {eventsListTitle || 'Tours Disponíveis'}
+                          </span>
+                        </div>
+                        <p className="text-[9px]" style={{ color: muted }}>
+                          {(eventsListTitle || 'Tours').toLowerCase()} · slug = DDMMYYYYHHMM
+                        </p>
+                      </div>
+
+                      {/* Card mock */}
+                      <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.85)' }}>
                         <div style={{ height: 3, background: isDark ? 'linear-gradient(90deg,#166534,#15803d)' : 'linear-gradient(90deg,#006B2B,#00843D)' }} />
-                        <div className="p-4">
-                          <span className="text-[10px] tracking-widest uppercase font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)', fontFamily: "'Montserrat',sans-serif" }}>
+                        <div className="p-3">
+                          <span className="text-[9px] tracking-widest uppercase font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)', fontFamily: "'Montserrat',sans-serif" }}>
                             {tourLabel || 'Tour'}
                           </span>
-                          <div className="text-sm font-bold mt-1" style={{ color: text, fontFamily: "'Montserrat',sans-serif" }}>27/02/2026, 10:00</div>
-                          <div className="text-[11px] mt-0.5" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)' }}>sexta-feira</div>
-                          <div className="flex items-center gap-1.5 mt-2 text-[10px] uppercase tracking-wider font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)' }}>
-                            <span>📍</span>{venueName || 'Allianz Parque'}, {venueLocation || 'São Paulo, SP'}
+                          <div className="text-xs font-bold mt-0.5" style={{ color: text, fontFamily: "'Montserrat',sans-serif" }}>27/02/2026, 10:00</div>
+                          <div className="text-[10px] mt-0.5" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)' }}>sexta-feira</div>
+                          <div className="flex items-center gap-1 mt-2 text-[9px] uppercase tracking-wider font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)' }}>
+                            <span>📍</span>
+                            <span>{venueName || 'Allianz Parque'}</span>
+                            <span style={{ opacity: 0.4 }}>·</span>
+                            <span>{venueLocation || 'São Paulo, SP'}</span>
+                          </div>
+                          <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px]"
+                            style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`, color: green, fontWeight: 600 }}>
+                            🖼 48 fotos →
                           </div>
                         </div>
                       </div>
                     </div>
-                    <SaveBar dirty={venueDirty} saving={savingVenue} onSave={saveVenue} green={green} isDark={isDark} />
-                  </SectionCard>
-                </div>
+                  }
+                >
+                  {/* Título da listagem */}
+                  <FieldRow
+                    label="📋 Título da seção de listagem"
+                    hint="Cabeçalho acima dos cards de eventos. Ex: Tours Disponíveis"
+                    value={eventsListTitle} onChange={v => { setEventsListTitle(v); setEventsDirty(true); }}
+                    placeholder="Tours Disponíveis"
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+
+                  {/* Label do card */}
+                  <FieldRow
+                    label="🏷️ Label exibida nos cards de evento"
+                    hint="Palavra em cima da data em cada card. Ex: Tour, Jogo, Show, Evento"
+                    value={tourLabel} onChange={v => { setTourLabel(v); setVenueDirty(true); }}
+                    placeholder="Tour"
+                    isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+
+                  {/* Venue */}
+                  <div className="rounded-xl p-3 space-y-3" style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${cardBorder}` }}>
+                    <p className="text-[10px] uppercase tracking-widest font-bold" style={{ color: muted }}>📍 Localização — aparece nos cards e marca d'água</p>
+                    <FieldRow
+                      label="Nome do local / arena / venue"
+                      hint="Ex: Allianz Parque, Maracanã, Arena BRB"
+                      value={venueName} onChange={v => { setVenueName(v); setVenueDirty(true); }}
+                      placeholder="Allianz Parque"
+                      isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                    <FieldRow
+                      label="Cidade e estado"
+                      hint="Exibido junto com o nome do local nos cards"
+                      value={venueLocation} onChange={v => { setVenueLocation(v); setVenueDirty(true); }}
+                      placeholder="São Paulo, SP"
+                      isDark={isDark} text={text} muted={muted} inputBg={inputBg} inputBorder={inputBrd} />
+                  </div>
+
+                  <SaveBar dirty={eventsDirty || venueDirty} saving={savingEvents || savingVenue} onSave={async () => { if (eventsDirty) await saveEvents(); if (venueDirty) await saveVenue(); }} green={green} isDark={isDark} />
+                </PageSection>
+
               </div>
             </motion.div>
           )}

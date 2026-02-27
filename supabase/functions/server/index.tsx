@@ -121,6 +121,7 @@ async function brandingWithUrls() {
   const b: any = (await kv.get(`${KV}branding`)) ?? {};
   let logoUrl: string | null = null;
   let faviconUrl: string | null = null;
+  let ctaBgUrl: string | null = null;
   const backgroundUrls: string[] = [];
 
   if (b.logoPath) {
@@ -130,6 +131,10 @@ async function brandingWithUrls() {
   if (b.faviconPath) {
     const { data } = await sb().storage.from(BUCKET).createSignedUrl(b.faviconPath, 3600);
     faviconUrl = data?.signedUrl ?? null;
+  }
+  if (b.ctaBgPath) {
+    const { data } = await sb().storage.from(BUCKET).createSignedUrl(b.ctaBgPath, 3600);
+    ctaBgUrl = data?.signedUrl ?? null;
   }
   for (const p of (b.backgroundPaths ?? [])) {
     const { data } = await sb().storage.from(BUCKET).createSignedUrl(p, 3600);
@@ -146,6 +151,7 @@ async function brandingWithUrls() {
     logoUrl,
     faviconUrl,
     backgroundUrls,
+    ctaBgUrl,
     hasLogo: !!b.logoPath,
     hasFavicon: !!b.faviconPath,
     backgroundCount: (b.backgroundPaths ?? []).length,
@@ -254,8 +260,8 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
   try {
     const { type, base64, mimeType = "image/png" } = await c.req.json();
     if (!base64 || !type) return c.json({ error: "type e base64 obrigatórios" }, 400);
-    if (!["logo", "favicon", "background"].includes(type))
-      return c.json({ error: "type deve ser logo, favicon ou background" }, 400);
+    if (!["logo", "favicon", "background", "cta-background"].includes(type))
+      return c.json({ error: "type deve ser logo, favicon, background ou cta-background" }, 400);
 
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -272,7 +278,9 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
       ? `branding/logo-${ts}.${ext}`
       : type === "favicon"
         ? `branding/favicon-${ts}.${ext}`
-        : `branding/bg/bg-${ts}.${ext}`;
+        : type === "cta-background"
+          ? `branding/cta-bg/cta-${ts}.${ext}`
+          : `branding/bg/bg-${ts}.${ext}`;
 
     const { error: uploadError } = await sb().storage
       .from(BUCKET).upload(storagePath, bytes, { contentType: mimeType, upsert: false });
@@ -280,16 +288,19 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
 
     const existing: any = (await kv.get(`${KV}branding`)) ?? {};
 
-    // Delete old asset when replacing logo or favicon
+    // Delete old asset when replacing logo, favicon or cta-background
     if (type === "logo" && existing.logoPath) {
       await sb().storage.from(BUCKET).remove([existing.logoPath]);
     } else if (type === "favicon" && existing.faviconPath) {
       await sb().storage.from(BUCKET).remove([existing.faviconPath]);
+    } else if (type === "cta-background" && existing.ctaBgPath) {
+      await sb().storage.from(BUCKET).remove([existing.ctaBgPath]);
     }
 
     const updated: any = { ...existing, updatedAt: new Date().toISOString() };
     if (type === "logo") updated.logoPath = storagePath;
     else if (type === "favicon") updated.faviconPath = storagePath;
+    else if (type === "cta-background") updated.ctaBgPath = storagePath;
     else updated.backgroundPaths = [...(existing.backgroundPaths ?? []), storagePath];
 
     await kv.set(`${KV}branding`, updated);
@@ -305,11 +316,11 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
 app.delete("/make-server-68454e9b/admin/branding/asset/:asset", adminAuth, async (c) => {
   try {
     const asset = c.req.param("asset");
-    if (asset !== "logo" && asset !== "favicon")
-      return c.json({ error: "Asset deve ser logo ou favicon" }, 400);
+    if (asset !== "logo" && asset !== "favicon" && asset !== "cta-background")
+      return c.json({ error: "Asset deve ser logo, favicon ou cta-background" }, 400);
 
     const existing: any = (await kv.get(`${KV}branding`)) ?? {};
-    const pathKey = asset === "logo" ? "logoPath" : "faviconPath";
+    const pathKey = asset === "logo" ? "logoPath" : asset === "favicon" ? "faviconPath" : "ctaBgPath";
     if (existing[pathKey]) {
       await sb().storage.from(BUCKET).remove([existing[pathKey]]);
     }

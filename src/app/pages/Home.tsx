@@ -670,7 +670,7 @@ function CtaBanner() {
           <div
             className="absolute inset-0"
             style={{
-              backgroundImage: `url(${IMG_FAN_FULL})`,
+              backgroundImage: `url(${branding.ctaBgUrl || IMG_FAN_FULL})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center right',
               opacity: isDark ? 0.08 : 0.06,

@@ -40,24 +40,9 @@ export function MinhaFoto() {
 
   const handleDownload = async () => {
     if (!downloadUrl) return;
-    try {
-      // fetch + blob: funciona cross-origin e no Safari mobile
-      // (a.download é ignorado cross-origin — este método contorna o problema)
-      const response = await fetch(downloadUrl);
-      if (!response.ok) throw new Error('Falha ao baixar');
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
-    } catch {
-      // Fallback: abre diretamente (Content-Disposition do Supabase aciona o download)
-      window.open(downloadUrl, '_blank', 'noopener,noreferrer');
-    }
+    // A signed URL do Supabase com option download já tem Content-Disposition: attachment.
+    // Redirecionar a janela atual é o método mais confiável em mobile (sem CORS, sem popup bloqueado).
+    window.location.href = downloadUrl;
     setDownloaded(true);
   };
 

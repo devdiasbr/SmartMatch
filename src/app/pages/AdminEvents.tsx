@@ -126,6 +126,192 @@ async function processFacesForPhoto(
   }
 }
 
+/* ─── ConfirmModal ─────────────────────────────────────────────────────────── */
+interface ConfirmModalProps {
+  open: boolean;
+  title: string;
+  description: string;
+  detail?: string;
+  confirmLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  isDark: boolean;
+  loading?: boolean;
+}
+function ConfirmModal({ open, title, description, detail, confirmLabel = 'Excluir', onConfirm, onCancel, isDark, loading }: ConfirmModalProps) {
+  const cardBg     = isDark ? 'rgba(15,10,20,0.98)' : '#fff';
+  const textColor  = isDark ? '#fff' : '#0D2818';
+  const mutedColor = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(13,40,24,0.5)';
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            key="confirm-backdrop"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => !loading && onCancel()}
+            className="fixed inset-0 z-[200]"
+            style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+          />
+          {/* Modal */}
+          <motion.div
+            key="confirm-modal"
+            initial={{ opacity: 0, scale: 0.88, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.88, y: 20 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+            className="fixed z-[201] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-[360px] px-4"
+          >
+            <div className="rounded-2xl overflow-hidden shadow-2xl"
+              style={{ background: cardBg, border: '1px solid rgba(239,68,68,0.2)', boxShadow: '0 32px 80px rgba(0,0,0,0.5)' }}>
+
+              {/* Red top accent */}
+              <div className="h-[3px]" style={{ background: 'linear-gradient(90deg,#b91c1c,#ef4444,#f87171)' }} />
+
+              <div className="p-6">
+                {/* Icon */}
+                <motion.div
+                  initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.1, type: 'spring', stiffness: 400 }}
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5"
+                  style={{ background: isDark ? 'rgba(239,68,68,0.12)' : 'rgba(220,38,38,0.07)', border: '1px solid rgba(239,68,68,0.2)' }}>
+                  <Trash2 className="w-6 h-6" style={{ color: isDark ? '#fca5a5' : '#dc2626' }} />
+                </motion.div>
+
+                {/* Title */}
+                <h2 className="mb-2" style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, fontSize: '1.15rem', color: textColor, letterSpacing: '-0.01em' }}>
+                  {title}
+                </h2>
+
+                {/* Description */}
+                <p className="text-sm leading-relaxed mb-4" style={{ color: mutedColor }}>
+                  {description}
+                </p>
+
+                {/* Detail pill */}
+                {detail && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-xl mb-5"
+                    style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)'}` }}>
+                    <CalendarDays className="w-3.5 h-3.5 flex-shrink-0" style={{ color: mutedColor }} />
+                    <span className="text-xs font-mono font-semibold" style={{ color: textColor }}>{detail}</span>
+                  </div>
+                )}
+
+                {/* Warning */}
+                <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl mb-6"
+                  style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.04)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" style={{ color: isDark ? '#fca5a5' : '#dc2626' }} />
+                  <p className="text-xs leading-relaxed" style={{ color: isDark ? 'rgba(252,165,165,0.85)' : '#b91c1c' }}>
+                    Esta ação é <strong>permanente e irreversível</strong>. Não é possível recuperar os dados após a exclusão.
+                  </p>
+                </div>
+
+                {/* Buttons */}
+                <div className="grid grid-cols-2 gap-3">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                    onClick={onCancel} disabled={loading}
+                    className="py-3 rounded-xl text-sm font-semibold transition-all"
+                    style={{
+                      background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                      border: `1px solid ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+                      color: mutedColor,
+                    }}
+                  >
+                    Cancelar
+                  </motion.button>
+                  <motion.button
+                    whileHover={!loading ? { scale: 1.02 } : {}} whileTap={!loading ? { scale: 0.97 } : {}}
+                    onClick={onConfirm} disabled={loading}
+                    className="py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2"
+                    style={{
+                      background: isDark ? 'rgba(220,38,38,0.85)' : '#dc2626',
+                      border: '1px solid rgba(239,68,68,0.3)',
+                      color: '#fff',
+                      opacity: loading ? 0.7 : 1,
+                      boxShadow: loading ? 'none' : '0 4px 16px rgba(220,38,38,0.3)',
+                    }}
+                  >
+                    {loading
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Excluindo…</>
+                      : <><Trash2 className="w-4 h-4" /> {confirmLabel}</>}
+                  </motion.button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/* ─── SuccessToast ─────────────────────────────────────────────────────────── */
+function SuccessToast({ msg, onClose, isDark }: { msg: string | null; onClose: () => void; isDark: boolean }) {
+  return (
+    <AnimatePresence>
+      {msg && (
+        <motion.div
+          initial={{ opacity: 0, x: 20, y: 8 }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0, x: 20 }}
+          className="fixed bottom-6 right-6 z-[300] flex items-start gap-3 px-4 py-3.5 rounded-2xl shadow-2xl max-w-xs"
+          style={{
+            background: isDark ? 'rgba(4,20,10,0.97)' : '#fff',
+            border: `1px solid ${isDark ? 'rgba(134,239,172,0.22)' : 'rgba(0,107,43,0.18)'}`,
+            backdropFilter: 'blur(14px)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+          }}
+        >
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.08)' }}>
+            <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#86efac' : '#006B2B' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold mb-0.5" style={{ color: isDark ? '#86efac' : '#006B2B' }}>Excluído com sucesso</p>
+            <p className="text-xs leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)' }}>{msg}</p>
+          </div>
+          <button onClick={onClose} className="flex-shrink-0 rounded-lg p-0.5 hover:opacity-60 transition-opacity">
+            <X className="w-3.5 h-3.5" style={{ color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }} />
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/* ─── ErrorToast ──────────────────────────────────────────────────────────── */
+function ErrorToast({ msg, onClose, isDark }: { msg: string | null; onClose: () => void; isDark: boolean }) {
+  return (
+    <AnimatePresence>
+      {msg && (
+        <motion.div
+          initial={{ opacity: 0, x: 20, y: 8 }} animate={{ opacity: 1, x: 0, y: 0 }} exit={{ opacity: 0, x: 20 }}
+          className="fixed bottom-24 right-6 z-[300] flex items-start gap-3 px-4 py-3.5 rounded-2xl shadow-2xl max-w-xs"
+          style={{
+            background: isDark ? 'rgba(20,6,6,0.97)' : '#fff',
+            border: `1px solid ${isDark ? 'rgba(252,165,165,0.22)' : 'rgba(220,38,38,0.18)'}`,
+            backdropFilter: 'blur(14px)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+          }}
+        >
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: isDark ? 'rgba(252,165,165,0.1)' : 'rgba(220,38,38,0.07)' }}>
+            <AlertCircle className="w-4 h-4" style={{ color: isDark ? '#fca5a5' : '#dc2626' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold mb-0.5" style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>Erro ao excluir</p>
+            <p className="text-xs leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)' }}>{msg}</p>
+          </div>
+          <button onClick={onClose} className="flex-shrink-0 rounded-lg p-0.5 hover:opacity-60 transition-opacity">
+            <X className="w-3.5 h-3.5" style={{ color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }} />
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 export function AdminEvents() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -172,6 +358,35 @@ export function AdminEvents() {
 
   // Copy slug
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
+
+  // ── Confirm modal + error toast ──
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean; title: string; description: string; detail?: string;
+    confirmLabel: string; successMsg?: string; action: (() => Promise<void>) | null; loading: boolean;
+  }>({ open: false, title: '', description: '', confirmLabel: 'Excluir', action: null, loading: false });
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const showSuccess = (msg: string) => {
+    setSuccessMsg(msg);
+    setTimeout(() => setSuccessMsg(null), 4000);
+  };
+
+  const openConfirm = (opts: { title: string; description: string; detail?: string; confirmLabel?: string; successMsg?: string; action: () => Promise<void> }) => {
+    setConfirmState({ open: true, loading: false, confirmLabel: opts.confirmLabel ?? 'Excluir', action: opts.action, title: opts.title, description: opts.description, detail: opts.detail, successMsg: opts.successMsg });
+  };
+  const closeConfirm = () => setConfirmState(prev => ({ ...prev, open: false, loading: false }));
+  const runConfirm = async () => {
+    if (!confirmState.action) return;
+    setConfirmState(prev => ({ ...prev, loading: true }));
+    try {
+      await confirmState.action!();
+      const msg = (confirmState as any).successMsg;
+      closeConfirm();
+      showSuccess(msg ?? 'Item removido com sucesso.');
+    }
+    catch (err: any) { closeConfirm(); setErrorMsg(err.message ?? 'Erro desconhecido'); setTimeout(() => setErrorMsg(null), 5000); }
+  };
 
   const bg = isDark ? '#08080E' : '#F2F8F4';
   const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
@@ -242,32 +457,41 @@ export function AdminEvents() {
     setTimeout(() => setCopiedSlug(null), 2000);
   };
 
-  const handleDeleteEvent = async (id: string) => {
-    if (!window.confirm('Excluir este tour e todas as suas fotos?')) return;
-    try {
-      const token = await getToken();
-      if (!token) { navigate('/admin/login'); return; }
-      await api.deleteEvent(id, token);
-      setEvents((prev) => prev.filter((e) => e.id !== id));
-      if (selectedEvent?.id === id) setSelectedEvent(null);
-    } catch (err: any) {
-      alert(`Erro ao excluir: ${err.message}`);
-    }
+  const handleDeleteEvent = (id: string) => {
+    const event = events.find(e => e.id === id);
+    openConfirm({
+      title: 'Excluir este tour?',
+      description: 'Todas as fotos e dados deste tour serão permanentemente removidos.',
+      detail: event?.name ?? id,
+      confirmLabel: 'Sim, excluir tour',
+      successMsg: `Tour "${event?.name ?? id}" excluído com sucesso.`,
+      action: async () => {
+        const token = await getToken();
+        if (!token) { navigate('/admin/login'); return; }
+        await api.deleteEvent(id, token);
+        setEvents(prev => prev.filter(e => e.id !== id));
+        if (selectedEvent?.id === id) setSelectedEvent(null);
+      },
+    });
   };
 
-  const handleDeletePhoto = async (photoId: string) => {
+  const handleDeletePhoto = (photoId: string) => {
     if (!selectedEvent) return;
-    try {
-      const token = await getToken();
-      if (!token) { navigate('/admin/login'); return; }
-      await api.deletePhoto(selectedEvent.id, photoId, token);
-      setEventPhotos((prev) => prev.filter((p) => p.id !== photoId));
-      setEvents((prev) => prev.map((e) =>
-        e.id === selectedEvent.id ? { ...e, photoCount: Math.max(0, e.photoCount - 1) } : e
-      ));
-    } catch (err: any) {
-      alert(`Erro ao excluir foto: ${err.message}`);
-    }
+    openConfirm({
+      title: 'Excluir esta foto?',
+      description: 'Esta foto será permanentemente removida do tour e do acervo.',
+      confirmLabel: 'Sim, excluir foto',
+      successMsg: 'Foto removida do acervo com sucesso.',
+      action: async () => {
+        const token = await getToken();
+        if (!token) { navigate('/admin/login'); return; }
+        await api.deletePhoto(selectedEvent.id, photoId, token);
+        setEventPhotos(prev => prev.filter(p => p.id !== photoId));
+        setEvents(prev => prev.map(e =>
+          e.id === selectedEvent.id ? { ...e, photoCount: Math.max(0, e.photoCount - 1) } : e
+        ));
+      },
+    });
   };
 
   const handleFileUpload = async (files: FileList | null, targetEvent?: EventRecord) => {
@@ -390,6 +614,25 @@ export function AdminEvents() {
   return (
     <div className="pt-20 pb-16 min-h-screen" style={{ background: bg }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
+
+        {/* ── Confirm Modal ── */}
+        <ConfirmModal
+          open={confirmState.open}
+          title={confirmState.title}
+          description={confirmState.description}
+          detail={confirmState.detail}
+          confirmLabel={confirmState.confirmLabel}
+          onConfirm={runConfirm}
+          onCancel={closeConfirm}
+          isDark={isDark}
+          loading={confirmState.loading}
+        />
+
+        {/* ── Success Toast ── */}
+        <SuccessToast msg={successMsg} onClose={() => setSuccessMsg(null)} isDark={isDark} />
+
+        {/* ── Error Toast ── */}
+        <ErrorToast msg={errorMsg} onClose={() => setErrorMsg(null)} isDark={isDark} />
 
         {/* Face processing toast */}
         <AnimatePresence>
@@ -692,7 +935,7 @@ export function AdminEvents() {
                         value={uploadDate}
                         onChange={(e) => setUploadDate(e.target.value)}
                         className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
-                        style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor }}
+                        style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor, colorScheme: isDark ? 'dark' : 'light' }}
                       />
                     </div>
 
@@ -707,7 +950,7 @@ export function AdminEvents() {
                         value={uploadTime}
                         onChange={(e) => setUploadTime(e.target.value)}
                         className="w-full px-4 py-2.5 rounded-xl text-sm outline-none"
-                        style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor }}
+                        style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor, colorScheme: isDark ? 'dark' : 'light' }}
                       />
                     </div>
 

@@ -160,6 +160,7 @@ export interface BrandingConfig {
   logoUrl: string | null;
   faviconUrl: string | null;
   backgroundUrls: string[];
+  ctaBgUrl: string | null;
   hasLogo: boolean;
   hasFavicon: boolean;
   backgroundCount: number;
@@ -286,10 +287,10 @@ export const api = {
   >>, token: string) =>
     aPut<{ success: boolean }>('/admin/branding', data, token),
 
-  uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background'; base64: string; mimeType: string }, token: string) =>
+  uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background' | 'cta-background'; base64: string; mimeType: string }, token: string) =>
     aPost<{ url: string | null; path: string }>('/admin/branding/upload', data, token),
 
-  deleteBrandingAsset: (asset: 'logo' | 'favicon', token: string) =>
+  deleteBrandingAsset: (asset: 'logo' | 'favicon' | 'cta-background', token: string) =>
     aDel<{ success: boolean }>(`/admin/branding/asset/${asset}`, token),
 
   deleteBrandingBackground: (index: number, token: string) =>
