@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { Image, MapPin, Calendar, ChevronRight, Search, X, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
+import { useBranding } from '../contexts/BrandingContext';
 import { api, type EventRecord } from '../lib/api';
 
 /* ── Transform API EventRecord to local session format ── */
@@ -189,7 +190,9 @@ export function Events() {
   const sectionBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.1)';
   const accentGreen = isDark ? '#86efac' : '#006B2B';
 
-  const IMG_STADIUM = 'https://images.unsplash.com/photo-1587565276758-0076cff659b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
+  const IMG_STADIUM_FALLBACK = 'https://images.unsplash.com/photo-1587565276758-0076cff659b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1080';
+  const { branding } = useBranding();
+  const IMG_STADIUM = branding.backgroundUrls[0] ?? IMG_STADIUM_FALLBACK;
 
   return (
     <div className="min-h-screen">

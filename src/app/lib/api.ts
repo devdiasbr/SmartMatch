@@ -150,6 +150,19 @@ export interface AdminConfig {
   mpTokenPreview: string | null;
 }
 
+export interface BrandingConfig {
+  appName: string;
+  pageTitle: string;
+  watermarkText: string;
+  logoUrl: string | null;
+  faviconUrl: string | null;
+  backgroundUrls: string[];
+  hasLogo: boolean;
+  hasFavicon: boolean;
+  backgroundCount: number;
+  updatedAt: string | null;
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -160,6 +173,10 @@ export const api = {
 
   getEvent: (id: string) =>
     get<{ event: EventRecord }>(`/events/${id}`),
+
+  // ── Public Branding ──────────────────────────────────────────────────────
+  getPublicBranding: () =>
+    get<BrandingConfig>('/branding/public'),
 
   // ── Public Config ────────────────────────────────────────────────────────
 
@@ -229,6 +246,22 @@ export const api = {
 
   getAdminStats: (token: string) =>
     aGet<AdminStats>('/admin/stats', token),
+
+  // ── Admin Branding ────────────────────────────────────────────────────────
+  getAdminBranding: (token: string) =>
+    aGet<BrandingConfig>('/admin/branding', token),
+
+  updateAdminBranding: (data: { appName?: string; pageTitle?: string; watermarkText?: string }, token: string) =>
+    aPut<{ success: boolean }>('/admin/branding', data, token),
+
+  uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background'; base64: string; mimeType: string }, token: string) =>
+    aPost<{ url: string | null; path: string }>('/admin/branding/upload', data, token),
+
+  deleteBrandingAsset: (asset: 'logo' | 'favicon', token: string) =>
+    aDel<{ success: boolean }>(`/admin/branding/asset/${asset}`, token),
+
+  deleteBrandingBackground: (index: number, token: string) =>
+    aDel<{ success: boolean }>(`/admin/branding/backgrounds/${index}`, token),
 
   // ── Admin Config ─────────────────────────────────────────────────────────
 

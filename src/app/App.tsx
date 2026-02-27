@@ -3,19 +3,21 @@ import { router } from './routes';
 import { ThemeProvider } from './components/ThemeProvider';
 import { CartProvider } from './contexts/CartContext';
 import { AuthProvider } from './contexts/AuthContext';
+import { BrandingProvider } from './contexts/BrandingContext';
 
 /**
  * Provider order (outer → inner):
- *  ThemeProvider → AuthProvider → CartProvider → RouterProvider
- * All routed components (Header, pages, etc.) have access to all contexts.
+ *  ThemeProvider → AuthProvider → BrandingProvider → CartProvider → RouterProvider
  */
 export default function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <CartProvider>
-          <RouterProvider router={router} />
-        </CartProvider>
+        <BrandingProvider>
+          <CartProvider>
+            <RouterProvider router={router} />
+          </CartProvider>
+        </BrandingProvider>
       </AuthProvider>
     </ThemeProvider>
   );

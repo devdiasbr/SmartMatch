@@ -26,6 +26,7 @@ import { FaceSearchPanel } from '../components/FaceSearchPanel';
 import { FaceGroupingPanel } from '../components/FaceGroupingPanel';
 import { ProtectedImage } from '../components/ProtectedImage';
 import { useTheme } from '../components/ThemeProvider';
+import { useBranding } from '../contexts/BrandingContext';
 
 /* ─── Images ─── */
 const IMG_STADIUM = 'https://images.unsplash.com/photo-1587565276758-0076cff659b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1200';
@@ -291,6 +292,7 @@ export function EventDetail() {
   const { addItem, isInCart, openDrawer } = useCart();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { branding } = useBranding();
 
   /* theme-aware palette */
   const bg          = isDark ? '#08080E'                  : '#F2F8F4';
@@ -335,7 +337,7 @@ export function EventDetail() {
           price: ev.price,
           tag: 'TOUR',
           tagColor: '#86efac',
-          hero: IMG_STADIUM,
+          hero: branding.backgroundUrls[0] ?? IMG_STADIUM,
         });
         const mapped: Photo[] = phRes.photos.map((p: PhotoRecord) => ({
           id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
@@ -354,6 +356,11 @@ export function EventDetail() {
 
   const event = apiEvent ?? (id && EVENT_DATA[id] ? EVENT_DATA[id] : FALLBACK_EVENT);
   const eventId = id ?? 'maratona-sp-2024';
+
+  // Compute hero in render phase so branding updates are reflected without re-fetching
+  const heroUrl = (apiEvent && branding.backgroundUrls.length > 0)
+    ? branding.backgroundUrls[0]
+    : event.hero;
 
   const handleAddAllPhotos = () => {
     photos.forEach((photo) => {
@@ -380,7 +387,7 @@ export function EventDetail() {
     <div className="min-h-screen" style={{ background: bg }}>
       {/* Event Hero */}
       <section className="relative h-72 md:h-96 overflow-hidden">
-        <img src={event.hero} alt={event.title} className="w-full h-full object-cover" style={{ filter: 'brightness(0.4) saturate(0.8)' }} />
+        <img src={heroUrl} alt={event.title} className="w-full h-full object-cover" style={{ filter: 'brightness(0.4) saturate(0.8)' }} />
         <div className="absolute inset-0" style={{ background: heroGrad }} />
         <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 20% 80%, ${event.tagColor}08 0%, transparent 60%)` }} />
         <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-12 max-w-7xl mx-auto w-full">

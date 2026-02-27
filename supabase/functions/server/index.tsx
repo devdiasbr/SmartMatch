@@ -115,6 +115,173 @@ app.get("/make-server-68454e9b/stats/public", async (c) => {
   }
 });
 
+// ── Branding ──────────────────────────────────────────────────────────────────
+
+async function brandingWithUrls() {
+  const b: any = (await kv.get(`${KV}branding`)) ?? {};
+  let logoUrl: string | null = null;
+  let faviconUrl: string | null = null;
+  const backgroundUrls: string[] = [];
+
+  if (b.logoPath) {
+    const { data } = await sb().storage.from(BUCKET).createSignedUrl(b.logoPath, 3600);
+    logoUrl = data?.signedUrl ?? null;
+  }
+  if (b.faviconPath) {
+    const { data } = await sb().storage.from(BUCKET).createSignedUrl(b.faviconPath, 3600);
+    faviconUrl = data?.signedUrl ?? null;
+  }
+  for (const p of (b.backgroundPaths ?? [])) {
+    const { data } = await sb().storage.from(BUCKET).createSignedUrl(p, 3600);
+    if (data?.signedUrl) backgroundUrls.push(data.signedUrl);
+  }
+
+  return {
+    appName: b.appName ?? "Smart Match",
+    pageTitle: b.pageTitle ?? "Smart Match – Tour Palmeiras",
+    watermarkText: b.watermarkText ?? "© Smart Match",
+    logoUrl,
+    faviconUrl,
+    backgroundUrls,
+    hasLogo: !!b.logoPath,
+    hasFavicon: !!b.faviconPath,
+    backgroundCount: (b.backgroundPaths ?? []).length,
+    updatedAt: b.updatedAt ?? null,
+  };
+}
+
+// Public branding (no auth)
+app.get("/make-server-68454e9b/branding/public", async (c) => {
+  try {
+    return c.json(await brandingWithUrls());
+  } catch (err) {
+    console.log("Erro ao buscar branding público:", err);
+    return c.json({
+      appName: "Smart Match",
+      pageTitle: "Smart Match – Tour Palmeiras",
+      watermarkText: "© Smart Match",
+      logoUrl: null, faviconUrl: null, backgroundUrls: [],
+      hasLogo: false, hasFavicon: false, backgroundCount: 0, updatedAt: null,
+    });
+  }
+});
+
+// Admin branding GET
+app.get("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
+  try {
+    return c.json(await brandingWithUrls());
+  } catch (err) {
+    return c.json({ error: `Erro ao buscar branding: ${err}` }, 500);
+  }
+});
+
+// Admin branding PUT (text fields only)
+app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+    const updated = {
+      ...existing,
+      appName: body.appName ?? existing.appName,
+      pageTitle: body.pageTitle ?? existing.pageTitle,
+      watermarkText: body.watermarkText ?? existing.watermarkText,
+      updatedAt: new Date().toISOString(),
+    };
+    await kv.set(`${KV}branding`, updated);
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ error: `Erro ao salvar branding: ${err}` }, 500);
+  }
+});
+
+// Upload logo / favicon / background
+app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => {
+  try {
+    const { type, base64, mimeType = "image/png" } = await c.req.json();
+    if (!base64 || !type) return c.json({ error: "type e base64 obrigatórios" }, 400);
+    if (!["logo", "favicon", "background"].includes(type))
+      return c.json({ error: "type deve ser logo, favicon ou background" }, 400);
+
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    const extMap: Record<string, string> = {
+      "image/jpeg": "jpg", "image/jpg": "jpg",
+      "image/png": "png", "image/webp": "webp",
+      "image/svg+xml": "svg", "image/x-icon": "ico", "image/gif": "gif",
+    };
+    const ext = extMap[mimeType] ?? "png";
+    const ts = Date.now();
+    const storagePath = type === "logo"
+      ? `branding/logo-${ts}.${ext}`
+      : type === "favicon"
+        ? `branding/favicon-${ts}.${ext}`
+        : `branding/bg/bg-${ts}.${ext}`;
+
+    const { error: uploadError } = await sb().storage
+      .from(BUCKET).upload(storagePath, bytes, { contentType: mimeType, upsert: false });
+    if (uploadError) return c.json({ error: `Upload erro: ${uploadError.message}` }, 500);
+
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+
+    // Delete old asset when replacing logo or favicon
+    if (type === "logo" && existing.logoPath) {
+      await sb().storage.from(BUCKET).remove([existing.logoPath]);
+    } else if (type === "favicon" && existing.faviconPath) {
+      await sb().storage.from(BUCKET).remove([existing.faviconPath]);
+    }
+
+    const updated: any = { ...existing, updatedAt: new Date().toISOString() };
+    if (type === "logo") updated.logoPath = storagePath;
+    else if (type === "favicon") updated.faviconPath = storagePath;
+    else updated.backgroundPaths = [...(existing.backgroundPaths ?? []), storagePath];
+
+    await kv.set(`${KV}branding`, updated);
+
+    const { data: signData } = await sb().storage.from(BUCKET).createSignedUrl(storagePath, 3600);
+    return c.json({ url: signData?.signedUrl ?? null, path: storagePath });
+  } catch (err) {
+    return c.json({ error: `Erro no upload de branding: ${err}` }, 500);
+  }
+});
+
+// Delete logo or favicon
+app.delete("/make-server-68454e9b/admin/branding/asset/:asset", adminAuth, async (c) => {
+  try {
+    const asset = c.req.param("asset");
+    if (asset !== "logo" && asset !== "favicon")
+      return c.json({ error: "Asset deve ser logo ou favicon" }, 400);
+
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+    const pathKey = asset === "logo" ? "logoPath" : "faviconPath";
+    if (existing[pathKey]) {
+      await sb().storage.from(BUCKET).remove([existing[pathKey]]);
+    }
+    await kv.set(`${KV}branding`, { ...existing, [pathKey]: null, updatedAt: new Date().toISOString() });
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ error: `Erro ao remover asset: ${err}` }, 500);
+  }
+});
+
+// Delete background by index
+app.delete("/make-server-68454e9b/admin/branding/backgrounds/:index", adminAuth, async (c) => {
+  try {
+    const idx = parseInt(c.req.param("index"));
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+    const paths: string[] = [...(existing.backgroundPaths ?? [])];
+    if (idx < 0 || idx >= paths.length) return c.json({ error: "Índice inválido" }, 400);
+
+    const [removed] = paths.splice(idx, 1);
+    await sb().storage.from(BUCKET).remove([removed]);
+    await kv.set(`${KV}branding`, { ...existing, backgroundPaths: paths, updatedAt: new Date().toISOString() });
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ error: `Erro ao remover background: ${err}` }, 500);
+  }
+});
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 // Register admin user

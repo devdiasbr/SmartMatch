@@ -8,6 +8,7 @@ import { AdminEvents } from './pages/AdminEvents';
 import { AdminFinanceiro } from './pages/AdminFinanceiro';
 import { AdminPDV } from './pages/AdminPDV';
 import { AdminPedidos } from './pages/AdminPedidos';
+import { AdminConfig } from './pages/AdminConfig';
 import { Cart } from './pages/Cart';
 import { AdminLogin } from './pages/AdminLogin';
 import { MinhaFoto } from './pages/MinhaFoto';
@@ -27,6 +28,7 @@ export const router = createBrowserRouter([
       { path: 'admin/financeiro', Component: AdminFinanceiro },
       { path: 'admin/pedidos', Component: AdminPedidos },
       { path: 'admin/pdv', Component: AdminPDV },
+      { path: 'admin/config', Component: AdminConfig },
       { path: 'admin/login', Component: AdminLogin },
     ],
   },

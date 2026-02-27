@@ -30,6 +30,7 @@ import {
   Globe,
   Printer,
   ClipboardList,
+  Settings,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -276,6 +277,7 @@ export function AdminFinanceiro() {
           { key: 'financeiro', label: 'Financeiro',  icon: DollarSign,   to: '/admin/financeiro' },
           { key: 'pedidos',    label: 'Pedidos',     icon: ClipboardList, to: '/admin/pedidos' },
           { key: 'pdv',        label: 'PDV',          icon: Store,        to: '/admin/pdv' },
+          { key: 'config',     label: 'Config',       icon: Settings,     to: '/admin/config' },
         ]} />
 
         {/* KPI cards */}

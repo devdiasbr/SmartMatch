@@ -5,6 +5,7 @@ import {
   Search, Loader2, Eye, XCircle, CheckCircle2, Clock, Package,
   ChevronDown, ChevronUp, Filter, Printer, Globe, ShoppingCart,
   User, CreditCard, Banknote, AlertCircle, X, Download, Check,
+  Settings,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -476,6 +477,7 @@ export function AdminPedidos() {
           { key: 'financeiro', label: 'Financeiro',  icon: DollarSign,     to: '/admin/financeiro' },
           { key: 'pedidos',    label: 'Pedidos',     icon: ClipboardList,  to: '/admin/pedidos' },
           { key: 'pdv',        label: 'PDV',         icon: Store,          to: '/admin/pdv' },
+          { key: 'config',     label: 'Config',      icon: Settings,       to: '/admin/config' },
         ]} />
 
         {/* KPIs */}

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import { Camera, ShoppingCart, Menu, X, Moon, Sun, LogOut, LogIn } from 'lucide-react';
+import { Camera, ShoppingCart, Menu, X, Moon, Sun, LogOut, LogIn, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from './ThemeProvider';
 import { useCart } from '../contexts/CartContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useBranding } from '../contexts/BrandingContext';
 
 /* ─────────────────────────────────────────────────────────────────────────
  * REGRA DE COR DO HEADER
@@ -25,6 +26,7 @@ export function Header() {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { isAdmin, signOut } = useAuth();
+  const { branding } = useBranding();
   const isDark = theme === 'dark';
 
   const isAdminPage = location.pathname.startsWith('/admin');
@@ -98,23 +100,44 @@ export function Header() {
 
           {/* ── Logo ── */}
           <Link to="/" className="flex items-center gap-2 group">
-            <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: 'linear-gradient(135deg, #006B2B, #00843D)' }}
-            >
-              <Camera className="w-4 h-4 text-white" strokeWidth={2.5} />
-            </div>
-            <span
-              style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1.2rem' }}
-              className={useThemedColors
-                ? (isDark ? 'text-white' : 'text-[#0D2818]')
-                : 'text-white'}
-            >
-              Smart
-              <span style={{ color: useThemedColors
-                ? (isDark ? '#86efac' : '#006B2B')
-                : '#4ade80' }}>Match</span>
-            </span>
+            {branding.logoUrl ? (
+              /* Custom logo uploaded via Config — sem filtro para preservar cores */
+              <img
+                src={branding.logoUrl}
+                alt={branding.appName}
+                className="h-8 object-contain max-w-[160px]"
+              />
+            ) : (
+              /* Fallback: ícone + nome */
+              <>
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'linear-gradient(135deg, #006B2B, #00843D)' }}
+                >
+                  <Camera className="w-4 h-4 text-white" strokeWidth={2.5} />
+                </div>
+                <span
+                  style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1.2rem' }}
+                  className={useThemedColors
+                    ? (isDark ? 'text-white' : 'text-[#0D2818]')
+                    : 'text-white'}
+                >
+                  {/* Split appName into first word + rest for color accent */}
+                  {branding.appName.includes(' ') ? (
+                    <>
+                      {branding.appName.split(' ')[0]}
+                      <span style={{ color: useThemedColors ? (isDark ? '#86efac' : '#006B2B') : '#4ade80' }}>
+                        {' '}{branding.appName.split(' ').slice(1).join(' ')}
+                      </span>
+                    </>
+                  ) : (
+                    <span style={{ color: useThemedColors ? (isDark ? '#86efac' : '#006B2B') : '#4ade80' }}>
+                      {branding.appName}
+                    </span>
+                  )}
+                </span>
+              </>
+            )}
           </Link>
 
           {/* ── Desktop Nav ── */}
@@ -231,6 +254,19 @@ export function Header() {
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
+
+            {/* ── Engrenagem Config — só para admin ── */}
+            {isAdmin && (
+              <Link to="/admin/config">
+                <button
+                  className="p-2 rounded-lg transition-colors cursor-pointer"
+                  style={{ background: iconBg, color: iconColor }}
+                  title="Configurações"
+                >
+                  <Settings className="w-4 h-4" />
+                </button>
+              </Link>
+            )}
           </div>
 
           {/* ── Mobile: toggle + hamburger ── */}

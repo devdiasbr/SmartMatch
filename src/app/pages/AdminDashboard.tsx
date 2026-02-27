@@ -29,6 +29,7 @@ import {
   Loader2,
   Store,
   ClipboardList,
+  Settings,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -423,6 +424,7 @@ export function AdminDashboard() {
             { key: 'financeiro', label: 'Financeiro',   icon: DollarSign,   to: '/admin/financeiro' },
             { key: 'pedidos',    label: 'Pedidos',      icon: ClipboardList, to: '/admin/pedidos' },
             { key: 'pdv',        label: 'PDV',           icon: Store,        to: '/admin/pdv' },
+            // remove this line: { key: 'config',     label: 'Config',        icon: Settings,     to: '/admin/config' },
           ]}
         />
 

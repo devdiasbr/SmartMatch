@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import {
   Camera,
@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { motion, useScroll, useTransform } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
+import { useBranding } from '../contexts/BrandingContext';
 import { api } from '../lib/api';
 
 /* ─── Images ─── */
@@ -208,6 +209,7 @@ function HeroSection() {
   const { scrollYProgress } = useScroll({ target: ref, offset: ['start start', 'end start'] });
   const y = useTransform(scrollYProgress, [0, 1], ['0%', '25%']);
   const opacity = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
+  const { branding } = useBranding();
 
   const [stats, setStats] = useState<{ totalEvents: number; totalPhotos: number } | null>(null);
 
@@ -216,6 +218,9 @@ function HeroSection() {
       .then((data) => setStats(data))
       .catch(() => {/* fail silently */});
   }, []);
+
+  // Use branding background if available, else fallback to default stadium photo
+  const heroBg = branding.backgroundUrls.length > 0 ? branding.backgroundUrls[0] : IMG_STADIUM;
 
   const statsRow = [
     {
@@ -234,11 +239,11 @@ function HeroSection() {
 
   return (
     <section ref={ref} className="relative min-h-screen flex items-center overflow-hidden">
-      {/* Background image with parallax — Allianz Parque */}
+      {/* Background image with parallax */}
       <motion.div className="absolute inset-0 z-0" style={{ y }}>
         <img
-          src={IMG_STADIUM}
-          alt="Allianz Parque"
+          src={heroBg}
+          alt="Background"
           className="w-full h-full object-cover"
           style={{ filter: 'brightness(0.32) saturate(0.9)' }}
         />
