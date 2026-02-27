@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ClipboardList, BarChart3, CalendarDays, DollarSign, Store,
   Search, Loader2, Eye, XCircle, CheckCircle2, Clock, Package,
   ChevronDown, ChevronUp, Filter, Printer, Globe, ShoppingCart,
-  User, CreditCard, Banknote, AlertCircle, X,
+  User, CreditCard, Banknote, AlertCircle, X, Download, Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -158,6 +158,88 @@ function CancelModal({ order, onClose, onConfirm, isDark }: {
   );
 }
 
+/* ── Custom Select ── */
+function CustomSelect({ value, onChange, options, isDark, border, card, text, muted }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  isDark: boolean;
+  border: string;
+  card: string;
+  text: string;
+  muted: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const selected = options.find(o => o.value === value);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(p => !p)}
+        className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm whitespace-nowrap cursor-pointer"
+        style={{ background: card, border: `1px solid ${border}`, color: text, minWidth: 160 }}
+      >
+        <span className="flex-1 text-left">{selected?.label}</span>
+        <ChevronDown
+          className="w-3.5 h-3.5 flex-shrink-0 transition-transform"
+          style={{ color: muted, transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+        />
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-50 mt-1.5 w-full rounded-xl overflow-hidden shadow-xl"
+          style={{
+            background: isDark ? '#0e0e1a' : '#ffffff',
+            border: `1px solid ${border}`,
+            boxShadow: isDark
+              ? '0 8px 32px rgba(0,0,0,0.6)'
+              : '0 8px 24px rgba(0,0,0,0.12)',
+          }}
+        >
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-left cursor-pointer transition-colors"
+              style={{
+                color: opt.value === value ? (isDark ? '#86efac' : '#006B2B') : text,
+                background: opt.value === value
+                  ? (isDark ? 'rgba(134,239,172,0.07)' : 'rgba(0,107,43,0.06)')
+                  : 'transparent',
+              }}
+              onMouseEnter={e => {
+                if (opt.value !== value)
+                  (e.currentTarget as HTMLElement).style.background = isDark
+                    ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+              }}
+              onMouseLeave={e => {
+                if (opt.value !== value)
+                  (e.currentTarget as HTMLElement).style.background = 'transparent';
+              }}
+            >
+              {opt.label}
+              {opt.value === value && <Check className="w-3.5 h-3.5" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Main Page ── */
 export function AdminPedidos() {
   const { theme } = useTheme();
@@ -247,6 +329,87 @@ export function AdminPedidos() {
   const pendingOrders = orders.filter(o => o.status === 'pending').length;
   const cancelledOrders = orders.filter(o => o.status === 'cancelled').length;
 
+  /* ── Export CSV ── */
+  const handleExport = () => {
+    const now = new Date();
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const row = (...cells: (string | number)[]) => cells.map(esc).join(',');
+
+    const statusLabel: Record<string, string> = {
+      pending: 'Pendente', paid: 'Pago', delivered: 'Entregue', cancelled: 'Cancelado',
+    };
+    const channelLabel: Record<string, string> = { pos: 'PDV', online: 'Online' };
+
+    const lines: string[] = [];
+
+    lines.push(row('Smart Match — Relatório de Pedidos'));
+    lines.push(row(`Gerado em: ${now.toLocaleDateString('pt-BR')} ${now.toLocaleTimeString('pt-BR')}`));
+
+    const filterDesc = [
+      statusFilter !== 'all' ? `Status: ${statusLabel[statusFilter] ?? statusFilter}` : '',
+      channelFilter !== 'all' ? `Canal: ${channelLabel[channelFilter] ?? channelFilter}` : '',
+      searchTerm ? `Busca: ${searchTerm}` : '',
+    ].filter(Boolean).join(' | ');
+    if (filterDesc) lines.push(row(`Filtros: ${filterDesc}`));
+
+    lines.push(row(`Total de registros: ${filtered.length} de ${orders.length}`));
+    lines.push(row(''));
+
+    // Cabeçalho da tabela
+    lines.push(row(
+      'ID', 'Data', 'Cliente', 'E-mail', 'Canal',
+      'Qtd Fotos', 'Total (R$)', 'Pagamento', 'Status',
+      'MP Payment ID', 'Motivo Cancelamento',
+    ));
+
+    for (const o of filtered) {
+      const items = o.items ?? [];
+      const totalFotos = items.length;
+      const eventNames = [...new Set(items.map(it => it.eventName ?? ''))].join('; ');
+
+      lines.push(row(
+        o.id,
+        o.createdAt ? new Date(o.createdAt).toLocaleString('pt-BR') : '',
+        o.customerName ?? '',
+        o.customerEmail ?? '',
+        channelLabel[o.channel ?? 'online'] ?? o.channel ?? 'Online',
+        totalFotos,
+        (o.total ?? 0).toFixed(2),
+        o.paymentMethod ?? '',
+        statusLabel[o.status] ?? o.status ?? '',
+        (o as any).mpPaymentId ?? '',
+        (o as any).cancelReason ?? '',
+      ));
+    }
+
+    // Seção de detalhamento de itens por pedido
+    lines.push(row(''));
+    lines.push(row('=== DETALHAMENTO DE ITENS ==='));
+    lines.push(row('Pedido ID', 'Cliente', 'Tag da Foto', 'Evento', 'Preço (R$)'));
+    for (const o of filtered) {
+      for (const item of o.items ?? []) {
+        lines.push(row(
+          o.id,
+          o.customerName ?? o.customerEmail ?? '',
+          item.tag ?? '',
+          item.eventName ?? '',
+          (item.price ?? 0).toFixed(2),
+        ));
+      }
+    }
+
+    const csv = '\uFEFF' + lines.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `smartmatch-pedidos-${now.toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: bg }}>
@@ -261,18 +424,49 @@ export function AdminPedidos() {
 
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: isDark ? 'rgba(96,165,250,0.1)' : 'rgba(59,130,246,0.08)' }}>
-              <ClipboardList className="w-5 h-5" style={{ color: isDark ? '#60a5fa' : '#3b82f6' }} />
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: isDark ? 'rgba(96,165,250,0.1)' : 'rgba(59,130,246,0.08)' }}>
+                <ClipboardList className="w-5 h-5" style={{ color: isDark ? '#60a5fa' : '#3b82f6' }} />
+              </div>
+              <div>
+                <h1 style={{ fontFamily: "'Montserrat',sans-serif", fontSize: 'clamp(1.4rem,3vw,2rem)', fontWeight: 900, color: text, letterSpacing: '-0.02em' }}>
+                  Pedidos
+                </h1>
+                <p className="text-sm" style={{ color: muted }}>
+                  Gerencie todos os pedidos do e-commerce e PDV
+                </p>
+              </div>
             </div>
-            <h1 style={{ fontFamily: "'Montserrat',sans-serif", fontSize: 'clamp(1.4rem,3vw,2rem)', fontWeight: 900, color: text, letterSpacing: '-0.02em' }}>
-              Pedidos
-            </h1>
+
+            {/* Exportar */}
+            <motion.button
+              whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+              onClick={handleExport}
+              disabled={loading || filtered.length === 0}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm self-start sm:self-auto"
+              style={{
+                background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,107,43,0.07)',
+                border: `1px solid ${border}`,
+                color: muted,
+                cursor: (loading || filtered.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (loading || filtered.length === 0) ? 0.5 : 1,
+                fontWeight: 600,
+              }}
+            >
+              <Download className="w-3.5 h-3.5" />
+              Exportar CSV
+              {filtered.length > 0 && (
+                <span
+                  className="px-1.5 py-0.5 rounded text-[10px] font-bold"
+                  style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.1)', color: green }}
+                >
+                  {filtered.length}
+                </span>
+              )}
+            </motion.button>
           </div>
-          <p className="text-sm mt-0.5" style={{ color: muted }}>
-            Gerencie todos os pedidos do e-commerce e PDV
-          </p>
         </motion.div>
 
         {/* TabNav */}
@@ -317,28 +511,36 @@ export function AdminPedidos() {
               style={{ background: card, border: `1px solid ${border}`, color: text }}
             />
           </div>
-          <select
+          <CustomSelect
             value={statusFilter}
-            onChange={e => setStatusFilter(e.target.value)}
-            className="px-3 py-2.5 rounded-xl text-sm outline-none cursor-pointer"
-            style={{ background: card, border: `1px solid ${border}`, color: text }}
-          >
-            <option value="all">Todos os status</option>
-            <option value="pending">Pendente</option>
-            <option value="paid">Pago</option>
-            <option value="delivered">Entregue</option>
-            <option value="cancelled">Cancelado</option>
-          </select>
-          <select
+            onChange={setStatusFilter}
+            isDark={isDark}
+            border={border}
+            card={card}
+            text={text}
+            muted={muted}
+            options={[
+              { value: 'all',       label: 'Todos os status' },
+              { value: 'pending',   label: 'Pendente' },
+              { value: 'paid',      label: 'Pago' },
+              { value: 'delivered', label: 'Entregue' },
+              { value: 'cancelled', label: 'Cancelado' },
+            ]}
+          />
+          <CustomSelect
             value={channelFilter}
-            onChange={e => setChannelFilter(e.target.value)}
-            className="px-3 py-2.5 rounded-xl text-sm outline-none cursor-pointer"
-            style={{ background: card, border: `1px solid ${border}`, color: text }}
-          >
-            <option value="all">Todos os canais</option>
-            <option value="online">Online</option>
-            <option value="pos">PDV</option>
-          </select>
+            onChange={setChannelFilter}
+            isDark={isDark}
+            border={border}
+            card={card}
+            text={text}
+            muted={muted}
+            options={[
+              { value: 'all',    label: 'Todos os canais' },
+              { value: 'online', label: 'Online' },
+              { value: 'pos',    label: 'PDV' },
+            ]}
+          />
         </div>
 
         {/* Orders list */}

@@ -260,6 +260,81 @@ export function AdminDashboard() {
     return arr.map((s) => ({ ...s, pct: Math.round((s.receita / maxReceita) * 100) }));
   }, [stats]);
 
+  /* ── Export CSV ──────────────────────────────────────────────────────── */
+  const handleExport = () => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('pt-BR');
+    const timeStr = now.toLocaleTimeString('pt-BR');
+
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const row = (...cells: (string | number)[]) => cells.map(esc).join(',');
+
+    const lines: string[] = [];
+
+    // Cabeçalho
+    lines.push(row('Smart Match — Relatório Dashboard'));
+    lines.push(row(`Gerado em: ${dateStr} ${timeStr}`));
+    lines.push(row(''));
+
+    // Resumo geral
+    lines.push(row('=== RESUMO GERAL ==='));
+    lines.push(row('Métrica', 'Valor'));
+    lines.push(row('Receita Total', `R$ ${totalRevenue.toFixed(2)}`));
+    lines.push(row('Total de Pedidos', totalVendas));
+    lines.push(row('Total de Fotos Vendidas', totalFotos));
+    lines.push(row('Ticket Médio', `R$ ${avgTicket}`));
+    lines.push(row(''));
+
+    // Dados diários
+    if (stats?.daily?.length) {
+      lines.push(row('=== DADOS DIÁRIOS ==='));
+      lines.push(row('Data', 'Receita (R$)', 'Fotos'));
+      for (const d of stats.daily) {
+        lines.push(row(d.day, d.receita.toFixed(2), d.fotos));
+      }
+      lines.push(row(''));
+    }
+
+    // Top sessões
+    if (topSessionsData.length) {
+      lines.push(row('=== TOP SESSÕES ==='));
+      lines.push(row('Evento', 'Fotos', 'Vendas', 'Receita (R$)'));
+      for (const s of topSessionsData) {
+        lines.push(row(s.name, s.fotos, s.vendas, s.receita.toFixed(2)));
+      }
+      lines.push(row(''));
+    }
+
+    // Pedidos recentes
+    if (stats?.recentOrders?.length) {
+      lines.push(row('=== PEDIDOS RECENTES ==='));
+      lines.push(row('ID', 'Cliente', 'E-mail', 'Evento', 'Fotos', 'Total (R$)', 'Pagamento', 'Status'));
+      for (const o of stats.recentOrders) {
+        lines.push(row(
+          o.id,
+          o.customerName ?? '',
+          o.customerEmail ?? '',
+          o.items?.[0]?.eventName ?? '',
+          o.items?.length ?? 0,
+          (o.total ?? 0).toFixed(2),
+          o.paymentMethod ?? '',
+          (o as any).status ?? '',
+        ));
+      }
+    }
+
+    const csv = '\uFEFF' + lines.join('\r\n'); // BOM p/ Excel PT-BR
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `smartmatch-dashboard-${now.toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: isDark ? '#08080E' : '#F2F8F4' }}>
@@ -306,15 +381,19 @@ export function AdminDashboard() {
           <div className="flex items-center gap-2">
             <motion.button
               whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+              onClick={handleExport}
+              disabled={!stats}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
               style={{
                 background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,107,43,0.07)',
                 border: `1px solid ${cardBorder}`,
                 color: mutedText,
+                cursor: stats ? 'pointer' : 'not-allowed',
+                opacity: stats ? 1 : 0.5,
               }}
             >
               <Download className="w-3.5 h-3.5" />
-              Exportar
+              Exportar CSV
             </motion.button>
             <Link to="/admin/eventos">
               <motion.button

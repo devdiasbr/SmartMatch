@@ -701,6 +701,10 @@ app.put("/make-server-68454e9b/orders/:id", adminAuth, async (c) => {
     const body = await c.req.json();
     const updated = { ...order, ...body, id, updatedAt: new Date().toISOString() };
     await kv.set(`${KV}order:${id}`, updated);
+    // Send confirmation email if status changed to "paid" and hasn't been sent yet
+    if (body.status === "paid" && order.status !== "paid") {
+      sendOrderConfirmationEmail(updated).catch(console.log);
+    }
     return c.json({ order: updated });
   } catch (err) {
     console.log("Erro ao atualizar pedido:", err);
@@ -865,13 +869,11 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
   }
 });
 
-// ── MP Token helper — KV (admin UI) takes priority, env var is fallback ────────
+// ── MP Token helper — somente KV (admin UI). Env var ignorada. ──────────────
 
 async function getMpToken(): Promise<string | null> {
   const cfg = (await kv.get(`${KV}config`)) as any ?? {};
-  if (cfg.mpToken) return cfg.mpToken;
-  const envToken = Deno.env.get("MP_ACCESS_TOKEN");
-  return envToken ?? null;
+  return cfg.mpToken ?? null;
 }
 
 // ── Admin Config ──────────────────────────────────────────────────────────────
@@ -880,11 +882,9 @@ app.get("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
   try {
     const cfg = (await kv.get(`${KV}config`)) as any ?? {};
     const kvToken: string | undefined = cfg.mpToken;
-    const envToken = Deno.env.get("MP_ACCESS_TOKEN");
 
-    // KV (admin UI) takes priority over env var
-    const raw = kvToken ?? envToken ?? "";
-    const mpTokenSource: "env" | "kv" | null = kvToken ? "kv" : envToken ? "env" : null;
+    // Apenas o KV é fonte de verdade — env var não é usada
+    const raw = kvToken ?? "";
     const mpTokenPreview = raw.length > 12
       ? `${raw.slice(0, 10)}${"•".repeat(8)}${raw.slice(-4)}`
       : raw.length > 0 ? "•".repeat(raw.length) : null;
@@ -892,8 +892,8 @@ app.get("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
     return c.json({
       photoPrice: cfg.photoPrice ?? 30,
       coupons: cfg.coupons ?? [{ code: "ALLIANZ10", discount: 10, active: true }],
-      mpConfigured: !!mpTokenSource,
-      mpTokenSource,
+      mpConfigured: !!kvToken,
+      mpTokenSource: kvToken ? "kv" : null,
       mpTokenPreview,
     });
   } catch (err) {
@@ -921,11 +921,9 @@ app.put("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
 
     await kv.set(`${KV}config`, updated);
 
-    // Return the same shape as GET — KV takes priority over env var
+    // Return the same shape as GET — apenas KV
     const kvToken: string | undefined = updated.mpToken;
-    const envToken = Deno.env.get("MP_ACCESS_TOKEN");
-    const raw = kvToken ?? envToken ?? "";
-    const mpTokenSource: "env" | "kv" | null = kvToken ? "kv" : envToken ? "env" : null;
+    const raw = kvToken ?? "";
     const mpTokenPreview = raw.length > 12
       ? `${raw.slice(0, 10)}${"•".repeat(8)}${raw.slice(-4)}`
       : raw.length > 0 ? "•".repeat(raw.length) : null;
@@ -934,8 +932,8 @@ app.put("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
       config: {
         photoPrice: updated.photoPrice ?? 30,
         coupons: updated.coupons ?? [],
-        mpConfigured: !!mpTokenSource,
-        mpTokenSource,
+        mpConfigured: !!kvToken,
+        mpTokenSource: kvToken ? "kv" : null,
         mpTokenPreview,
       },
     });
@@ -1095,6 +1093,218 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
   }
 });
 
+// ── Email — Resend ─────────────────────────────────────────────────────────────
+
+function buildOrderEmailHtml(order: any, photos: { tag: string; eventName: string; viewUrl: string; downloadUrl: string; fileName: string }[]): string {
+  const green = "#00843D";
+  const darkGreen = "#006B2B";
+  const textDark = "#111827";
+  const textMid = "#374151";
+  const textLight = "#6B7280";
+  const border = "#E5E7EB";
+  const bg = "#F9FAFB";
+
+  const photoCards = photos.map((p, i) => `
+    <tr>
+      <td style="padding:12px 0;border-bottom:1px solid ${border};">
+        <table cellpadding="0" cellspacing="0" width="100%">
+          <tr>
+            <td width="72" style="vertical-align:top;padding-right:16px;">
+              <img src="${p.viewUrl}" width="72" height="72"
+                style="border-radius:8px;object-fit:cover;display:block;border:1px solid ${border};"
+                alt="Foto ${i + 1}" />
+            </td>
+            <td style="vertical-align:middle;">
+              <div style="font-size:13px;font-weight:600;color:${textDark};margin-bottom:2px;">${p.tag || "Foto"} ${i + 1}</div>
+              <div style="font-size:12px;color:${textLight};margin-bottom:10px;">${p.eventName || "Tour Palmeiras"}</div>
+              <a href="${p.downloadUrl}"
+                style="display:inline-block;background:${green};color:#fff;font-size:12px;font-weight:700;
+                       text-decoration:none;padding:7px 18px;border-radius:6px;letter-spacing:0.3px;">
+                ⬇ Baixar foto
+              </a>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>`).join("");
+
+  const totalStr = `R$ ${Number(order.total ?? 0).toFixed(2).replace(".", ",")}`;
+  const photosWord = photos.length === 1 ? "foto" : "fotos";
+  const dataPedido = new Date(order.createdAt ?? Date.now())
+    .toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:${bg};font-family:Arial,Helvetica,sans-serif;">
+  <table cellpadding="0" cellspacing="0" width="100%" style="background:${bg};padding:32px 16px;">
+    <tr><td align="center">
+      <table cellpadding="0" cellspacing="0" width="560" style="max-width:560px;background:#fff;border-radius:12px;overflow:hidden;border:1px solid ${border};">
+
+        <!-- Header -->
+        <tr>
+          <td style="background:${darkGreen};padding:28px 32px;text-align:center;">
+            <div style="font-size:22px;font-weight:900;color:#fff;letter-spacing:-0.5px;">
+              ⚽ Smart Match
+            </div>
+            <div style="font-size:13px;color:rgba(255,255,255,0.75);margin-top:4px;">
+              Tour Palmeiras · Allianz Parque
+            </div>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:32px 32px 24px;">
+            <h1 style="margin:0 0 8px;font-size:20px;font-weight:800;color:${textDark};">
+              📸 Suas ${photosWord} estão prontas!
+            </h1>
+            <p style="margin:0 0 24px;font-size:14px;color:${textMid};line-height:1.6;">
+              Olá${order.customerName ? `, <strong>${order.customerName}</strong>` : ""}! Seu pagamento foi confirmado e suas
+              ${photos.length} ${photosWord} já estão disponíveis para download. Os links são válidos por <strong>7 dias</strong>.
+            </p>
+
+            <!-- Order summary -->
+            <table cellpadding="0" cellspacing="0" width="100%"
+              style="background:${bg};border-radius:8px;border:1px solid ${border};margin-bottom:24px;">
+              <tr>
+                <td style="padding:14px 18px;">
+                  <table cellpadding="0" cellspacing="0" width="100%">
+                    <tr>
+                      <td style="font-size:12px;color:${textLight};">Pedido</td>
+                      <td align="right" style="font-size:12px;color:${textLight};">Data</td>
+                    </tr>
+                    <tr>
+                      <td style="font-size:13px;font-weight:700;color:${textDark};font-family:monospace;">
+                        #${(order.id ?? "").slice(-8).toUpperCase()}
+                      </td>
+                      <td align="right" style="font-size:13px;font-weight:600;color:${textDark};">
+                        ${dataPedido}
+                      </td>
+                    </tr>
+                    <tr><td colspan="2" style="padding-top:10px;border-top:1px solid ${border};"></td></tr>
+                    <tr>
+                      <td style="font-size:12px;color:${textLight};">${photos.length} ${photosWord}</td>
+                      <td align="right" style="font-size:14px;font-weight:800;color:${green};">${totalStr}</td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Photos -->
+            <p style="margin:0 0 12px;font-size:13px;font-weight:700;color:${textDark};text-transform:uppercase;letter-spacing:0.5px;">
+              Suas fotos
+            </p>
+            <table cellpadding="0" cellspacing="0" width="100%">
+              ${photoCards}
+            </table>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:20px 32px;border-top:1px solid ${border};text-align:center;">
+            <p style="margin:0 0 6px;font-size:12px;color:${textLight};">
+              Dúvidas? Fale conosco pelo Instagram
+              <a href="https://instagram.com/smartmatch.foto" style="color:${green};text-decoration:none;">@smartmatch.foto</a>
+            </p>
+            <p style="margin:0;font-size:11px;color:#9CA3AF;">
+              © ${new Date().getFullYear()} Smart Match · Allianz Parque, São Paulo
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+async function sendOrderConfirmationEmail(order: any): Promise<void> {
+  const apiKey = Deno.env.get("RESEND_API_KEY");
+  if (!apiKey) {
+    console.log("sendOrderConfirmationEmail: RESEND_API_KEY não configurado, e-mail ignorado.");
+    return;
+  }
+  if (!order?.customerEmail) {
+    console.log("sendOrderConfirmationEmail: pedido sem e-mail de cliente, ignorado.");
+    return;
+  }
+  // Prevent duplicate emails
+  if (order.emailSentAt) {
+    console.log("sendOrderConfirmationEmail: e-mail já enviado para", order.id);
+    return;
+  }
+
+  try {
+    // Generate signed URLs (view + download) for each purchased photo
+    const photos: { tag: string; eventName: string; viewUrl: string; downloadUrl: string; fileName: string }[] = [];
+
+    for (const item of (order.items ?? [])) {
+      const photo: any = await kv.get(`${KV}photo:${item.photoId}`);
+      if (!photo?.storagePath) continue;
+
+      const [viewResult, dlResult] = await Promise.all([
+        sb().storage.from(BUCKET).createSignedUrl(photo.storagePath, 7 * 24 * 3600),
+        sb().storage.from(BUCKET).createSignedUrl(photo.storagePath, 7 * 24 * 3600, {
+          download: photo.fileName ?? `foto-${item.photoId}.jpg`,
+        }),
+      ]);
+
+      if (!viewResult.data?.signedUrl) continue;
+
+      photos.push({
+        tag: item.tag ?? "Foto",
+        eventName: item.eventName ?? "",
+        viewUrl: viewResult.data.signedUrl,
+        downloadUrl: dlResult.data?.signedUrl ?? viewResult.data.signedUrl,
+        fileName: photo.fileName ?? `foto-${item.photoId}.jpg`,
+      });
+    }
+
+    if (!photos.length) {
+      console.log("sendOrderConfirmationEmail: nenhuma foto com URL válida, e-mail não enviado.");
+      return;
+    }
+
+    const html = buildOrderEmailHtml(order, photos);
+
+    const emailRes = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        // Troque por um domínio verificado no Resend para produção:
+        // ex: "Smart Match <noreply@seudominio.com.br>"
+        from: "Smart Match <onboarding@resend.dev>",
+        to: [order.customerEmail],
+        subject: `📸 Suas fotos do Tour Palmeiras estão prontas! (#${(order.id ?? "").slice(-8).toUpperCase()})`,
+        html,
+      }),
+    });
+
+    if (!emailRes.ok) {
+      const errBody = await emailRes.text();
+      console.log("Resend API erro:", emailRes.status, errBody);
+      return;
+    }
+
+    // Mark as sent to avoid duplicates
+    await kv.set(`${KV}order:${order.id}`, {
+      ...order,
+      emailSentAt: new Date().toISOString(),
+    });
+    console.log("E-mail de confirmação enviado para:", order.customerEmail);
+  } catch (err) {
+    console.log("Erro ao enviar e-mail de confirmação:", err);
+    // Non-blocking: do not throw
+  }
+}
+
 // MP Webhook (payment status update)
 app.post("/make-server-68454e9b/payments/webhook", async (c) => {
   try {
@@ -1118,11 +1328,14 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
         const order: any = await kv.get(`${KV}order:${orderId}`);
         if (order) {
           const now = new Date().toISOString();
-          await kv.set(`${KV}order:${orderId}`, { ...order, status: "paid", updatedAt: now });
+          const updatedOrder = { ...order, status: "paid", updatedAt: now };
+          await kv.set(`${KV}order:${orderId}`, updatedOrder);
           // Update daily revenue on confirmation
           const dateKey = now.slice(0, 10);
           const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
           await kv.set(`${KV}daily:revenue:${dateKey}`, dayRevenue + (order.total ?? 0));
+          // Send confirmation email (non-blocking)
+          sendOrderConfirmationEmail(updatedOrder).catch(console.log);
         }
       }
     }
