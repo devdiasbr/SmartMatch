@@ -25,6 +25,7 @@ import { api, type PhotoRecord } from '../lib/api';
 import { FaceSearchPanel } from '../components/FaceSearchPanel';
 import { FaceGroupingPanel } from '../components/FaceGroupingPanel';
 import { ProtectedImage } from '../components/ProtectedImage';
+import { useTheme } from '../components/ThemeProvider';
 
 /* ─── Images ─── */
 const IMG_STADIUM = 'https://images.unsplash.com/photo-1587565276758-0076cff659b0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&w=1200';
@@ -115,7 +116,7 @@ function PhotoCard({ photo, eventId, eventName, onClick }: {
       whileHover={{ scale: 1.02 }}
       transition={{ duration: 0.2 }}
       className="relative group overflow-hidden cursor-pointer"
-      style={{ borderRadius: 14, border: inCart ? '1px solid rgba(134,239,172,0.35)' : '1px solid rgba(255,255,255,0.05)', aspectRatio: '3/2' }}
+      style={{ borderRadius: 14, border: inCart ? '1px solid rgba(134,239,172,0.35)' : '1px solid rgba(128,128,128,0.15)', aspectRatio: '3/2' }}
       onClick={onClick}
     >
       <ProtectedImage
@@ -240,6 +241,8 @@ function FaceGroupingTab({ photos, eventId, eventName }: { photos: Photo[]; even
 
 /* ─── Packages Tab ─── */
 function PackagesTab({ price }: { price: number }) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const pkgs = [
     { name: 'Digital', desc: '1 foto selecionada', price, color: '#7dd3fc', features: ['Alta resolução', 'Uso pessoal', 'Download imediato'], highlight: false },
     { name: 'Coleção', desc: 'Até 6 fotos', price: Math.round(price * 2.7), color: '#86efac', features: ['Alta resolução', 'Sem marca d\'água', 'Uso em redes sociais', 'Download imediato'], highlight: true },
@@ -249,19 +252,29 @@ function PackagesTab({ price }: { price: number }) {
     <div className="py-8">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {pkgs.map((pkg, i) => (
-          <motion.div key={pkg.name} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} className="relative p-6" style={{ borderRadius: 20, background: pkg.highlight ? 'rgba(134,239,172,0.04)' : 'rgba(255,255,255,0.02)', border: pkg.highlight ? '1px solid rgba(134,239,172,0.2)' : '1px solid rgba(255,255,255,0.07)' }}>
+          <motion.div key={pkg.name} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }} className="relative p-6"
+            style={{
+              borderRadius: 20,
+              background: pkg.highlight
+                ? (isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.04)')
+                : (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)'),
+              border: pkg.highlight
+                ? `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.2)'}`
+                : `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)'}`,
+            }}>
             {pkg.highlight && <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-xs" style={{ background: 'rgba(22,101,52,0.9)', border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 800 }}>MAIS POPULAR</div>}
             <div className="inline-block px-3 py-1 rounded-full text-xs mb-4" style={{ background: `${pkg.color}12`, border: `1px solid ${pkg.color}28`, color: pkg.color, fontWeight: 700 }}>{pkg.name}</div>
             <div className="mb-1"><span style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '2.5rem', fontWeight: 900, color: pkg.color, lineHeight: 1 }}>R$ {pkg.price}</span></div>
-            <p className="text-xs mb-6" style={{ color: 'rgba(255,255,255,0.35)' }}>{pkg.desc}</p>
-            <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} className="w-full py-3 rounded-xl text-sm mb-6" style={{ background: pkg.highlight ? 'rgba(22,101,52,0.9)' : `${pkg.color}12`, border: pkg.highlight ? '1px solid rgba(134,239,172,0.2)' : `1px solid ${pkg.color}25`, color: pkg.highlight ? '#fff' : pkg.color, fontWeight: 700 }}>
+            <p className="text-xs mb-6" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.4)' }}>{pkg.desc}</p>
+            <motion.button whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }} className="w-full py-3 rounded-xl text-sm mb-6"
+              style={{ background: pkg.highlight ? 'rgba(22,101,52,0.9)' : `${pkg.color}12`, border: pkg.highlight ? '1px solid rgba(134,239,172,0.2)' : `1px solid ${pkg.color}25`, color: pkg.highlight ? '#fff' : pkg.color, fontWeight: 700 }}>
               Escolher pacote
             </motion.button>
             <ul className="space-y-3">
-              {pkg.features.map((f) => (
+              {pkg.features.map(f => (
                 <li key={f} className="flex items-center gap-2.5 text-sm">
                   <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: pkg.color }} />
-                  <span style={{ color: 'rgba(255,255,255,0.55)' }}>{f}</span>
+                  <span style={{ color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.6)' }}>{f}</span>
                 </li>
               ))}
             </ul>
@@ -276,6 +289,23 @@ function PackagesTab({ price }: { price: number }) {
 export function EventDetail() {
   const { id } = useParams<{ id: string }>();
   const { addItem, isInCart, openDrawer } = useCart();
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+
+  /* theme-aware palette */
+  const bg          = isDark ? '#08080E'                  : '#F2F8F4';
+  const heroGrad    = isDark
+    ? 'linear-gradient(to top, #08080E 0%, rgba(8,8,14,0.5) 50%, rgba(8,8,14,0.3) 100%)'
+    : 'linear-gradient(to top, #F2F8F4 0%, rgba(242,248,244,0.5) 50%, rgba(242,248,244,0.1) 100%)';
+  const textPrimary = isDark ? '#ffffff'                  : '#0D2818';
+  const textMuted   = isDark ? 'rgba(255,255,255,0.55)'   : 'rgba(0,40,0,0.5)';
+  const textSubtle  = isDark ? 'rgba(255,255,255,0.35)'   : 'rgba(0,0,0,0.38)';
+  const divider     = isDark ? 'rgba(255,255,255,0.06)'   : 'rgba(0,107,43,0.1)';
+  const statAccent1 = isDark ? '#86efac'                  : '#006B2B';
+  const statAccent2 = isDark ? '#7dd3fc'                  : '#00843D';
+  const cardBg      = isDark ? 'rgba(255,255,255,0.03)'   : 'rgba(0,0,0,0.02)';
+  const cardBorder  = isDark ? 'rgba(255,255,255,0.06)'   : 'rgba(0,107,43,0.1)';
+  const emptyText   = isDark ? 'rgba(255,255,255,0.35)'   : 'rgba(0,0,0,0.38)';
 
   const [activeTab, setActiveTab] = useState<'fotos' | 'minhas' | 'agrupamento'>('fotos');
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -340,21 +370,21 @@ export function EventDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#08080E' }}>
-        <Loader2 className="w-10 h-10 animate-spin" style={{ color: '#86efac' }} />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: bg }}>
+        <Loader2 className="w-10 h-10 animate-spin" style={{ color: isDark ? '#86efac' : '#006B2B' }} />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen" style={{ background: '#08080E' }}>
+    <div className="min-h-screen" style={{ background: bg }}>
       {/* Event Hero */}
       <section className="relative h-72 md:h-96 overflow-hidden">
         <img src={event.hero} alt={event.title} className="w-full h-full object-cover" style={{ filter: 'brightness(0.4) saturate(0.8)' }} />
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, #08080E 0%, rgba(8,8,14,0.5) 50%, rgba(8,8,14,0.3) 100%)' }} />
+        <div className="absolute inset-0" style={{ background: heroGrad }} />
         <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 20% 80%, ${event.tagColor}08 0%, transparent 60%)` }} />
         <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-12 max-w-7xl mx-auto w-full">
-          <Link to="/eventos" className="absolute top-24 left-6 md:left-12 flex items-center gap-2 text-sm transition-opacity hover:opacity-70" style={{ color: 'rgba(255,255,255,0.55)' }}>
+          <Link to="/eventos" className="absolute top-24 left-6 md:left-12 flex items-center gap-2 text-sm transition-opacity hover:opacity-70" style={{ color: 'rgba(255,255,255,0.7)' }}>
             <ArrowLeft className="w-4 h-4" /> Eventos
           </Link>
           <span className="self-start px-3 py-1 rounded-full text-[11px] tracking-widest mb-3" style={{ background: `${event.tagColor}20`, border: `1px solid ${event.tagColor}40`, color: event.tagColor, fontWeight: 700 }}>
@@ -364,9 +394,9 @@ export function EventDetail() {
             {event.title}
           </h1>
           <div className="flex flex-wrap items-center gap-4 mt-4">
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>📅 {event.date}</span>
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>📍 {event.location}</span>
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.55)' }}>📸 {photos.length} fotos disponíveis</span>
+            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📅 {event.date}</span>
+            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📍 {event.location}</span>
+            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📸 {photos.length} fotos disponíveis</span>
           </div>
         </div>
       </section>
@@ -374,23 +404,24 @@ export function EventDetail() {
       {/* Content */}
       <section className="max-w-7xl mx-auto px-4 md:px-6 py-10">
         {/* Stats bar */}
-        <div className="flex flex-wrap gap-6 mb-8 pb-8" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex flex-wrap gap-6 mb-8 pb-8" style={{ borderBottom: `1px solid ${divider}` }}>
           {[
-            { value: photos.length, label: 'Fotos', color: '#86efac' },
-            { value: `R$ ${photos.length > 0 ? photos[0].price : event.price}`, label: 'por foto', color: '#7dd3fc' },
-            { value: '98.7%', label: 'precisão facial', color: '#86efac' },
+            { value: photos.length, label: 'Fotos', color: statAccent1 },
+            { value: `R$ ${photos.length > 0 ? photos[0].price : event.price}`, label: 'por foto', color: statAccent2 },
+            { value: '98.7%', label: 'precisão facial', color: statAccent1 },
           ].map(({ value, label, color }, i) => (
             <div key={i} className={i > 0 ? 'flex items-center gap-6' : ''}>
-              {i > 0 && <div className="w-px h-10 self-center" style={{ background: 'rgba(255,255,255,0.06)' }} />}
+              {i > 0 && <div className="w-px h-10 self-center" style={{ background: divider }} />}
               <div>
                 <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.6rem', fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
-                <div className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>{label}</div>
+                <div className="text-xs mt-0.5" style={{ color: textSubtle }}>{label}</div>
               </div>
             </div>
           ))}
           <div className="ml-auto flex items-center">
             {photos.length > 0 && (
-              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={handleAddAllPhotos} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm" style={{ background: 'rgba(22,101,52,0.85)', border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 700 }}>
+              <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={handleAddAllPhotos} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm"
+                style={{ background: 'rgba(22,101,52,0.85)', border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 700 }}>
                 <ShoppingCart className="w-4 h-4" /> Adicionar todas
               </motion.button>
             )}
@@ -405,7 +436,7 @@ export function EventDetail() {
           {activeTab === 'fotos' && (
             <motion.div key="fotos" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
               {photos.length === 0 ? (
-                <div className="text-center py-20" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                <div className="text-center py-20" style={{ color: emptyText }}>
                   <Camera className="w-12 h-12 mx-auto mb-4 opacity-40" />
                   <p>Nenhuma foto disponível ainda para este evento.</p>
                   <p className="text-sm mt-2 opacity-60">As fotos são processadas em até 48h após o evento.</p>

@@ -391,8 +391,8 @@ function HeroSection() {
           transition={{ duration: 0.6, delay: 0.7 }}
           className="mt-20 grid grid-cols-2 md:grid-cols-4 gap-0"
           style={{
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid rgba(255,255,255,0.06)',
+            background: 'rgba(255,255,255,0.04)',
+            border: '1px solid rgba(255,255,255,0.08)',
             borderRadius: 20,
             overflow: 'hidden',
           }}
@@ -402,7 +402,7 @@ function HeroSection() {
               key={label}
               className="flex flex-col items-center justify-center py-6 px-4"
               style={{
-                borderRight: i < 3 ? '1px solid rgba(255,255,255,0.05)' : 'none',
+                borderRight: i < 3 ? '1px solid rgba(255,255,255,0.06)' : 'none',
               }}
             >
               <span
@@ -418,7 +418,7 @@ function HeroSection() {
               </span>
               <span
                 className="text-xs mt-1.5 text-center"
-                style={{ color: 'rgba(255,255,255,0.35)', fontWeight: 500 }}
+                style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}
               >
                 {label}
               </span>
@@ -427,10 +427,10 @@ function HeroSection() {
         </motion.div>
       </motion.div>
 
-      {/* Bottom gradient */}
+      {/* Bottom gradient — funde hero com o conteúdo abaixo */}
       <div
-        className="absolute bottom-0 left-0 right-0 h-32 z-20"
-        style={{ background: 'linear-gradient(to top, var(--background), transparent)' }}
+        className="absolute bottom-0 left-0 right-0 h-40 z-20 pointer-events-none"
+        style={{ background: 'linear-gradient(to top, var(--background) 0%, transparent 100%)' }}
       />
     </section>
   );
