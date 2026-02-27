@@ -44,7 +44,9 @@ function transformEvent(e: EventRecord): TourSession {
 function SessionCard({ session, index }: { session: TourSession; index: number }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { branding } = useBranding();
   const hasPhotos = session.photos > 0;
+  const displayEventType = branding.tourLabel || session.eventType;
 
   const accentColor = hasPhotos
     ? isDark ? '#86efac' : '#006B2B'
@@ -97,7 +99,7 @@ function SessionCard({ session, index }: { session: TourSession; index: number }
                 className="text-xs tracking-widest"
                 style={{ color: subtitleColor, fontWeight: 600, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
               >
-                {session.eventType}
+                {displayEventType}
               </span>
               <h3
                 className="mt-1"
@@ -226,17 +228,17 @@ export function Events() {
               className="text-xs tracking-widest uppercase"
               style={{ color: 'rgba(255,255,255,0.55)', fontWeight: 600, fontFamily: "'Montserrat', sans-serif", letterSpacing: '0.15em' }}
             >
-              Allianz Parque · Tour Oficial Palmeiras
+              {branding.heroBadge}
             </span>
             <h1
               className="mt-4 text-white"
               style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 'clamp(2.2rem, 5.5vw, 4rem)', fontWeight: 900, lineHeight: 1.1, letterSpacing: '-0.025em' }}
             >
-              Reviva seus{' '}
-              <span style={{ color: isDark ? '#86efac' : '#4ade80' }}>Momentos no Allianz</span>
+              {branding.eventsHeroTitle}{' '}
+              <span style={{ color: isDark ? '#86efac' : '#4ade80' }}>{branding.eventsHeroTitleAccent}</span>
             </h1>
             <p className="mt-5 mx-auto max-w-md" style={{ color: 'rgba(255,255,255,0.42)', lineHeight: 1.75 }}>
-              Busca com reconhecimento facial. Encontre suas fotos pelo data e horário do tour.
+              {branding.eventsHeroSubtitle}
             </p>
           </motion.div>
 
@@ -285,7 +287,7 @@ export function Events() {
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 rounded-full" style={{ background: accentGreen }} />
                   <h2 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.1rem', fontWeight: 800, color: headingColor }}>
-                    Tours Disponíveis
+                    {branding.eventsListTitle || 'Tours Disponíveis'}
                   </h2>
                 </div>
                 <p className="text-sm" style={{ color: subtitleColor }}>

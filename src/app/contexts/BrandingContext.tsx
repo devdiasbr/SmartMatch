@@ -5,6 +5,9 @@ export interface BrandingConfig {
   appName: string;
   pageTitle: string;
   watermarkText: string;
+  watermarkProducer: string;
+  watermarkPhotoTag: string;
+  watermarkTour: string;
   logoUrl: string | null;
   faviconUrl: string | null;
   backgroundUrls: string[];
@@ -12,12 +15,37 @@ export interface BrandingConfig {
   hasFavicon: boolean;
   backgroundCount: number;
   updatedAt: string | null;
+  // Venue / tour identity
+  venueName: string;
+  venueLocation: string;
+  tourLabel: string;
+  homeExclusiveText: string;
+  // Home page content
+  heroLine1: string;
+  heroLine2: string;
+  heroLine3: string;
+  heroSubtitle: string;
+  heroCTA: string;
+  heroBadge: string;
+  // Home CTA banner
+  ctaTitle1: string;
+  ctaTitle2: string;
+  ctaSubtitle: string;
+  ctaButton: string;
+  // Events page content
+  eventsHeroTitle: string;
+  eventsHeroTitleAccent: string;
+  eventsHeroSubtitle: string;
+  eventsListTitle: string;
 }
 
 export const DEFAULT_BRANDING: BrandingConfig = {
   appName: 'Smart Match',
   pageTitle: 'Smart Match – Tour Palmeiras',
-  watermarkText: '© Smart Match',
+  watermarkText: 'SMART MATCH',
+  watermarkProducer: 'EDU SANTANA PRODUÇÕES',
+  watermarkPhotoTag: '◆ FOTO PROTEGIDA ◆',
+  watermarkTour: '© TOUR PALMEIRAS',
   logoUrl: null,
   faviconUrl: null,
   backgroundUrls: [],
@@ -25,6 +53,27 @@ export const DEFAULT_BRANDING: BrandingConfig = {
   hasFavicon: false,
   backgroundCount: 0,
   updatedAt: null,
+  // Venue
+  venueName: 'Allianz Parque',
+  venueLocation: 'São Paulo, SP',
+  tourLabel: 'Tour',
+  homeExclusiveText: 'Exclusivo Allianz Parque',
+  // Home
+  heroLine1: 'Você vibrou.',
+  heroLine2: 'Você torceu.',
+  heroLine3: 'Encontre-se.',
+  heroSubtitle: 'Nossa IA varre milhares de fotos do Tour do Allianz Parque e localiza você em segundos. Compre apenas o que importa — os seus momentos.',
+  heroCTA: 'Ver eventos',
+  heroBadge: 'Allianz Parque · Tour Oficial do Palmeiras',
+  ctaTitle1: 'Pronto para encontrar',
+  ctaTitle2: 'seus momentos?',
+  ctaSubtitle: 'Tire uma selfie e nossa IA encontra você em segundos entre milhares de fotos.',
+  ctaButton: 'Ver eventos',
+  // Events
+  eventsHeroTitle: 'Reviva seus',
+  eventsHeroTitleAccent: 'Momentos no Allianz',
+  eventsHeroSubtitle: 'Busca com reconhecimento facial. Encontre suas fotos pelo data e horário do tour.',
+  eventsListTitle: 'Tours Disponíveis',
 };
 
 interface BrandingContextValue {

@@ -289,7 +289,7 @@ function HeroSection() {
                 className="text-xs tracking-widest"
                 style={{ color: '#00FF7F', fontWeight: 700, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
               >
-                Allianz Parque · Tour Oficial do Palmeiras
+                {branding.heroBadge}
               </span>
             </motion.div>
 
@@ -308,11 +308,11 @@ function HeroSection() {
                   letterSpacing: '-0.02em',
                 }}
               >
-                <span className="text-white">Você vibrou.</span>
+                <span className="text-white">{branding.heroLine1}</span>
                 <br />
-                <span className="text-white">Você torceu.</span>
+                <span className="text-white">{branding.heroLine2}</span>
                 <br />
-                <span style={{ color: '#00FF7F' }}>Encontre-se.</span>
+                <span style={{ color: '#00FF7F' }}>{branding.heroLine3}</span>
               </h1>
             </motion.div>
 
@@ -324,7 +324,7 @@ function HeroSection() {
               className="mt-6 text-lg max-w-md"
               style={{ color: 'rgba(255,255,255,0.55)', lineHeight: 1.7 }}
             >
-              Nossa IA varre milhares de fotos do Tour do Allianz Parque e localiza você em segundos. Compre apenas o que importa — os seus momentos.
+              {branding.heroSubtitle}
             </motion.p>
 
             {/* CTAs */}
@@ -348,7 +348,7 @@ function HeroSection() {
                   }}
                 >
                   <Play className="w-4 h-4" />
-                  Ver eventos
+                  {branding.heroCTA}
                   <ChevronRight className="w-4 h-4" />
                 </motion.button>
               </Link>
@@ -646,6 +646,7 @@ function HowItWorks() {
 function CtaBanner() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
+  const { branding } = useBranding();
 
   return (
     <section className="px-6 pb-32">
@@ -702,7 +703,7 @@ function CtaBanner() {
                 className="text-xs tracking-widest"
                 style={{ color: isDark ? '#00FF7F' : '#006B2B', fontWeight: 700, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
               >
-                Exclusivo Allianz Parque
+                {branding.homeExclusiveText || 'Exclusivo Allianz Parque'}
               </span>
             </motion.div>
 
@@ -717,16 +718,16 @@ function CtaBanner() {
                 marginBottom: '1.5rem',
               }}
             >
-              Pronto para encontrar
+              {branding.ctaTitle1 || 'Pronto para encontrar'}
               <br />
-              <span style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>seus momentos?</span>
+              <span style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>{branding.ctaTitle2 || 'seus momentos?'}</span>
             </h2>
 
             <p
               className="text-lg mb-10"
               style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)', lineHeight: 1.7 }}
             >
-              Tire uma selfie e nossa IA encontra você em segundos entre milhares de fotos do Tour do Allianz Parque.
+              {branding.ctaSubtitle || `Tire uma selfie e nossa IA encontra você em segundos entre milhares de fotos do ${branding.venueName || 'Allianz Parque'}.`}
             </p>
 
             <Link to="/eventos">
@@ -744,7 +745,7 @@ function CtaBanner() {
                   boxShadow: `0 0 40px rgba(0,107,43,0.35), 0 4px 20px rgba(0,0,0,0.15)`,
                 }}
               >
-                Ver eventos
+                {branding.ctaButton || 'Ver eventos'}
                 <ChevronRight className="w-4 h-4" />
               </motion.button>
             </Link>

@@ -105,6 +105,7 @@ function PhotoCard({ photo, eventId, eventName, onClick }: {
   const { addItem, isInCart, openDrawer } = useCart();
   const [liked, setLiked] = useState(photo.liked);
   const inCart = isInCart(photo.id, eventId);
+  const { branding } = useBranding();
 
   const handleAdd = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -124,6 +125,10 @@ function PhotoCard({ photo, eventId, eventName, onClick }: {
         src={photo.src}
         alt={photo.tag}
         watermark={true}
+        watermarkText={branding.watermarkText}
+        watermarkProducer={branding.watermarkProducer}
+        watermarkPhotoTag={branding.watermarkPhotoTag}
+        watermarkTour={branding.watermarkTour}
         className="w-full h-full"
         style={{ filter: 'brightness(0.85)' }}
       />
@@ -165,6 +170,7 @@ function Lightbox({ photos, index, eventId, eventName, onClose, onNext, onPrev }
   const photo = photos[index];
   const { addItem, isInCart, openDrawer } = useCart();
   const inCart = isInCart(photo.id, eventId);
+  const { branding } = useBranding();
 
   const handleBuy = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -202,6 +208,10 @@ function Lightbox({ photos, index, eventId, eventName, onClose, onNext, onPrev }
           src={photo.src}
           alt={photo.tag}
           watermark={true}
+          watermarkText={branding.watermarkText}
+          watermarkProducer={branding.watermarkProducer}
+          watermarkPhotoTag={branding.watermarkPhotoTag}
+          watermarkTour={branding.watermarkTour}
           className="max-h-[80vh] max-w-[70vw] rounded-2xl"
           style={{ boxShadow: '0 0 60px rgba(0,0,0,0.8)' }}
         />

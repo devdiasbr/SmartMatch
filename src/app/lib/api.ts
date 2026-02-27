@@ -154,6 +154,9 @@ export interface BrandingConfig {
   appName: string;
   pageTitle: string;
   watermarkText: string;
+  watermarkProducer: string;
+  watermarkPhotoTag: string;
+  watermarkTour: string;
   logoUrl: string | null;
   faviconUrl: string | null;
   backgroundUrls: string[];
@@ -161,6 +164,28 @@ export interface BrandingConfig {
   hasFavicon: boolean;
   backgroundCount: number;
   updatedAt: string | null;
+  // Venue / tour identity
+  venueName: string;
+  venueLocation: string;
+  tourLabel: string;
+  homeExclusiveText: string;
+  // Home content
+  heroLine1: string;
+  heroLine2: string;
+  heroLine3: string;
+  heroSubtitle: string;
+  heroCTA: string;
+  heroBadge: string;
+  // Home CTA banner
+  ctaTitle1: string;
+  ctaTitle2: string;
+  ctaSubtitle: string;
+  ctaButton: string;
+  // Events content
+  eventsHeroTitle: string;
+  eventsHeroTitleAccent: string;
+  eventsHeroSubtitle: string;
+  eventsListTitle: string;
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
@@ -242,7 +267,7 @@ export const api = {
   }, token: string) =>
     aPost<{ order: OrderRecord }>('/orders/pos', data, token),
 
-  // ── Admin Stats ──────────────────────────────────────────────────────
+  // ── Admin Stats ────���─────────────────────────────────────────────────
 
   getAdminStats: (token: string) =>
     aGet<AdminStats>('/admin/stats', token),
@@ -251,7 +276,14 @@ export const api = {
   getAdminBranding: (token: string) =>
     aGet<BrandingConfig>('/admin/branding', token),
 
-  updateAdminBranding: (data: { appName?: string; pageTitle?: string; watermarkText?: string }, token: string) =>
+  updateAdminBranding: (data: Partial<Pick<BrandingConfig,
+    'appName' | 'pageTitle' |
+    'watermarkText' | 'watermarkProducer' | 'watermarkPhotoTag' | 'watermarkTour' |
+    'venueName' | 'venueLocation' | 'tourLabel' | 'homeExclusiveText' |
+    'heroLine1' | 'heroLine2' | 'heroLine3' | 'heroSubtitle' | 'heroCTA' | 'heroBadge' |
+    'ctaTitle1' | 'ctaTitle2' | 'ctaSubtitle' | 'ctaButton' |
+    'eventsHeroTitle' | 'eventsHeroTitleAccent' | 'eventsHeroSubtitle' | 'eventsListTitle'
+  >>, token: string) =>
     aPut<{ success: boolean }>('/admin/branding', data, token),
 
   uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background'; base64: string; mimeType: string }, token: string) =>

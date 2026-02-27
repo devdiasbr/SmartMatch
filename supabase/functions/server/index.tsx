@@ -139,7 +139,10 @@ async function brandingWithUrls() {
   return {
     appName: b.appName ?? "Smart Match",
     pageTitle: b.pageTitle ?? "Smart Match – Tour Palmeiras",
-    watermarkText: b.watermarkText ?? "© Smart Match",
+    watermarkText: b.watermarkText ?? "SMART MATCH",
+    watermarkProducer: b.watermarkProducer ?? "EDU SANTANA PRODUÇÕES",
+    watermarkPhotoTag: b.watermarkPhotoTag ?? "◆ FOTO PROTEGIDA ◆",
+    watermarkTour: b.watermarkTour ?? "© TOUR PALMEIRAS",
     logoUrl,
     faviconUrl,
     backgroundUrls,
@@ -147,6 +150,28 @@ async function brandingWithUrls() {
     hasFavicon: !!b.faviconPath,
     backgroundCount: (b.backgroundPaths ?? []).length,
     updatedAt: b.updatedAt ?? null,
+    // Venue / tour identity
+    venueName: b.venueName ?? "Allianz Parque",
+    venueLocation: b.venueLocation ?? "São Paulo, SP",
+    tourLabel: b.tourLabel ?? "Tour",
+    homeExclusiveText: b.homeExclusiveText ?? "Exclusivo Allianz Parque",
+    // ── Home page content ──
+    heroLine1: b.heroLine1 ?? "Você vibrou.",
+    heroLine2: b.heroLine2 ?? "Você torceu.",
+    heroLine3: b.heroLine3 ?? "Encontre-se.",
+    heroSubtitle: b.heroSubtitle ?? "Nossa IA varre milhares de fotos do Tour do Allianz Parque e localiza você em segundos. Compre apenas o que importa — os seus momentos.",
+    heroCTA: b.heroCTA ?? "Ver eventos",
+    heroBadge: b.heroBadge ?? "Allianz Parque · Tour Oficial do Palmeiras",
+    // ── Home CTA banner ──
+    ctaTitle1: b.ctaTitle1 ?? "Pronto para encontrar",
+    ctaTitle2: b.ctaTitle2 ?? "seus momentos?",
+    ctaSubtitle: b.ctaSubtitle ?? "Tire uma selfie e nossa IA encontra você em segundos entre milhares de fotos.",
+    ctaButton: b.ctaButton ?? "Ver eventos",
+    // ── Events page content ──
+    eventsHeroTitle: b.eventsHeroTitle ?? "Reviva seus",
+    eventsHeroTitleAccent: b.eventsHeroTitleAccent ?? "Momentos no Allianz",
+    eventsHeroSubtitle: b.eventsHeroSubtitle ?? "Busca com reconhecimento facial. Encontre suas fotos pelo data e horário do tour.",
+    eventsListTitle: b.eventsListTitle ?? "Tours Disponíveis",
   };
 }
 
@@ -159,9 +184,14 @@ app.get("/make-server-68454e9b/branding/public", async (c) => {
     return c.json({
       appName: "Smart Match",
       pageTitle: "Smart Match – Tour Palmeiras",
-      watermarkText: "© Smart Match",
+      watermarkText: "SMART MATCH",
+      watermarkProducer: "EDU SANTANA PRODUÇÕES",
+      watermarkPhotoTag: "◆ FOTO PROTEGIDA ◆",
+      watermarkTour: "© TOUR PALMEIRAS",
       logoUrl: null, faviconUrl: null, backgroundUrls: [],
       hasLogo: false, hasFavicon: false, backgroundCount: 0, updatedAt: null,
+      venueName: "Allianz Parque", venueLocation: "São Paulo, SP",
+      tourLabel: "Tour", homeExclusiveText: "Exclusivo Allianz Parque",
     });
   }
 });
@@ -185,6 +215,31 @@ app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
       appName: body.appName ?? existing.appName,
       pageTitle: body.pageTitle ?? existing.pageTitle,
       watermarkText: body.watermarkText ?? existing.watermarkText,
+      watermarkProducer: body.watermarkProducer ?? existing.watermarkProducer,
+      watermarkPhotoTag: body.watermarkPhotoTag ?? existing.watermarkPhotoTag,
+      watermarkTour: body.watermarkTour ?? existing.watermarkTour,
+      // Venue / tour identity
+      venueName: body.venueName !== undefined ? body.venueName : existing.venueName,
+      venueLocation: body.venueLocation !== undefined ? body.venueLocation : existing.venueLocation,
+      tourLabel: body.tourLabel !== undefined ? body.tourLabel : existing.tourLabel,
+      homeExclusiveText: body.homeExclusiveText !== undefined ? body.homeExclusiveText : existing.homeExclusiveText,
+      // Home content fields
+      heroLine1: body.heroLine1 !== undefined ? body.heroLine1 : existing.heroLine1,
+      heroLine2: body.heroLine2 !== undefined ? body.heroLine2 : existing.heroLine2,
+      heroLine3: body.heroLine3 !== undefined ? body.heroLine3 : existing.heroLine3,
+      heroSubtitle: body.heroSubtitle !== undefined ? body.heroSubtitle : existing.heroSubtitle,
+      heroCTA: body.heroCTA !== undefined ? body.heroCTA : existing.heroCTA,
+      heroBadge: body.heroBadge !== undefined ? body.heroBadge : existing.heroBadge,
+      // Home CTA banner
+      ctaTitle1: body.ctaTitle1 !== undefined ? body.ctaTitle1 : existing.ctaTitle1,
+      ctaTitle2: body.ctaTitle2 !== undefined ? body.ctaTitle2 : existing.ctaTitle2,
+      ctaSubtitle: body.ctaSubtitle !== undefined ? body.ctaSubtitle : existing.ctaSubtitle,
+      ctaButton: body.ctaButton !== undefined ? body.ctaButton : existing.ctaButton,
+      // Events page content fields
+      eventsHeroTitle: body.eventsHeroTitle !== undefined ? body.eventsHeroTitle : existing.eventsHeroTitle,
+      eventsHeroTitleAccent: body.eventsHeroTitleAccent !== undefined ? body.eventsHeroTitleAccent : existing.eventsHeroTitleAccent,
+      eventsHeroSubtitle: body.eventsHeroSubtitle !== undefined ? body.eventsHeroSubtitle : existing.eventsHeroSubtitle,
+      eventsListTitle: body.eventsListTitle !== undefined ? body.eventsListTitle : existing.eventsListTitle,
       updatedAt: new Date().toISOString(),
     };
     await kv.set(`${KV}branding`, updated);
