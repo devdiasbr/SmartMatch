@@ -18,12 +18,14 @@ import { projectId, publicAnonKey } from '/utils/supabase/info';
 const fmt = (n: number) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-// URL da página pública (escaneada pelo cliente no celular — sem header necessário)
+// URL da página pública (fallback — exibe foto + botão download)
 const getPublicPhotoUrl = (orderId: string, photoId: string) =>
   `${window.location.origin}/minha-foto/${orderId}/${photoId}`;
 
-// URL da API (usada pelo frontend com Authorization header — NÃO usar em QR codes)
-const getApiDownloadUrl = (orderId: string, photoId: string) =>
+// URL de download DIRETO — endpoint público do servidor que faz streaming com
+// Content-Disposition: attachment. Quando o celular escaneia o QR e abre esta URL,
+// o browser inicia o download automaticamente (sem precisar clicar em botão).
+const getDirectDownloadUrl = (orderId: string, photoId: string) =>
   `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b/orders/${orderId}/photos/${photoId}/download`;
 
 // Busca URL pública fresca para exibição/impressão (evita URLs assinadas expiradas)
@@ -316,8 +318,8 @@ body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
     const qrRightPct = qrRight;
 
     const photosHtml = freshItems.map((it: any, idx: number) => {
-      const publicUrl = getPublicPhotoUrl(lastOrder.id, String(it.photoId));
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(publicUrl)}&color=ffffff&bgcolor=006B2B`;
+      const directDlUrl = getDirectDownloadUrl(lastOrder.id, String(it.photoId));
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(directDlUrl)}&color=ffffff&bgcolor=006B2B`;
       const pageClass = it.orientation === 'portrait' ? 'page-portrait' : 'page-landscape';
 
       return `
@@ -489,7 +491,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                         key={i}
                         src={item.src}
                         footerSrc={footerSrc || undefined}
-                        downloadUrl={getPublicPhotoUrl(lastOrder.id, String(item.photoId))}
+                        downloadUrl={getDirectDownloadUrl(lastOrder.id, String(item.photoId))}
                         compact={(lastOrder.items?.length ?? 0) > 1}
                         qrRight={qrRight}
                       />

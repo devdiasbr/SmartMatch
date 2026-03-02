@@ -16,7 +16,6 @@ export function Root() {
 
   const isDark = theme === 'dark';
   const isAdminLogin = pathname === '/admin/login';
-  const isMinhaFoto  = pathname.startsWith('/minha-foto');
 
   return (
     <div
@@ -39,13 +38,13 @@ export function Root() {
           backgroundSize: '28px 28px',
         }}
       />
-      {!isAdminLogin && !isMinhaFoto && <Header />}
-      {!isAdminLogin && !isMinhaFoto && <CartDrawer />}
+      {!isAdminLogin && <Header />}
+      {!isAdminLogin && <CartDrawer />}
       <FaceQueueToast />
       <main className="relative z-10">
         <Outlet />
       </main>
-      {!isAdminLogin && !isMinhaFoto && <Footer />}
+      {!isAdminLogin && <Footer />}
     </div>
   );
 }

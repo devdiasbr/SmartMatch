@@ -13,7 +13,19 @@ import { Cart } from './pages/Cart';
 import { AdminLogin } from './pages/AdminLogin';
 import { MinhaFoto } from './pages/MinhaFoto';
 
+import { PitchDeck } from './pages/PitchDeck';
+
 export const router = createBrowserRouter([
+  // Rotas standalone (sem layout Root — sem Header/Footer)
+  {
+    path: '/pitch',
+    Component: PitchDeck,
+  },
+  {
+    path: '/minha-foto/:orderId/:photoId',
+    Component: MinhaFoto,
+  },
+  // App principal com layout
   {
     path: '/',
     Component: Root,
@@ -22,7 +34,6 @@ export const router = createBrowserRouter([
       { path: 'eventos', Component: Events },
       { path: 'eventos/:id', Component: EventDetail },
       { path: 'carrinho', Component: Cart },
-      { path: 'minha-foto/:orderId/:photoId', Component: MinhaFoto },
       { path: 'admin', Component: AdminDashboard },
       { path: 'admin/eventos', Component: AdminEvents },
       { path: 'admin/financeiro', Component: AdminFinanceiro },

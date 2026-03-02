@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router';
 import { Download, Loader2, AlertCircle, CheckCircle2, Camera } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -18,6 +18,7 @@ export function MinhaFoto() {
   const [downloading, setDownloading] = useState(false);
   const [downloaded,  setDownloaded]  = useState(false);
   const [dlError,     setDlError]     = useState('');
+  const hasAutoTriggered = useRef(false);
 
   useEffect(() => {
     if (!orderId || !photoId) {
@@ -39,6 +40,16 @@ export function MinhaFoto() {
       .catch(err => setError(err.message ?? 'Não foi possível carregar a foto.'))
       .finally(() => setLoading(false));
   }, [orderId, photoId]);
+
+  // Auto-trigger download quando a foto é carregada (ex: escaneou QR code)
+  useEffect(() => {
+    if (downloadUrl && !hasAutoTriggered.current && !loading && !error) {
+      hasAutoTriggered.current = true;
+      // Pequeno delay para garantir que a UI renderizou
+      const t = setTimeout(() => handleDownload(), 600);
+      return () => clearTimeout(t);
+    }
+  }, [downloadUrl, loading, error]);
 
   /**
    * Download confiável para todos os browsers (desktop e mobile, incluindo iOS Safari).
