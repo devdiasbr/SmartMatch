@@ -15,7 +15,7 @@
  *
  * Matching:
  *      Distância mínima por foto (min-pool sobre todos os descritores),
- *      rankeado por proximidade, dois passes (strict 0.45 → relaxed 0.55).
+ *      rankeado por proximidade, dois passes (strict 0.50 → relaxed 0.60).
  *
  * Cache de modelos:
  *      Os pesos (~6.3 MB) são persistidos na Cache Storage do navegador.
@@ -232,7 +232,7 @@ export interface MatchResult {
   minDistance: number; // menor distância encontrada para essa foto
 }
 
-// ── Distância euclidiana otimizada ────────────────────────────────────────────
+// ── Distância euclidiana otimizada ─���──────────────────────────────────────────
 // Inline sem uso de ** para evitar Math.pow overhead em loop interno.
 
 export function euclideanDistance(a: number[], b: number[]): number {
@@ -250,14 +250,14 @@ export function euclideanDistance(a: number[], b: number[]): number {
 // Estratégia:
 //   1. Para cada foto calcula a distância MÍNIMA sobre todos seus descritores
 //      (min-pool) — evita que uma face aleatória cause match espúrio.
-//   2. Passe 1 (strict, 0.45): alta precisão, poucos falsos positivos.
-//   3. Passe 2 (relaxed, 0.55): se nenhum match strict, amplia recall.
+//   2. Passe 1 (strict, 0.50): boa precisão, permite alguma variação.
+//   3. Passe 2 (relaxed, 0.60): se nenhum match strict, amplia recall.
 //   4. Retorna fotos ordenadas por distância crescente (melhor match primeiro).
 
 export function findMatches(
   query: number[] | Float32Array,
   candidates: PhotoFaces[],
-  threshold = 0.45,
+  threshold = 0.50,
 ): string[] {
   return findRankedMatches(query, candidates, threshold)
     .map((m) => m.photoId);
@@ -266,8 +266,8 @@ export function findMatches(
 export function findRankedMatches(
   query: number[] | Float32Array,
   candidates: PhotoFaces[],
-  strictThreshold = 0.45,
-  relaxedThreshold = 0.55,
+  strictThreshold = 0.50,
+  relaxedThreshold = 0.60,
 ): MatchResult[] {
   const q = Array.from(query);
 

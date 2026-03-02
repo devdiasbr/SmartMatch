@@ -43,7 +43,7 @@ interface FaceCluster {
   coverSrc: string;
 }
 
-/* ── tema helper ───────────────��─────────────────────────────────────────── */
+/* ── tema helper ───────────────��────────────────────────────────────────── */
 
 function useColors() {
   const { theme } = useTheme();
@@ -167,8 +167,8 @@ function deduplicateAcrossClusters(
 function clusterFaces(
   faces: { photoId: string; descriptors: number[][] }[],
   photoMap: Map<string, GroupPhoto>,
-  greedyThreshold = 0.55,
-  mergeThreshold  = 0.60,
+  greedyThreshold = 0.58,  // Ajustado de 0.55 para 0.58 (um pouco mais permissivo)
+  mergeThreshold  = 0.63,  // Ajustado de 0.60 para 0.63 (permite mais merge)
 ): FaceCluster[] {
   const clusters: FaceCluster[] = [];
   const rawDescs: number[][][] = [];

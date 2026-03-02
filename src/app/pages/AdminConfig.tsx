@@ -330,12 +330,16 @@ export function AdminConfig() {
     skippedPhotos: number; elapsedMs: number; errors: string[]; usedFallback?: boolean;
   } | null>(null);
   const [migrError, setMigrError] = useState('');
+  const [migrProgress, setMigrProgress] = useState({ current: 0, total: 0 });
 
   // ── KV Diagnose state ──
   type DiagStatus = 'idle' | 'running' | 'done' | 'error';
   const [diagStatus, setDiagStatus] = useState<DiagStatus>('idle');
   const [diagResult, setDiagResult] = useState<{
-    total: number; prefixCounts: Record<string, number>; sampleKeys: string[];
+    total: number;
+    prefixCounts: Record<string, number>;
+    sampleKeys: string[];
+    events?: Array<{ id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }>;
   } | null>(null);
   const [diagError, setDiagError] = useState('');
 
@@ -362,6 +366,17 @@ export function AdminConfig() {
   } | null>(null);
   const [syncError, setSyncError] = useState('');
   const [skipCompleteSync, setSkipCompleteSync] = useState(true);
+
+  // ── Complete Flow state ──
+  type FlowStatus = 'idle' | 'sync' | 'reindex' | 'migrate' | 'done' | 'error';
+  const [flowStatus, setFlowStatus] = useState<FlowStatus>('idle');
+  const [flowStep, setFlowStep] = useState(0); // 0=idle, 1=sync, 2=reindex, 3=migrate
+  const [flowError, setFlowError] = useState('');
+  const [flowResults, setFlowResults] = useState<{
+    sync?: { eventsCreated: number; photosImported: number };
+    reindex?: { processed: number; faces: number };
+    migrate?: { embeddings: number };
+  }>({});
 
   // ── branding state ──
   const [branding, setBranding] = useState<BrandingConfig | null>(null);
@@ -704,6 +719,8 @@ export function AdminConfig() {
     try {
       const data = await api.diagnoseKv(t);
       if (data.error) throw new Error(data.error);
+      console.log('[AdminConfig] Diagnóstico KV:', data);
+      console.log(`[AdminConfig] Eventos retornados: ${data.events?.length ?? 0}`);
       setDiagResult(data);
       setDiagStatus('done');
     } catch (err: any) {
@@ -718,6 +735,7 @@ export function AdminConfig() {
     setMigrStatus('running');
     setMigrResult(null);
     setMigrError('');
+    setMigrProgress({ current: 0, total: 0 });
     try {
       const { stats } = await api.migrateFacesToPgvector(t);
       setMigrResult(stats);
@@ -733,10 +751,11 @@ export function AdminConfig() {
     const t = await getToken(); if (!t) return;
     try {
       const { events } = await api.getEvents();
-      setAvailableEvents(events.filter(e => e.photoCount > 0).map(e => ({
+      // Mostra todos os eventos, mesmo sem fotos (para permitir reindexação)
+      setAvailableEvents(events.map(e => ({
         id: e.id,
         name: e.name,
-        photoCount: e.photoCount,
+        photoCount: e.photoCount || 0,
       })));
     } catch (err: any) {
       console.error('Erro ao carregar eventos:', err);
@@ -822,6 +841,207 @@ export function AdminConfig() {
     } catch (err: any) {
       setReindexError(err.message ?? 'Erro desconhecido');
       setReindexStatus('error');
+    }
+  };
+
+  // ── Reindex ALL events ──
+  const startReindexAll = async () => {
+    if (availableEvents.length === 0) {
+      setReindexError('Nenhum evento disponível');
+      return;
+    }
+    const t = await getToken(); if (!t) return;
+
+    setReindexStatus('loading');
+    setReindexResult(null);
+    setReindexError('');
+    setReindexProgress({ current: 0, total: 0 });
+
+    try {
+      let totalProcessed = 0;
+      let totalFailed = 0;
+      let totalFacesAll = 0;
+      let totalPhotosAll = 0;
+
+      // Import face detection dependencies
+      const faceService = await import('../lib/faceService');
+      await faceService.loadModels();
+
+      const BATCH_SIZE = 4;
+
+      for (const event of availableEvents) {
+        try {
+          // Get photos for this event
+          const { photos } = await api.startFaceReindex(event.id, t);
+          
+          if (photos.length === 0) continue;
+
+          totalPhotosAll += photos.length;
+          setReindexStatus('processing');
+
+          // Process photos in batches
+          for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+            const batch = photos.slice(i, Math.min(i + BATCH_SIZE, photos.length));
+            
+            await Promise.all(
+              batch.map(async (photo) => {
+                try {
+                  const img = await faceService.loadImage(photo.url);
+                  const resized = faceService.resizeImage(img, 960);
+                  
+                  const descriptors = await faceService.detectAllFaces(resized, { 
+                    inputSize: 416,
+                    scoreThreshold: 0.35
+                  });
+
+                  if (descriptors.length > 0) {
+                    await api.saveFaceDescriptors(event.id, photo.id, descriptors, t);
+                    totalFacesAll += descriptors.length;
+                  }
+                  
+                  totalProcessed++;
+                } catch (err: any) {
+                  console.error(`Erro ao processar foto ${photo.id}:`, err);
+                  totalFailed++;
+                }
+              })
+            );
+
+            setReindexProgress({ current: totalProcessed, total: totalPhotosAll });
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+        } catch (err: any) {
+          console.error(`Erro ao processar evento ${event.id}:`, err);
+        }
+      }
+
+      setReindexResult({ processed: totalProcessed, failed: totalFailed, faces: totalFacesAll });
+      setReindexStatus('done');
+      showToast('ok', `Reindexação total concluída: ${totalFacesAll} faces em ${availableEvents.length} eventos`);
+    } catch (err: any) {
+      setReindexError(err.message ?? 'Erro desconhecido');
+      setReindexStatus('error');
+    }
+  };
+
+  // ── COMPLETE FLOW: Sync → Reindex → Migrate ──
+  const runCompleteFlow = async () => {
+    const t = await getToken(); if (!t) return;
+    
+    setFlowStatus('sync');
+    setFlowStep(1);
+    setFlowError('');
+    setFlowResults({});
+    
+    try {
+      // STEP 1: Sync Storage → KV
+      setSyncStatus('running');
+      setSyncProgress('Varrendo pastas do Storage S3...');
+      const syncRes = await api.syncStorage(t, skipCompleteSync);
+      setSyncStatus('done');
+      setSyncResult(syncRes.stats);
+      
+      setFlowResults(prev => ({ 
+        ...prev, 
+        sync: { 
+          eventsCreated: syncRes.stats.eventsCreated, 
+          photosImported: syncRes.stats.photosImported 
+        } 
+      }));
+      
+      // Se não importou fotos, para aqui
+      if (syncRes.stats.photosImported === 0) {
+        setFlowStatus('done');
+        showToast('ok', 'Fluxo concluído: nenhuma foto nova para processar');
+        return;
+      }
+      
+      // Recarrega lista de eventos
+      await loadAvailableEvents(t);
+      
+      // STEP 2: Reindex ALL events
+      setFlowStatus('reindex');
+      setFlowStep(2);
+      setReindexStatus('loading');
+      
+      const faceService = await import('../lib/faceService');
+      await faceService.loadModels();
+      
+      const BATCH_SIZE = 4;
+      let totalProcessed = 0;
+      let totalFaces = 0;
+      
+      // Pega eventos atualizados
+      const eventsRes = await api.getEvents(t);
+      const events = eventsRes.events;
+      
+      setReindexStatus('processing');
+      
+      for (const event of events) {
+        try {
+          const { photos } = await api.startFaceReindex(event.id, t);
+          if (photos.length === 0) continue;
+          
+          for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+            const batch = photos.slice(i, Math.min(i + BATCH_SIZE, photos.length));
+            
+            await Promise.all(
+              batch.map(async (photo) => {
+                try {
+                  const img = await faceService.loadImage(photo.url);
+                  const resized = faceService.resizeImage(img, 960);
+                  
+                  const descriptors = await faceService.detectAllFaces(resized, { 
+                    inputSize: 416,
+                    scoreThreshold: 0.35
+                  });
+
+                  if (descriptors.length > 0) {
+                    await api.saveFaceDescriptors(event.id, photo.id, descriptors, t);
+                    totalFaces += descriptors.length;
+                  }
+                  
+                  totalProcessed++;
+                } catch (err: any) {
+                  console.error(`Erro ao processar foto ${photo.id}:`, err);
+                }
+              })
+            );
+            
+            setReindexProgress({ current: totalProcessed, total: totalProcessed });
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+        } catch (err: any) {
+          console.error(`Erro ao processar evento ${event.id}:`, err);
+        }
+      }
+      
+      setReindexStatus('done');
+      setReindexResult({ processed: totalProcessed, failed: 0, faces: totalFaces });
+      setFlowResults(prev => ({ ...prev, reindex: { processed: totalProcessed, faces: totalFaces } }));
+      
+      // Se não detectou faces, para aqui
+      if (totalFaces === 0) {
+        setFlowStatus('done');
+        showToast('ok', 'Fluxo concluído: nenhuma face detectada');
+        return;
+      }
+      
+      // STEP 3: Migrate to pgvector
+      setFlowStatus('migrate');
+      setFlowStep(3);
+      
+      const migrateRes = await api.migrateToPgvector(t);
+      setFlowResults(prev => ({ ...prev, migrate: { embeddings: migrateRes.embeddings } }));
+      
+      setFlowStatus('done');
+      showToast('ok', `Fluxo completo: ${totalFaces} faces indexadas no pgvector!`);
+      
+    } catch (err: any) {
+      console.error('Erro no fluxo completo:', err);
+      setFlowError(err.message ?? 'Erro desconhecido');
+      setFlowStatus('error');
+      showToast('err', `Erro no fluxo: ${err.message ?? 'desconhecido'}`);
     }
   };
 
@@ -1958,15 +2178,163 @@ export function AdminConfig() {
           {/* ════════════════════ TAB: SISTEMA ════════════════════ */}
           {activeTab === 'sistema' && (
             <motion.div key="sistema" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-              <div className="max-w-2xl space-y-5">
+              <div className="max-w-6xl space-y-6">
 
-                {/* ── Card: Sincronizar Storage → KV ── */}
+                {/* ══════════════ FLUXO COMPLETO ══════════════ */}
+                <div className="rounded-2xl overflow-hidden" style={{ 
+                  background: flowStatus !== 'idle' 
+                    ? (isDark ? 'rgba(16,185,129,0.05)' : 'rgba(5,150,105,0.04)') 
+                    : cardBg, 
+                  border: `1px solid ${flowStatus !== 'idle' 
+                    ? (isDark ? 'rgba(16,185,129,0.2)' : 'rgba(5,150,105,0.15)') 
+                    : cardBorder}` 
+                }}>
+                  <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: isDark ? 'rgba(16,185,129,0.12)' : 'rgba(5,150,105,0.08)', border: `1px solid ${isDark ? 'rgba(16,185,129,0.25)' : 'rgba(5,150,105,0.2)'}` }}>
+                        <Zap className="w-5 h-5" style={{ color: isDark ? '#10b981' : '#059669' }} />
+                      </div>
+                      <div className="flex-1">
+                        <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '1.05rem', color: text }}>
+                          🚀 Executar Fluxo Completo
+                        </h3>
+                        <p className="text-xs mt-0.5" style={{ color: muted }}>
+                          Sincroniza Storage → Detecta Faces → Indexa no pgvector automaticamente
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    {/* Steps indicator */}
+                    <div className="flex items-center gap-3">
+                      {[
+                        { num: 1, label: 'Sync', status: flowStep >= 1 },
+                        { num: 2, label: 'Faces', status: flowStep >= 2 },
+                        { num: 3, label: 'Index', status: flowStep >= 3 },
+                      ].map(({ num, label, status }) => (
+                        <div key={num} className="flex items-center gap-2 flex-1">
+                          <div className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-black transition-all"
+                            style={{
+                              background: status 
+                                ? (isDark ? 'rgba(16,185,129,0.15)' : 'rgba(5,150,105,0.12)') 
+                                : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
+                              border: `2px solid ${status 
+                                ? (isDark ? '#10b981' : '#059669') 
+                                : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)')}`,
+                              color: status ? (isDark ? '#10b981' : '#059669') : muted,
+                            }}>
+                            {num}
+                          </div>
+                          <span className="text-xs font-bold" style={{ color: status ? (isDark ? '#10b981' : '#059669') : muted }}>
+                            {label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Botão principal */}
+                    <motion.button
+                      whileHover={flowStatus === 'idle' ? { scale: 1.02 } : {}}
+                      whileTap={flowStatus === 'idle' ? { scale: 0.98 } : {}}
+                      onClick={runCompleteFlow}
+                      disabled={flowStatus !== 'idle' && flowStatus !== 'done' && flowStatus !== 'error'}
+                      className="w-full flex items-center justify-center gap-3 py-4 rounded-xl text-sm font-bold transition-all"
+                      style={{
+                        background: flowStatus === 'idle' || flowStatus === 'done' || flowStatus === 'error'
+                          ? 'linear-gradient(135deg,rgba(16,185,129,0.95),rgba(5,150,105,0.9))'
+                          : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                        border: `1px solid ${flowStatus === 'idle' || flowStatus === 'done' || flowStatus === 'error' 
+                          ? 'rgba(16,185,129,0.25)' 
+                          : cardBorder}`,
+                        color: flowStatus === 'idle' || flowStatus === 'done' || flowStatus === 'error' ? '#fff' : muted,
+                        cursor: flowStatus === 'idle' || flowStatus === 'done' || flowStatus === 'error' ? 'pointer' : 'not-allowed',
+                        fontFamily: "'Montserrat',sans-serif",
+                      }}
+                    >
+                      {flowStatus === 'idle' && <><Zap className="w-5 h-5" /> Executar fluxo completo agora</>}
+                      {flowStatus === 'sync' && <><Loader2 className="w-5 h-5 animate-spin" /> 1/3 Sincronizando Storage...</>}
+                      {flowStatus === 'reindex' && <><Loader2 className="w-5 h-5 animate-spin" /> 2/3 Detectando faces...</>}
+                      {flowStatus === 'migrate' && <><Loader2 className="w-5 h-5 animate-spin" /> 3/3 Indexando pgvector...</>}
+                      {flowStatus === 'done' && <><CheckCircle2 className="w-5 h-5" /> Executar novamente</>}
+                      {flowStatus === 'error' && <><AlertCircle className="w-5 h-5" /> Tentar novamente</>}
+                    </motion.button>
+
+                    {/* Resultados */}
+                    {flowStatus === 'done' && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 space-y-3"
+                        style={{ background: isDark ? 'rgba(16,185,129,0.07)' : 'rgba(5,150,105,0.05)', border: `1px solid ${isDark ? 'rgba(16,185,129,0.2)' : 'rgba(5,150,105,0.15)'}` }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#10b981' : '#059669' }} />
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#10b981' : '#059669', fontFamily: "'Montserrat',sans-serif" }}>
+                            Fluxo completo executado com sucesso! 🎉
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div className="rounded-lg p-2.5 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+                            <p className="text-lg font-black" style={{ color: isDark ? '#10b981' : '#059669' }}>
+                              {flowResults.sync?.photosImported || 0}
+                            </p>
+                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Fotos</p>
+                          </div>
+                          <div className="rounded-lg p-2.5 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+                            <p className="text-lg font-black" style={{ color: isDark ? '#10b981' : '#059669' }}>
+                              {flowResults.reindex?.faces || 0}
+                            </p>
+                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Faces</p>
+                          </div>
+                          <div className="rounded-lg p-2.5 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+                            <p className="text-lg font-black" style={{ color: isDark ? '#10b981' : '#059669' }}>
+                              {flowResults.migrate?.embeddings || 0}
+                            </p>
+                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Indexados</p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+
+                    {/* Erro */}
+                    {flowStatus === 'error' && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 flex items-start gap-3"
+                        style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.25)' : 'rgba(220,38,38,0.2)'}` }}
+                      >
+                        <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
+                        <div>
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Erro no fluxo</p>
+                          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: muted }}>{flowError}</p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ══════════════ 2 COLUNAS ══════════════ */}
+                <div className="grid lg:grid-cols-2 gap-5">
+                  
+                  {/* ────── COLUNA 1: Setup Inicial (ordem de execução) ────── */}
+                  <div className="space-y-5">
+                    <div className="rounded-xl p-3" style={{ background: isDark ? 'rgba(109,40,217,0.06)' : 'rgba(109,40,217,0.04)', border: `1px solid ${isDark ? 'rgba(109,40,217,0.15)' : 'rgba(109,40,217,0.1)'}` }}>
+                      <p className="text-xs font-black uppercase tracking-widest" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }}>
+                        📋 Setup Inicial (ordem de execução)
+                      </p>
+                    </div>
+
+                    {/* ── Card: Sincronizar Storage → KV ── */}
                 <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
                   <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
                     <div className="flex items-center gap-3 mb-1">
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                        style={{ background: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(109,40,217,0.07)', border: `1px solid ${isDark ? 'rgba(139,92,246,0.18)' : 'rgba(109,40,217,0.15)'}` }}>
-                        <Database className="w-4 h-4" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }} />
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black" style={{ background: isDark ? 'rgba(139,92,246,0.15)' : 'rgba(109,40,217,0.12)', color: isDark ? '#a78bfa' : '#7c3aed', border: `1px solid ${isDark ? 'rgba(139,92,246,0.3)' : 'rgba(109,40,217,0.25)'}` }}>1</span>
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style={{ background: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(109,40,217,0.07)', border: `1px solid ${isDark ? 'rgba(139,92,246,0.18)' : 'rgba(109,40,217,0.15)'}` }}>
+                          <Database className="w-4 h-4" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }} />
+                        </div>
                       </div>
                       <div>
                         <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
@@ -2185,6 +2553,44 @@ export function AdminConfig() {
                                 ))}
                               </div>
                             </div>
+
+                            {diagResult.events && diagResult.events.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="text-xs font-bold uppercase tracking-wider" style={{ color: muted }}>Eventos e fotos no KV</p>
+                                <div className="max-h-64 overflow-y-auto space-y-1">
+                                  {diagResult.events.map((evt) => (
+                                    <div key={evt.id} className="rounded-lg p-2.5 flex items-center justify-between gap-2"
+                                      style={{ 
+                                        background: evt.photoCount > 0 
+                                          ? (isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.04)') 
+                                          : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)'), 
+                                        border: `1px solid ${evt.photoCount > 0 
+                                          ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') 
+                                          : cardBorder}` 
+                                      }}>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold truncate" style={{ color: text }}>{evt.name}</p>
+                                        <code className="text-[10px] font-mono truncate block" style={{ color: muted }}>{evt.id}</code>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-bold px-2 py-0.5 rounded" 
+                                          style={{ 
+                                            background: evt.photoCount > 0 
+                                              ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') 
+                                              : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                                            color: evt.photoCount > 0 ? green : muted 
+                                          }}>
+                                          {evt.photoCount} fotos
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <p className="text-[10px] mt-2" style={{ color: muted }}>
+                                  💡 <strong>Chave de fotos:</strong> <code>ef:photos:event:&lt;eventId&gt;</code>
+                                </p>
+                              </div>
+                            )}
                           </>
                         )}
                       </motion.div>
@@ -2197,9 +2603,12 @@ export function AdminConfig() {
                   {/* header */}
                   <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
                     <div className="flex items-center gap-3 mb-1">
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                        style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.18)' : 'rgba(0,107,43,0.15)'}` }}>
-                        <Database className="w-4.5 h-4.5" style={{ color: green }} />
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black" style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}` }}>2</span>
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.18)' : 'rgba(0,107,43,0.15)'}` }}>
+                          <Database className="w-4.5 h-4.5" style={{ color: green }} />
+                        </div>
                       </div>
                       <div>
                         <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
@@ -2263,6 +2672,29 @@ export function AdminConfig() {
                         <><Database className="w-4 h-4" /> Iniciar migração pgvector</>
                       )}
                     </motion.button>
+
+                    {/* Progress bar indeterminada */}
+                    {migrStatus === 'running' && (
+                      <div className="space-y-2">
+                        <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                          <motion.div
+                            animate={{
+                              x: ['-100%', '200%'],
+                            }}
+                            transition={{
+                              duration: 1.5,
+                              repeat: Infinity,
+                              ease: 'linear',
+                            }}
+                            className="h-full w-1/3 rounded-full"
+                            style={{ background: 'linear-gradient(90deg,#16a34a,#86efac)' }}
+                          />
+                        </div>
+                        <p className="text-xs text-center" style={{ color: muted }}>
+                          Processando faces do KV para o banco vetorial...
+                        </p>
+                      </div>
+                    )}
 
                     {/* Resultado — sucesso */}
                     {migrStatus === 'done' && migrResult && (
@@ -2354,9 +2786,12 @@ export function AdminConfig() {
                   {/* header */}
                   <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
                     <div className="flex items-center gap-3 mb-1">
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                        style={{ background: isDark ? 'rgba(6,182,212,0.08)' : 'rgba(8,145,178,0.07)', border: `1px solid ${isDark ? 'rgba(6,182,212,0.18)' : 'rgba(8,145,178,0.15)'}` }}>
-                        <Scan className="w-4.5 h-4.5" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black" style={{ background: isDark ? 'rgba(6,182,212,0.15)' : 'rgba(8,145,178,0.12)', color: isDark ? '#06b6d4' : '#0891b2', border: `1px solid ${isDark ? 'rgba(6,182,212,0.3)' : 'rgba(8,145,178,0.25)'}` }}>3</span>
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                          style={{ background: isDark ? 'rgba(6,182,212,0.08)' : 'rgba(8,145,178,0.07)', border: `1px solid ${isDark ? 'rgba(6,182,212,0.18)' : 'rgba(8,145,178,0.15)'}` }}>
+                          <Scan className="w-4.5 h-4.5" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
+                        </div>
                       </div>
                       <div>
                         <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
@@ -2392,7 +2827,7 @@ export function AdminConfig() {
                         value={reindexEventId}
                         onChange={(e) => setReindexEventId(e.target.value)}
                         disabled={reindexStatus === 'processing'}
-                        className="w-full px-4 py-2.5 rounded-xl text-sm transition-all"
+                        className="w-full px-4 py-2.5 rounded-xl text-sm transition-all [&>option]:bg-[#08080E] [&>option]:text-white"
                         style={{
                           background: inputBg,
                           border: `1px solid ${inputBrd}`,
@@ -2402,6 +2837,9 @@ export function AdminConfig() {
                         }}
                       >
                         <option value="">-- Escolha um evento --</option>
+                        <option value="ALL" style={{ fontWeight: 'bold' }}>
+                          🔥 TODOS OS EVENTOS ({availableEvents.length} eventos)
+                        </option>
                         {availableEvents.map(evt => (
                           <option key={evt.id} value={evt.id}>
                             {evt.name} ({evt.photoCount} fotos)
@@ -2410,19 +2848,32 @@ export function AdminConfig() {
                       </select>
                     </div>
 
-                    {/* Botão */}
+                    {/* Botão único */}
                     <motion.button
                       whileHover={reindexStatus === 'idle' && reindexEventId ? { scale: 1.02 } : {}}
                       whileTap={reindexStatus === 'idle' && reindexEventId ? { scale: 0.98 } : {}}
-                      onClick={startReindex}
+                      onClick={() => {
+                        if (reindexEventId === 'ALL') startReindexAll();
+                        else startReindex();
+                      }}
                       disabled={!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing'}
                       className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl text-sm font-bold transition-all"
                       style={{
                         background: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing')
                           ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
+                          : reindexEventId === 'ALL'
+                          ? 'linear-gradient(135deg,rgba(251,191,36,0.95),rgba(245,158,11,0.9))'
                           : 'linear-gradient(135deg,rgba(8,145,178,0.95),rgba(6,182,212,0.9))',
-                        border: `1px solid ${(!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') ? cardBorder : 'rgba(6,182,212,0.25)'}`,
-                        color: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') ? muted : '#fff',
+                        border: `1px solid ${(!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') 
+                          ? cardBorder 
+                          : reindexEventId === 'ALL'
+                          ? 'rgba(251,191,36,0.25)'
+                          : 'rgba(6,182,212,0.25)'}`,
+                        color: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') 
+                          ? muted 
+                          : reindexEventId === 'ALL'
+                          ? '#0D2818'
+                          : '#fff',
                         cursor: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') ? 'not-allowed' : 'pointer',
                         fontFamily: "'Montserrat',sans-serif",
                       }}
@@ -2431,12 +2882,37 @@ export function AdminConfig() {
                         <><Loader2 className="w-4 h-4 animate-spin" /> Carregando fotos…</>
                       ) : reindexStatus === 'processing' ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Processando {reindexProgress.current}/{reindexProgress.total}…</>
+                      ) : reindexEventId === 'ALL' ? (
+                        <><Zap className="w-4 h-4" /> Reindexar TODOS os eventos</>
                       ) : (
                         <><Scan className="w-4 h-4" /> Iniciar reindexação</>
                       )}
                     </motion.button>
 
-                    {/* Progress bar */}
+                    {/* Progress bar indeterminada — loading */}
+                    {reindexStatus === 'loading' && (
+                      <div className="space-y-2">
+                        <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                          <motion.div
+                            animate={{
+                              x: ['-100%', '200%'],
+                            }}
+                            transition={{
+                              duration: 1.5,
+                              repeat: Infinity,
+                              ease: 'linear',
+                            }}
+                            className="h-full w-1/3 rounded-full"
+                            style={{ background: 'linear-gradient(90deg,#0891b2,#06b6d4)' }}
+                          />
+                        </div>
+                        <p className="text-xs text-center" style={{ color: muted }}>
+                          Carregando fotos do servidor...
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Progress bar determinada — processing */}
                     {reindexStatus === 'processing' && reindexProgress.total > 0 && (
                       <div className="space-y-2">
                         <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
@@ -2458,36 +2934,65 @@ export function AdminConfig() {
                       <motion.div
                         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                         className="rounded-xl p-4 space-y-3"
-                        style={{ background: isDark ? 'rgba(6,182,212,0.05)' : 'rgba(8,145,178,0.05)', border: `1px solid ${isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.15)'}` }}
+                        style={{ 
+                          background: reindexResult.processed === 0 
+                            ? (isDark ? 'rgba(251,191,36,0.05)' : 'rgba(180,130,0,0.05)') 
+                            : (isDark ? 'rgba(6,182,212,0.05)' : 'rgba(8,145,178,0.05)'), 
+                          border: `1px solid ${reindexResult.processed === 0 
+                            ? (isDark ? 'rgba(251,191,36,0.2)' : 'rgba(180,130,0,0.15)') 
+                            : (isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.15)')}` 
+                        }}
                       >
                         <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
-                          <p className="text-sm font-bold" style={{ color: isDark ? '#06b6d4' : '#0891b2', fontFamily: "'Montserrat',sans-serif" }}>
-                            Reindexação concluída!
+                          {reindexResult.processed === 0 ? (
+                            <AlertTriangle className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#b45309' }} />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
+                          )}
+                          <p className="text-sm font-bold" style={{ 
+                            color: reindexResult.processed === 0 
+                              ? (isDark ? '#fbbf24' : '#b45309') 
+                              : (isDark ? '#06b6d4' : '#0891b2'), 
+                            fontFamily: "'Montserrat',sans-serif" 
+                          }}>
+                            {reindexResult.processed === 0 ? 'Nenhuma foto encontrada!' : 'Reindexação concluída!'}
                           </p>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { label: 'Processadas', value: reindexResult.processed, accent: false },
-                            { label: 'Faces detectadas', value: reindexResult.faces, accent: true },
-                            { label: 'Falhas', value: reindexResult.failed, accent: reindexResult.failed > 0 },
-                          ].map(({ label, value, accent }) => (
-                            <div key={label} className="rounded-lg p-3 text-center"
-                              style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}>
-                              <p className="text-xl font-black" style={{ 
-                                color: accent && value > 0 ? (isDark ? '#fbbf24' : '#b45309') : text, 
-                                fontFamily: "'Montserrat',sans-serif" 
-                              }}>{value}</p>
-                              <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
+                        {reindexResult.processed === 0 ? (
+                          <div className="text-xs space-y-2 leading-relaxed" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                            <p><strong>⚠️ Os eventos selecionados não têm fotos no sistema.</strong></p>
+                            <p>Você precisa primeiro:</p>
+                            <ul className="list-disc list-inside space-y-1 ml-2">
+                              <li>Fazer upload de fotos via PDV</li>
+                              <li>Ou rodar a <strong>Sincronização Storage → KV</strong> abaixo (se já tiver fotos no S3)</li>
+                            </ul>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="grid grid-cols-3 gap-2">
+                              {[
+                                { label: 'Processadas', value: reindexResult.processed, accent: false },
+                                { label: 'Faces detectadas', value: reindexResult.faces, accent: true },
+                                { label: 'Falhas', value: reindexResult.failed, accent: reindexResult.failed > 0 },
+                              ].map(({ label, value, accent }) => (
+                                <div key={label} className="rounded-lg p-3 text-center"
+                                  style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}>
+                                  <p className="text-xl font-black" style={{ 
+                                    color: accent && value > 0 ? (isDark ? '#fbbf24' : '#b45309') : text, 
+                                    fontFamily: "'Montserrat',sans-serif" 
+                                  }}>{value}</p>
+                                  <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
+                                </div>
+                              ))}
                             </div>
-                          ))}
-                        </div>
 
-                        {reindexResult.faces > 0 && (
-                          <p className="text-xs" style={{ color: muted }}>
-                            ✅ Agora rode a <strong>Migração pgvector</strong> acima para indexar as faces detectadas no banco vetorial.
-                          </p>
+                            {reindexResult.faces > 0 && (
+                              <p className="text-xs" style={{ color: muted }}>
+                                ✅ Agora rode a <strong>Migração pgvector</strong> acima para indexar as faces detectadas no banco vetorial.
+                              </p>
+                            )}
+                          </>
                         )}
                       </motion.div>
                     )}
@@ -2508,7 +3013,25 @@ export function AdminConfig() {
                     )}
                   </div>
                 </div>
+                  </div>
+                  
+                  {/* ────── COLUNA 2: Ferramentas Avançadas ────── */}
+                  <div className="space-y-5">
+                    <div className="rounded-xl p-3" style={{ background: isDark ? 'rgba(251,191,36,0.06)' : 'rgba(180,130,0,0.04)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.15)' : 'rgba(180,130,0,0.1)'}` }}>
+                      <p className="text-xs font-black uppercase tracking-widest" style={{ color: isDark ? '#fbbf24' : '#b45309' }}>
+                        🔧 Ferramentas Avançadas
+                      </p>
+                    </div>
 
+                    {/* Placeholder para ferramentas avançadas */}
+                    <div className="rounded-xl p-6 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)', border: `1px dashed ${cardBorder}` }}>
+                      <p className="text-sm" style={{ color: muted }}>
+                        Ferramentas de diagnóstico serão movidas para cá
+                      </p>
+                    </div>
+                  </div>
+
+                </div>
               </div>
             </motion.div>
           )}

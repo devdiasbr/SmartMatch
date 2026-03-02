@@ -1110,9 +1110,61 @@ app.get("/make-server-68454e9b/admin/diagnose-kv", adminAuth, async (c) => {
     }
     const sampleKeys = (rows ?? []).slice(0, 30).map((r: any) => r.key as string);
 
-    return c.json({ total: total ?? 0, prefixCounts, sampleKeys });
+    // ─── NOVO: Diagnóstico detalhado de eventos e fotos ───
+    const eventIds: string[] = await getList(`${KV}events:index`);
+    console.log(`[diagnose-kv] Encontrados ${eventIds.length} eventos na lista ef:events:index`);
+    const events: Array<{ id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }> = [];
+    
+    for (const eventId of eventIds.slice(0, 20)) {
+      const event: any = await kv.get(`${KV}event:${eventId}`);
+      const photosKey = `${KV}photos:event:${eventId}`;
+      const photoIds = await getList(photosKey);
+      
+      console.log(`[diagnose-kv] Evento ${eventId}: ${photoIds.length} fotos na chave ${photosKey}`);
+      
+      events.push({
+        id: eventId,
+        name: event?.name ?? "N/A",
+        photoCount: photoIds.length,
+        photosKey,
+        hasList: photoIds.length > 0,
+      });
+    }
+
+    console.log(`[diagnose-kv] Retornando ${events.length} eventos, ${events.filter(e => e.photoCount > 0).length} com fotos`);
+
+    return c.json({ 
+      total: total ?? 0, 
+      prefixCounts, 
+      sampleKeys,
+      events: events.sort((a, b) => b.photoCount - a.photoCount),
+    });
   } catch (err) {
     console.log("Erro no diagnóstico KV:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+// ── List Photo Keys Diagnostic ────────────────────────────────────────────────
+// GET /admin/diagnose-photo-keys — admin auth
+// Lista TODAS as chaves que começam com ef:photos:event: para debugar
+app.get("/make-server-68454e9b/admin/diagnose-photo-keys", adminAuth, async (c) => {
+  try {
+    const { data: rows, error } = await sb()
+      .from("kv_store_68454e9b")
+      .select("key")
+      .ilike("key", "ef:photos:event:%")
+      .order("key")
+      .limit(100);
+    
+    if (error) throw new Error(`query error: ${error.message}`);
+
+    const photoKeys = (rows ?? []).map((r: any) => r.key as string);
+    console.log(`[diagnose-photo-keys] Encontradas ${photoKeys.length} chaves de fotos`);
+    
+    return c.json({ photoKeys, total: photoKeys.length });
+  } catch (err) {
+    console.log("Erro ao listar chaves de fotos:", err);
     return c.json({ error: `Erro: ${err}` }, 500);
   }
 });
@@ -1216,7 +1268,11 @@ app.get("/make-server-68454e9b/admin/events/:eventId/face-stats", adminAuth, asy
 app.post("/make-server-68454e9b/admin/events/:eventId/reindex-faces", adminAuth, async (c) => {
   try {
     const eventId = c.req.param("eventId");
-    const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
+    const photosKey = `${KV}photos:event:${eventId}`;
+    console.log(`[reindex-faces] Buscando fotos para evento ${eventId} na chave ${photosKey}`);
+    
+    const photoIds: string[] = await getList(photosKey);
+    console.log(`[reindex-faces] Encontradas ${photoIds.length} fotos na lista`);
     
     const photos: Array<{ id: string; url: string; fileName: string }> = [];
     for (const photoId of photoIds) {
@@ -1227,9 +1283,25 @@ app.post("/make-server-68454e9b/admin/events/:eventId/reindex-faces", adminAuth,
           url: photo.url,
           fileName: photo.fileName,
         });
+      } else if (photo) {
+        // Foto existe mas sem URL — gerar signed URL do storage
+        console.log(`[reindex-faces] Foto ${photoId} sem URL, gerando do storage: ${photo.storagePath}`);
+        if (photo.storagePath) {
+          const { data: signedData } = await sb().storage
+            .from("make-68454e9b-eventface")
+            .createSignedUrl(photo.storagePath, 3600);
+          if (signedData?.signedUrl) {
+            photos.push({
+              id: photo.id,
+              url: signedData.signedUrl,
+              fileName: photo.fileName,
+            });
+          }
+        }
       }
     }
 
+    console.log(`[reindex-faces] Retornando ${photos.length} fotos com URLs válidas`);
     return c.json({ eventId, photos, totalPhotos: photos.length });
   } catch (err) {
     console.log("Erro ao preparar reindexação:", err);
@@ -1251,9 +1323,12 @@ app.post("/make-server-68454e9b/faces/search", async (c) => {
       return c.json({ error: "eventId e embedding são obrigatórios" }, 400);
     }
 
+    console.log(`[faces/search] Buscando faces para evento ${eventId}, embedding length: ${embedding.length}, threshold: ${threshold ?? 0.55}`);
+
     const searchThreshold = typeof threshold === "number" ? threshold : 0.55;
     const matches = await faces.searchFaces(embedding, eventId, searchThreshold);
 
+    console.log(`[faces/search] ✓ Encontrados ${matches.length} matches para evento ${eventId}`);
     return c.json({ matches });
   } catch (err) {
     console.log("Erro na busca facial por pgvector:", err);

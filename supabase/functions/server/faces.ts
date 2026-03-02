@@ -76,6 +76,8 @@ export async function searchFaces(
   threshold = 0.55,
   maxResults = 50,
 ): Promise<SearchResult[]> {
+  console.log(`[pgvector searchFaces] evento=${eventId}, threshold=${threshold}, maxResults=${maxResults}`);
+  
   const { data, error } = await sb().rpc("search_faces_68454e9b", {
     query_embedding: toVec(queryEmbedding),
     target_event_id: eventId,
@@ -83,8 +85,13 @@ export async function searchFaces(
     max_results: maxResults,
   });
 
-  if (error) throw new Error(`pgvector searchFaces error: ${error.message}`);
+  if (error) {
+    console.log(`[pgvector searchFaces] ERRO: ${error.message}`);
+    throw new Error(`pgvector searchFaces error: ${error.message}`);
+  }
 
+  console.log(`[pgvector searchFaces] ✓ RPC retornou ${data?.length ?? 0} resultados`);
+  
   return (data ?? []).map((row: any) => ({
     photoId: row.photo_id,
     similarity: Number(row.similarity),

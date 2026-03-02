@@ -452,6 +452,7 @@ export const api = {
       total: number;
       prefixCounts: Record<string, number>;
       sampleKeys: string[];
+      events: Array<{ id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }>;
       error?: string;
     }>('/admin/diagnose-kv', token),
 

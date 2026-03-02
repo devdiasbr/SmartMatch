@@ -722,13 +722,24 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
                 <p style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, color: '#fff', fontSize: '1rem' }} className="mb-2">
                   Nenhuma foto encontrada
                 </p>
-                <p className="text-sm" style={{ color: MUTED, lineHeight: 1.7 }}>
-                  Pode ser que você não apareça nas fotos disponíveis, ou que as fotos ainda não tenham sido processadas pelo administrador.
+                <p className="text-sm mb-4" style={{ color: MUTED, lineHeight: 1.7 }}>
+                  Pode ser que você não apareça nas fotos disponíveis, ou que as fotos ainda não tenham sido processadas.
                 </p>
+                
+                {/* Aviso de reindexação */}
+                <div className="mb-4 p-3 rounded-xl text-left" style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)' }}>
+                  <p className="text-xs font-bold mb-1.5" style={{ color: '#06b6d4' }}>
+                    💡 Dica para administradores
+                  </p>
+                  <p className="text-xs leading-relaxed" style={{ color: 'rgba(6,182,212,0.9)' }}>
+                    Se você é admin, acesse <strong>Admin &gt; Sistema &gt; Reindexar Faces</strong> para processar as fotos deste evento.
+                  </p>
+                </div>
+
                 <motion.button
                   whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                   onClick={reset}
-                  className="mt-6 flex items-center gap-2 px-6 py-3 rounded-2xl text-sm mx-auto"
+                  className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm mx-auto"
                   style={{ background: 'rgba(255,255,255,0.05)', border: `1px solid ${BORD}`, color: '#fff', fontWeight: 700 }}
                 >
                   <RefreshCw className="w-4 h-4" /> Tentar novamente
