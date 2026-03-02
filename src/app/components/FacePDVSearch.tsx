@@ -197,6 +197,12 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
     if (fileRef.current) fileRef.current.value = '';
   };
 
+  /* Fecha o modal SEM limpar os matches — mantém o filtro ativo na grade */
+  const closeKeepingMatches = () => {
+    stopCamera();
+    onClose();
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -204,7 +210,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) { reset(); onClose(); } }}
+      onClick={(e) => { if (e.target === e.currentTarget) closeKeepingMatches(); }}
     >
       <motion.div
         initial={{ scale: 0.94, y: 16 }}
@@ -229,7 +235,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
               <p className="text-[10px]" style={{ color: MUTED }}>{eventName}</p>
             </div>
           </div>
-          <button onClick={() => { reset(); onClose(); }}
+          <button onClick={closeKeepingMatches}
             className="w-7 h-7 rounded-lg flex items-center justify-center"
             style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444' }}>
             <X className="w-4 h-4" />
@@ -366,7 +372,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
                   <RefreshCw className="w-3.5 h-3.5" /> Nova busca
                 </button>
                 {matchCount > 0 && (
-                  <button onClick={() => { reset(); onClose(); }}
+                  <button onClick={closeKeepingMatches}
                     className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold"
                     style={{ background: isDark ? 'rgba(22,101,52,0.85)' : 'linear-gradient(135deg,#006B2B,#00843D)', color: '#fff' }}>
                     <CheckCircle2 className="w-3.5 h-3.5" /> Ver fotos

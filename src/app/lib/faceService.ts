@@ -15,7 +15,7 @@
  *
  * Matching:
  *      Distância mínima por foto (min-pool sobre todos os descritores),
- *      rankeado por proximidade, dois passes (strict 0.50 → relaxed 0.60).
+ *      rankeado por proximidade, dois passes (strict 0.55 → relaxed 0.70).
  *
  * Cache de modelos:
  *      Os pesos (~6.3 MB) são persistidos na Cache Storage do navegador.
@@ -124,7 +124,7 @@ export async function detectSingleFace(
 
   // Tenta 3 tamanhos: 320 (rápido), 416 (balanceado), 512 (máxima qualidade)
   for (const inputSize of [320, 416, 512] as const) {
-    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.35 }); // Threshold padrão
+    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.25 });
     const result = await faceapi
       .detectSingleFace(input, opts)
       .withFaceLandmarks(true)   // true = usa faceLandmark68TinyNet (mais rápido)
@@ -146,8 +146,8 @@ export async function detectAllFaces(
 ): Promise<number[][]> {
   const faceapi = await import('face-api.js');
   const opts = new faceapi.TinyFaceDetectorOptions({ 
-    inputSize: options.inputSize ?? 416,   // 416 é ~30% mais rápido que 512, mantém boa qualidade
-    scoreThreshold: options.scoreThreshold ?? 0.35 
+    inputSize: options.inputSize ?? 416,
+    scoreThreshold: options.scoreThreshold ?? 0.25 
   });
   const results = await faceapi
     .detectAllFaces(input, opts)
@@ -232,7 +232,7 @@ export interface MatchResult {
   minDistance: number; // menor distância encontrada para essa foto
 }
 
-// ── Distância euclidiana otimizada ─���──────────────────────────────────────────
+// ── Distância euclidiana otimizada ───────────────────────────────────────────
 // Inline sem uso de ** para evitar Math.pow overhead em loop interno.
 
 export function euclideanDistance(a: number[], b: number[]): number {
@@ -257,7 +257,7 @@ export function euclideanDistance(a: number[], b: number[]): number {
 export function findMatches(
   query: number[] | Float32Array,
   candidates: PhotoFaces[],
-  threshold = 0.50,
+  threshold = 0.55,
 ): string[] {
   return findRankedMatches(query, candidates, threshold)
     .map((m) => m.photoId);
@@ -266,8 +266,8 @@ export function findMatches(
 export function findRankedMatches(
   query: number[] | Float32Array,
   candidates: PhotoFaces[],
-  strictThreshold = 0.50,
-  relaxedThreshold = 0.60,
+  strictThreshold = 0.55,
+  relaxedThreshold = 0.70,
 ): MatchResult[] {
   const q = Array.from(query);
 

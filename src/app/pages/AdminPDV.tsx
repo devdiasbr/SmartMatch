@@ -214,6 +214,10 @@ export function AdminPDV() {
   /* ── Checkout ── */
   const handleCheckout = async () => {
     if (!cart.length) return;
+    if (!footerSrc) {
+      setError('Configure um rodapé antes de finalizar a venda.');
+      return;
+    }
     setProcessing(true); setError('');
     try {
       const token = await getToken();
@@ -1086,7 +1090,8 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                     <motion.button
                       whileHover={{ scale:1.02 }} whileTap={{ scale:0.97 }}
                       onClick={handleCheckout}
-                      disabled={cart.length === 0 || processing}
+                      disabled={cart.length === 0 || processing || !footerSrc}
+                      title={!footerSrc ? 'Configure um rodapé antes de finalizar' : undefined}
                       className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold"
                       style={{
                         background: cart.length === 0 ? inputBg : btnPri,
@@ -1097,7 +1102,9 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                     >
                       {processing
                         ? <><Loader2 className="w-4 h-4 animate-spin" /> Processando…</>
-                        : <><Store className="w-4 h-4" /> Finalizar Venda</>
+                        : !footerSrc
+                          ? <><ImageIcon className="w-4 h-4" /> Configure o rodapé</>
+                          : <><Store className="w-4 h-4" /> Finalizar Venda</>
                       }
                     </motion.button>
                   </div>
