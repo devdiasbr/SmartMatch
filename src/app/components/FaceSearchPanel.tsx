@@ -96,6 +96,7 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
 
   const [stage,        setStage]        = useState<Stage>('idle');
   const [loadStep,     setLoadStep]     = useState('');
+  const [processStep,  setProcessStep]  = useState(''); // Novo: feedback durante processamento
   const [error,        setError]        = useState('');
   const [isCamBlocked, setIsCamBlocked] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
@@ -136,7 +137,9 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
 
   const processCanvas = async (snap: HTMLCanvasElement) => {
     setStage('processing');
+    setProcessStep('Detectando rosto…');
     try {
+      // ── Passo 1: detecta rosto na selfie (local, face-api.js) ─────────────
       const det = await faceService.detectSingleFace(snap);
       if (!det) {
         setError('Nenhum rosto reconhecido. Tente em boa iluminação e olhando diretamente para a câmera.');
@@ -145,22 +148,28 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
       }
       const queryDescriptor = Array.from(det.descriptor);
 
-      const { faces } = await api.getEventFaces(eventId);
+      // ── Passo 2: busca no pgvector via servidor (ANN O(log n)) ────────────
+      // Envia apenas 1 vetor 128-dim — sem baixar todos os descritores do evento.
+      setProcessStep('Buscando suas fotos…');
+      let matched: string[] = [];
+      let conf = 0;
 
-      if (faces.length === 0) {
-        setMatchedIds([]);
-        setConfidence(0);
-        setStage('results');
-        return;
+      try {
+        const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor);
+        matched = matches.map((m) => m.photoId);
+        // Confiança baseada na melhor similaridade coseno (0..1 → 0..100%)
+        const best = matches.length > 0 ? matches[0].similarity : 0;
+        conf = Math.max(0, Math.min(100, Math.round(best * 100)));
+      } catch (_pgErr) {
+        // ── Fallback: busca local caso o servidor falhe ───────────────────
+        console.warn('[FaceSearch] pgvector falhou, usando fallback local:', _pgErr);
+        setProcessStep('Comparando rostos (modo offline)…');
+        const { faces: allFaces } = await api.getEventFaces(eventId);
+        const ranked = faceService.findRankedMatches(queryDescriptor, allFaces);
+        matched = ranked.map((m) => m.photoId);
+        const bestDist = ranked.length > 0 ? ranked[0].minDistance : 1;
+        conf = Math.max(0, Math.min(100, Math.round((1 - bestDist / 0.8) * 100)));
       }
-
-      // Matching rankeado: min-pool por foto + dois passes (strict → relaxed)
-      const ranked = faceService.findRankedMatches(queryDescriptor, faces);
-      const matched = ranked.map((m) => m.photoId);
-
-      // Confiança baseada na melhor distância encontrada
-      const best = ranked.length > 0 ? ranked[0].minDistance : 1;
-      const conf = Math.max(0, Math.min(100, Math.round((1 - best / 0.8) * 100)));
 
       setMatchedIds(matched);
       setConfidence(conf);
@@ -382,7 +391,7 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
             </div>
 
             <p className="mt-5 text-xs flex items-center justify-center gap-1.5" style={{ color: 'rgba(255,255,255,0.2)' }}>
-              <Lock className="w-3 h-3" /> Sua imagem não é armazenada — processamento 100% local
+              <Lock className="w-3 h-3" /> Sua imagem não é armazenada — apenas o vetor biométrico é enviado
             </p>
           </motion.div>
         )}
@@ -590,10 +599,12 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
             {/* ── texto abaixo ── */}
             <div className="text-center">
               <p style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1.1rem', fontWeight: 900, color: '#fff' }} className="mb-1">
-                Buscando suas fotos…
+                {processStep || 'Buscando suas fotos…'}
               </p>
               <p className="text-xs" style={{ color: MUTED }}>
-                Comparando seu rosto com {photos.length} fotos do evento
+                {processStep.includes('offline') 
+                  ? 'Processamento local em andamento'
+                  : `Comparando seu rosto com ${photos.length} fotos do evento`}
               </p>
             </div>
           </motion.div>

@@ -3,6 +3,7 @@ import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as kv from "./kv_store.tsx";
+import * as faces from "./faces.ts";
 
 const BUCKET = "make-68454e9b-eventface";
 const KV = "ef:";
@@ -580,6 +581,12 @@ app.delete("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
     await kv.del(`${KV}faces:event:${id}`); // aggregated face index
     await kv.del(`${KV}event:${id}`);
     await removeFromList(`${KV}events:index`, id);
+
+    // Remove face embeddings from pgvector
+    faces.deleteFacesByEvent(id).catch((e) =>
+      console.log(`pgvector deleteFacesByEvent error (non-blocking): ${e}`)
+    );
+
     return c.json({ success: true });
   } catch (err) {
     console.log("Erro ao deletar evento:", err);
@@ -605,7 +612,7 @@ app.get("/make-server-68454e9b/events/:id/photos", async (c) => {
 
     // Pagination: ?page=1&limit=20 (defaults: page 1, limit 20)
     const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") ?? "20", 10)));
+    const limit = Math.min(500, Math.max(1, parseInt(c.req.query("limit") ?? "20", 10))); // Aumentado de 100 para 500 para admin
     const total = photoIds.length;
     const totalPages = Math.ceil(total / limit);
     const start = (page - 1) * limit;
@@ -648,10 +655,12 @@ app.get("/make-server-68454e9b/events/:id/photos", async (c) => {
 app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
   try {
     const eventId = c.req.param("id");
+    console.log(`[Base64] Recebendo upload para evento ${eventId}`);
     let event: any = await kv.get(`${KV}event:${eventId}`);
 
     // Auto-create event if it doesn't exist (for direct slug uploads)
     if (!event) {
+      console.log(`[Base64] Evento ${eventId} não encontrado, tentando auto-criar`);
       // Try to interpret eventId as slug DDMMYYYYHHMM
       if (/^\d{12}$/.test(eventId)) {
         const now = new Date().toISOString();
@@ -685,30 +694,40 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
         };
         await kv.set(`${KV}event:${eventId}`, event);
         await appendToList(`${KV}events:index`, eventId);
+        console.log(`[Base64] Evento ${eventId} auto-criado`);
       } else {
+        console.log(`[Base64] Evento ${eventId} inválido (não é slug DDMMYYYYHHMM)`);
         return c.json({ error: "Evento não encontrado" }, 404);
       }
     }
 
     const body = await c.req.json();
     const { base64, fileName, mimeType = "image/jpeg", tag = "Geral" } = body;
-    if (!base64) return c.json({ error: "Imagem base64 obrigatória" }, 400);
+    console.log(`[Base64] Recebendo arquivo ${fileName}, mime=${mimeType}, base64.length=${base64?.length ?? 0}`);
+    if (!base64) {
+      console.log(`[Base64] Erro: base64 não fornecido`);
+      return c.json({ error: "Imagem base64 obrigatória" }, 400);
+    }
 
     const photoId = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const ext = mimeType === "image/png" ? "png" : "jpg";
     const storagePath = `events/${eventId}/${photoId}.${ext}`;
 
     // Decode base64 → Uint8Array
+    console.log(`[Base64] Decodificando base64...`);
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    console.log(`[Base64] Decodificado ${bytes.length} bytes`);
 
     // Upload to Supabase Storage
+    console.log(`[Base64] Enviando para storage: ${storagePath}`);
     const { error: uploadError } = await sb().storage
       .from(BUCKET)
       .upload(storagePath, bytes, { contentType: mimeType, upsert: false });
 
     if (uploadError) {
+      console.log(`[Base64] Erro no upload do storage: ${uploadError.message}`);
       return c.json({ error: `Erro no upload para storage: ${uploadError.message}` }, 500);
     }
 
@@ -728,6 +747,7 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
       createdAt: now,
     };
 
+    console.log(`[Base64] Salvando foto ${photoId} no KV`);
     await kv.set(`${KV}photo:${photoId}`, photo);
     await appendToList(`${KV}photos:event:${eventId}`, photoId);
 
@@ -741,10 +761,97 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
     });
 
     const photoWithUrl = await withSignedUrl(photo);
+    console.log(`[Base64] ✓ Upload completo: ${photoId}`);
     return c.json({ photo: photoWithUrl }, 201);
   } catch (err) {
     console.log("Erro ao fazer upload de foto:", err);
     return c.json({ error: `Erro ao fazer upload: ${err}` }, 500);
+  }
+});
+
+// ── Upload foto via multipart/form-data (streaming binário — sem base64) ───────
+// POST /events/:id/photos/stream
+// Cliente envia FormData{ file: Blob, tag: string }.
+// Elimina 37% de inflate do base64 e o loop atob() char-a-char no servidor.
+// O File é passado diretamente ao SDK do Supabase Storage (zero-copy).
+app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) => {
+  try {
+    const eventId = c.req.param("id");
+    console.log(`[Stream] Recebendo upload para evento ${eventId}`);
+    let event: any = await kv.get(`${KV}event:${eventId}`);
+
+    if (!event) {
+      console.log(`[Stream] Evento ${eventId} não encontrado, tentando auto-criar`);
+      if (/^\d{12}$/.test(eventId)) {
+        const now = new Date().toISOString();
+        const day = eventId.slice(0, 2), month = eventId.slice(2, 4);
+        const year = eventId.slice(4, 8), hours = eventId.slice(8, 10), mins = eventId.slice(10, 12);
+        const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
+        const d = new Date(dateISO);
+        const autoBranding: any = (await kv.get(`${KV}branding`)) ?? {};
+        const autoSessionType = Array.isArray(autoBranding.eventSessionTypes) && autoBranding.eventSessionTypes.length > 0
+          ? autoBranding.eventSessionTypes[0] : "Tour";
+        const autoVenue = `${autoBranding.venueName ?? "Allianz Parque"}, ${autoBranding.venueLocation ?? "São Paulo, SP"}`;
+        event = {
+          id: eventId, name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
+          slug: eventId, date: dateISO, endTime: "", location: autoVenue, sessionType: autoSessionType,
+          status: "disponivel", photoCount: 0, faceCount: 0, price: 30,
+          dayOfWeek: dayOfWeekPT(d), createdAt: now, updatedAt: now,
+        };
+        await kv.set(`${KV}event:${eventId}`, event);
+        await appendToList(`${KV}events:index`, eventId);
+        console.log(`[Stream] Evento ${eventId} auto-criado`);
+      } else {
+        console.log(`[Stream] Evento ${eventId} inválido (não é slug DDMMYYYYHHMM)`);
+        return c.json({ error: "Evento não encontrado" }, 404);
+      }
+    }
+
+    // parseBody lê multipart — campo "file" é um Web API File (Blob + nome + tipo)
+    console.log(`[Stream] Parsing multipart body...`);
+    const body = await c.req.parseBody();
+    const file = body["file"] as File | null;
+    const tag = (body["tag"] as string) || "Geral";
+    console.log(`[Stream] File received: ${file ? `${file.name} (${file.size} bytes, ${file.type})` : 'NULL'}`);
+    if (!file || file.size === 0) {
+      console.log(`[Stream] Campo 'file' obrigatório ou vazio`);
+      return c.json({ error: "Campo 'file' obrigatório" }, 400);
+    }
+
+    const mimeType = file.type || "image/jpeg";
+    const photoId = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const storagePath = `events/${eventId}/${photoId}.jpg`;
+
+    console.log(`[Stream] Enviando para storage: ${storagePath}`);
+    // Zero-copy: File passado diretamente ao SDK — sem ArrayBuffer intermediário
+    const { error: uploadError } = await sb().storage
+      .from(BUCKET)
+      .upload(storagePath, file, { contentType: mimeType, upsert: false });
+
+    if (uploadError) {
+      console.log(`[Stream] Erro no upload do storage: ${uploadError.message}`);
+      return c.json({ error: `Erro storage (stream): ${uploadError.message}` }, 500);
+    }
+
+    const now = new Date().toISOString();
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    const currentPrice: number = cfg.photoPrice ?? event.price ?? 30;
+    const fileName = (file.name || `${photoId}.jpg`).replace(/\.[^.]+$/, ".jpg");
+
+    console.log(`[Stream] Salvando foto ${photoId} no KV`);
+    const photo = { id: photoId, eventId, fileName, storagePath, tag, price: currentPrice, createdAt: now };
+    await kv.set(`${KV}photo:${photoId}`, photo);
+    await appendToList(`${KV}photos:event:${eventId}`, photoId);
+    await kv.set(`${KV}event:${eventId}`, {
+      ...event, photoCount: (event.photoCount ?? 0) + 1, price: currentPrice, updatedAt: now,
+    });
+
+    const photoWithUrl = await withSignedUrl(photo);
+    console.log(`[Stream] ✓ Upload completo: ${photoId}`);
+    return c.json({ photo: photoWithUrl }, 201);
+  } catch (err) {
+    console.log("Erro no upload stream:", err);
+    return c.json({ error: `Erro no upload stream: ${err}` }, 500);
   }
 });
 
@@ -765,6 +872,11 @@ app.delete(
 
       await kv.del(`${KV}photo:${photoId}`);
       await removeFromList(`${KV}photos:event:${eventId}`, photoId);
+
+      // Remove face embeddings from pgvector
+      faces.deleteFacesByPhoto(photoId).catch((e) =>
+        console.log(`pgvector deleteFacesByPhoto error (non-blocking): ${e}`)
+      );
 
       // Remove from aggregated face index
       const facesKey = `${KV}faces:event:${eventId}`;
@@ -826,6 +938,13 @@ app.post(
       faceIndex[photoId] = descriptors;
       await kv.set(facesKey, faceIndex);
 
+      // ── Indexa no pgvector (busca ANN em O(log n), escala para milhões) ───
+      if (descriptors.length > 0) {
+        faces.indexFaces(photoId, eventId, descriptors).catch((e) =>
+          console.log(`pgvector indexFaces error (non-blocking): ${e}`)
+        );
+      }
+
       // Atualiza contador de faces no evento
       if (descriptors.length > 0) {
         const event: any = await kv.get(`${KV}event:${eventId}`);
@@ -881,6 +1000,264 @@ app.get("/make-server-68454e9b/events/:id/faces", async (c) => {
   } catch (err) {
     console.log("Erro ao buscar descritores faciais:", err);
     return c.json({ error: `Erro ao buscar faces: ${err}` }, 500);
+  }
+});
+
+// ── Face Migration (KV → pgvector) ───────────────────────────────────────────
+
+// POST /admin/migrate-faces-pgvector — admin auth
+// Varre TODOS os registros ef:photo:* no KV via getByPrefix, independente do
+// índice ef:events:index. Idempotente — pode ser rodado várias vezes.
+app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async (c) => {
+  const startedAt = Date.now();
+  const errors: string[] = [];
+  let totalPhotos = 0;
+  let totalFaces = 0;
+  let skippedPhotos = 0;
+  const eventsSeen = new Set<string>();
+  const photosWithFaces: any[] = [];
+
+  try {
+    // ── Estratégia 1: getByPrefix — varre todos os registros de foto diretamente ──
+    // Não depende do ef:events:index, que pode estar desatualizado.
+    const allPhotoRecords: any[] = await kv.getByPrefix(`${KV}photo:`);
+    console.log(`[migrate-faces] getByPrefix encontrou ${allPhotoRecords.length} registros ef:photo:*`);
+
+    const fromPrefix = allPhotoRecords.filter(
+      (p: any) => p && p.id && p.eventId && Array.isArray(p.faceDescriptors) && p.faceDescriptors.length > 0,
+    );
+    skippedPhotos = allPhotoRecords.length - fromPrefix.length;
+    photosWithFaces.push(...fromPrefix);
+    console.log(`[migrate-faces] ${fromPrefix.length} com descritores, ${skippedPhotos} sem`);
+
+    // ── Estratégia 2 (fallback): se prefix scan vazio, usa ef:events:index ────
+    let usedFallback = false;
+    if (allPhotoRecords.length === 0) {
+      usedFallback = true;
+      console.log("[migrate-faces] prefix scan vazio — fallback via ef:events:index");
+      const eventIds: string[] = await getList(`${KV}events:index`);
+      console.log(`[migrate-faces] ef:events:index tem ${eventIds.length} eventos`);
+
+      for (const eventId of eventIds) {
+        eventsSeen.add(eventId);
+        const faceIndex: Record<string, number[][]> | null = await kv.get(`${KV}faces:event:${eventId}`);
+        if (faceIndex && Object.keys(faceIndex).length > 0) {
+          for (const [photoId, descriptors] of Object.entries(faceIndex)) {
+            if (Array.isArray(descriptors) && descriptors.length > 0)
+              photosWithFaces.push({ id: photoId, eventId, faceDescriptors: descriptors });
+          }
+        } else {
+          const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
+          const records = await Promise.all(photoIds.map((pid) => kv.get(`${KV}photo:${pid}`)));
+          for (const p of records as any[]) {
+            if (p?.faceDescriptors?.length > 0) photosWithFaces.push(p);
+            else skippedPhotos++;
+          }
+        }
+      }
+    }
+
+    // ── Indexar no pgvector ───────────────────────────────────────────────────
+    for (const photo of photosWithFaces) {
+      const photoId: string = photo.id;
+      const eventId: string = photo.eventId;
+      const descriptors: number[][] = photo.faceDescriptors;
+      eventsSeen.add(eventId);
+      try {
+        await faces.indexFaces(photoId, eventId, descriptors);
+        totalPhotos++;
+        totalFaces += descriptors.length;
+      } catch (e: any) {
+        errors.push(`evento=${eventId} foto=${photoId}: ${e.message}`);
+      }
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    const totalEvents = eventsSeen.size;
+    console.log(`[migrate-faces] done — ${totalEvents} eventos, ${totalPhotos} fotos, ${totalFaces} faces em ${elapsedMs}ms`);
+    return c.json({
+      success: true,
+      stats: { totalEvents, totalPhotos, totalFaces, skippedPhotos, elapsedMs, errors, usedFallback },
+    });
+  } catch (err) {
+    console.log("Erro na migração de faces:", err);
+    return c.json({ error: `Erro na migração: ${err}` }, 500);
+  }
+});
+
+// ── KV Diagnostic ─────────────────────────────────────────────────────────────
+// GET /admin/diagnose-kv — admin auth
+// Lê a tabela kv_store_68454e9b diretamente e retorna contagens por prefixo.
+app.get("/make-server-68454e9b/admin/diagnose-kv", adminAuth, async (c) => {
+  try {
+    const { count: total, error: countErr } = await sb()
+      .from("kv_store_68454e9b")
+      .select("*", { count: "exact", head: true });
+    if (countErr) throw new Error(`count error: ${countErr.message}`);
+
+    const { data: rows, error: rowsErr } = await sb()
+      .from("kv_store_68454e9b")
+      .select("key")
+      .order("key")
+      .limit(200);
+    if (rowsErr) throw new Error(`rows error: ${rowsErr.message}`);
+
+    const prefixCounts: Record<string, number> = {};
+    for (const row of rows ?? []) {
+      const parts = (row.key as string).split(":");
+      const prefix = parts.slice(0, 2).join(":");
+      prefixCounts[prefix] = (prefixCounts[prefix] ?? 0) + 1;
+    }
+    const sampleKeys = (rows ?? []).slice(0, 30).map((r: any) => r.key as string);
+
+    return c.json({ total: total ?? 0, prefixCounts, sampleKeys });
+  } catch (err) {
+    console.log("Erro no diagnóstico KV:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+// ── pgvector Diagnostic ───────────────────────────────────────────────────────
+// GET /admin/diagnose-pgvector — admin auth
+// Verifica quantos embeddings estão indexados no pgvector.
+app.get("/make-server-68454e9b/admin/diagnose-pgvector", adminAuth, async (c) => {
+  try {
+    // Total de embeddings
+    const { count: totalEmbeddings, error: countErr } = await sb()
+      .from("face_embeddings_68454e9b")
+      .select("*", { count: "exact", head: true });
+    if (countErr) throw new Error(`count error: ${countErr.message}`);
+
+    // Contar fotos únicas
+    const { data: uniquePhotos, error: photosErr } = await sb()
+      .from("face_embeddings_68454e9b")
+      .select("photo_id")
+      .limit(10000); // Limite razoável
+    if (photosErr) throw new Error(`photos error: ${photosErr.message}`);
+    
+    const uniquePhotoIds = new Set((uniquePhotos ?? []).map((r: any) => r.photo_id));
+    const totalPhotos = uniquePhotoIds.size;
+
+    // Contar eventos únicos
+    const { data: uniqueEvents, error: eventsErr } = await sb()
+      .from("face_embeddings_68454e9b")
+      .select("event_id")
+      .limit(10000);
+    if (eventsErr) throw new Error(`events error: ${eventsErr.message}`);
+    
+    const uniqueEventIds = new Set((uniqueEvents ?? []).map((r: any) => r.event_id));
+    const totalEvents = uniqueEventIds.size;
+
+    // Amostra de fotos recentes
+    const { data: samplePhotos, error: sampleErr } = await sb()
+      .from("face_embeddings_68454e9b")
+      .select("photo_id, event_id")
+      .order("created_at", { ascending: false })
+      .limit(10);
+    if (sampleErr) throw new Error(`sample error: ${sampleErr.message}`);
+
+    return c.json({
+      totalEmbeddings: totalEmbeddings ?? 0,
+      totalPhotos,
+      totalEvents,
+      eventIds: Array.from(uniqueEventIds).slice(0, 10),
+      samplePhotos: samplePhotos ?? [],
+    });
+  } catch (err) {
+    console.log("Erro no diagnóstico pgvector:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+// ── Face Reindex ──────────────────────────────────────────────────────────────
+// GET /admin/events/:eventId/face-stats — admin auth
+// Retorna estatísticas de faces detectadas em fotos de um evento
+app.get("/make-server-68454e9b/admin/events/:eventId/face-stats", adminAuth, async (c) => {
+  try {
+    const eventId = c.req.param("eventId");
+    const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
+    
+    const stats = {
+      totalPhotos: photoIds.length,
+      photosWithFaces: 0,
+      photosWithoutFaces: 0,
+      totalFaces: 0,
+      photos: [] as Array<{ id: string; fileName: string; faceCount: number }>,
+    };
+
+    for (const photoId of photoIds) {
+      const photo: any = await kv.get(`${KV}photo:${photoId}`);
+      if (photo) {
+        const faceCount = Array.isArray(photo.faceDescriptors) ? photo.faceDescriptors.length : 0;
+        if (faceCount > 0) {
+          stats.photosWithFaces++;
+          stats.totalFaces += faceCount;
+        } else {
+          stats.photosWithoutFaces++;
+        }
+        stats.photos.push({
+          id: photo.id,
+          fileName: photo.fileName,
+          faceCount,
+        });
+      }
+    }
+
+    return c.json(stats);
+  } catch (err) {
+    console.log("Erro ao buscar estatísticas de faces:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+// POST /admin/events/:eventId/reindex-faces — admin auth
+// Retorna lista de fotos do evento para reindexação client-side
+// O frontend baixa as fotos, detecta faces com face-api.js, e reenvia os descritores
+app.post("/make-server-68454e9b/admin/events/:eventId/reindex-faces", adminAuth, async (c) => {
+  try {
+    const eventId = c.req.param("eventId");
+    const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
+    
+    const photos: Array<{ id: string; url: string; fileName: string }> = [];
+    for (const photoId of photoIds) {
+      const photo: any = await kv.get(`${KV}photo:${photoId}`);
+      if (photo?.url) {
+        photos.push({
+          id: photo.id,
+          url: photo.url,
+          fileName: photo.fileName,
+        });
+      }
+    }
+
+    return c.json({ eventId, photos, totalPhotos: photos.length });
+  } catch (err) {
+    console.log("Erro ao preparar reindexação:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+// ── Face Search (pgvector ANN) ────────────────────────────────────────────────
+
+// POST /faces/search — public, sem auth
+// Recebe um embedding 128-dim da selfie do usuário e retorna photoIds com match.
+// Usa HNSW via pgvector: O(log n), funciona com milhões de vetores, ~30ms.
+app.post("/make-server-68454e9b/faces/search", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { eventId, embedding, threshold } = body;
+
+    if (!eventId || !Array.isArray(embedding) || embedding.length === 0) {
+      return c.json({ error: "eventId e embedding são obrigatórios" }, 400);
+    }
+
+    const searchThreshold = typeof threshold === "number" ? threshold : 0.55;
+    const matches = await faces.searchFaces(embedding, eventId, searchThreshold);
+
+    return c.json({ matches });
+  } catch (err) {
+    console.log("Erro na busca facial por pgvector:", err);
+    return c.json({ error: `Erro na busca facial: ${err}` }, 500);
   }
 });
 
@@ -1710,6 +2087,203 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
   } catch (err) {
     console.log("Webhook error:", err);
     return c.json({ error: `Webhook error: ${err}` }, 500);
+  }
+});
+
+// ── Sync Storage → KV ─────────────────────────────────────────────────────────
+// POST /admin/sync-storage — admin auth
+// Varre o bucket S3 (pasta events/) e importa eventos+fotos que existem no
+// Storage mas não estão no KV. Não duplica registros existentes.
+// Query param: ?skipComplete=true para pular eventos com 100% de sincronização
+app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
+  const startedAt = Date.now();
+  const errors: string[] = [];
+  let eventsCreated = 0;
+  let photosImported = 0;
+  let eventsSkipped = 0;
+  let photosSkipped = 0;
+  const skipComplete = c.req.query("skipComplete") === "true";
+
+  try {
+    console.log(`[Sync] Iniciando sincronização do Storage... (skipComplete=${skipComplete})`);
+    
+    // 1. List all folders under events/ in the bucket
+    console.log(`[Sync] Listando pastas em events/...`);
+    const { data: eventFolders, error: listErr } = await sb().storage
+      .from(BUCKET)
+      .list("events", { limit: 500 });
+
+    if (listErr) {
+      console.log(`[Sync] Erro ao listar bucket: ${listErr.message}`);
+      return c.json({ error: `Erro ao listar bucket: ${listErr.message}` }, 500);
+    }
+
+    if (!eventFolders || eventFolders.length === 0) {
+      console.log(`[Sync] Nenhuma pasta encontrada no Storage`);
+      return c.json({
+        success: true,
+        message: "Nenhuma pasta de evento encontrada no Storage.",
+        stats: { eventsCreated: 0, photosImported: 0, eventsSkipped: 0, photosSkipped: 0, elapsedMs: Date.now() - startedAt, errors },
+      });
+    }
+
+    // Filter only "folders" (items without mimetype metadata)
+    const folderNames = eventFolders
+      .filter((item: any) => !item.metadata?.mimetype)
+      .map((item: any) => item.name);
+
+    console.log(`[Sync] ✓ Encontradas ${folderNames.length} pastas de eventos: ${folderNames.join(", ")}`);
+
+    // Fetch current config for price
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    const currentPrice: number = cfg.photoPrice ?? 30;
+    const branding: any = (await kv.get(`${KV}branding`)) ?? {};
+    const defaultSessionType = Array.isArray(branding.eventSessionTypes) && branding.eventSessionTypes.length > 0
+      ? branding.eventSessionTypes[0] : "Tour";
+    const autoVenue = `${branding.venueName ?? "Allianz Parque"}, ${branding.venueLocation ?? "São Paulo, SP"}`;
+
+    for (const eventSlug of folderNames) {
+      try {
+        // 2. List all files in events/<slug>/ FIRST (para calcular %)
+        const { data: files, error: filesErr } = await sb().storage
+          .from(BUCKET)
+          .list(`events/${eventSlug}`, { limit: 1000 });
+
+        if (filesErr) { 
+          console.log(`[Sync] Erro listando ${eventSlug}: ${filesErr.message}`);
+          errors.push(`Erro listando eventos/${eventSlug}: ${filesErr.message}`); 
+          continue; 
+        }
+        if (!files || files.length === 0) {
+          console.log(`[Sync] Nenhuma foto em ${eventSlug}`);
+          continue;
+        }
+
+        const imageFiles = files.filter(
+          (f: any) => f.name && f.metadata && /\.(jpg|jpeg|png|webp)$/i.test(f.name)
+        );
+        const storagePhotoCount = imageFiles.length;
+
+        // Get existing photos to calculate sync %
+        const existingPhotoIds = await getList(`${KV}photos:event:${eventSlug}`);
+        const kvPhotoCount = existingPhotoIds.length;
+        const syncPercentage = storagePhotoCount > 0 ? Math.round((kvPhotoCount / storagePhotoCount) * 100) : 0;
+
+        console.log(`[Sync] Evento ${eventSlug}: ${kvPhotoCount}/${storagePhotoCount} fotos (${syncPercentage}%)`);
+
+        // Skip if 100% synced and skipComplete=true
+        if (skipComplete && syncPercentage >= 100) {
+          console.log(`[Sync] ⏭ Pulando ${eventSlug} (100% sincronizado)`);
+          eventsSkipped++;
+          continue;
+        }
+
+        // 3. Check if event already exists in KV
+        let event: any = await kv.get(`${KV}event:${eventSlug}`);
+        const isNewEvent = !event;
+
+        if (isNewEvent) {
+          const now = new Date().toISOString();
+          if (/^\d{12}$/.test(eventSlug)) {
+            const day = eventSlug.slice(0, 2), month = eventSlug.slice(2, 4);
+            const year = eventSlug.slice(4, 8), hours = eventSlug.slice(8, 10), mins = eventSlug.slice(10, 12);
+            const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
+            const d = new Date(dateISO);
+            event = {
+              id: eventSlug, name: `${defaultSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
+              slug: eventSlug, date: dateISO, endTime: "", location: autoVenue,
+              sessionType: defaultSessionType, status: "disponivel", photoCount: 0, faceCount: 0,
+              price: currentPrice, dayOfWeek: dayOfWeekPT(d), createdAt: now, updatedAt: now,
+            };
+          } else {
+            event = {
+              id: eventSlug, name: eventSlug, slug: eventSlug, date: new Date().toISOString(),
+              endTime: "", location: autoVenue, sessionType: defaultSessionType,
+              status: "disponivel", photoCount: 0, faceCount: 0, price: currentPrice,
+              dayOfWeek: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+            };
+          }
+          await kv.set(`${KV}event:${eventSlug}`, event);
+          await appendToList(`${KV}events:index`, eventSlug);
+          eventsCreated++;
+          console.log(`[Sync] ✓ Criado evento: ${eventSlug}`);
+        } else {
+          eventsSkipped++;
+          console.log(`[Sync] → Evento ${eventSlug} já existe`);
+        }
+
+        // 4. Process photos from the already-loaded files (no need to list again)
+        console.log(`[Sync] Varrendo fotos do evento ${eventSlug}...`);
+
+        // Get existing photo storagePaths to avoid duplicates (reuse existingPhotoIds from above)
+        const existingPaths = new Set<string>();
+        const existingIdSet = new Set(existingPhotoIds);
+        if (existingPhotoIds.length > 0) {
+          const recs = await Promise.all(existingPhotoIds.map((pid) => kv.get(`${KV}photo:${pid}`)));
+          for (const rec of recs) { if ((rec as any)?.storagePath) existingPaths.add((rec as any).storagePath); }
+        }
+
+        // Import photos that don't exist yet
+        let newPhotosForEvent = 0;
+        console.log(`[Sync] Processando ${storagePhotoCount} imagens em ${eventSlug}...`);
+        for (const file of imageFiles) {
+          const storagePath = `events/${eventSlug}/${file.name}`;
+          const photoId = file.name.replace(/\.[^.]+$/, "");
+          if (existingPaths.has(storagePath) || existingIdSet.has(photoId)) { 
+            photosSkipped++; 
+            continue; 
+          }
+
+          const now = new Date().toISOString();
+          const photo = { id: photoId, eventId: eventSlug, fileName: file.name, storagePath, tag: "Geral", price: currentPrice, createdAt: file.created_at ?? now };
+          await kv.set(`${KV}photo:${photoId}`, photo);
+          await appendToList(`${KV}photos:event:${eventSlug}`, photoId);
+          photosImported++;
+          newPhotosForEvent++;
+        }
+        if (newPhotosForEvent > 0) {
+          console.log(`[Sync] ✓ Importadas ${newPhotosForEvent} fotos novas para ${eventSlug}`);
+        }
+
+        // Update event photoCount
+        if (newPhotosForEvent > 0 || isNewEvent) {
+          const allPhotoIds = await getList(`${KV}photos:event:${eventSlug}`);
+          await kv.set(`${KV}event:${eventSlug}`, { ...event, photoCount: allPhotoIds.length, updatedAt: new Date().toISOString() });
+        }
+      } catch (e: any) {
+        errors.push(`evento=${eventSlug}: ${e.message}`);
+      }
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[Sync] ✓ CONCLUÍDO — ${eventsCreated} eventos criados, ${photosImported} fotos importadas, ${eventsSkipped} eventos pulados, ${photosSkipped} fotos já existiam (${elapsedMs}ms)`);
+    if (errors.length > 0) {
+      console.log(`[Sync] ⚠ ${errors.length} erro(s):`, errors);
+    }
+    return c.json({ success: true, stats: { eventsCreated, photosImported, eventsSkipped, photosSkipped, elapsedMs, errors } });
+  } catch (err) {
+    console.log("[Sync] ✗ ERRO:", err);
+    return c.json({ error: `Erro no sync: ${err}` }, 500);
+  }
+});
+
+// ── List Storage Contents (diagnostic) ────────────────────────────────────────
+app.get("/make-server-68454e9b/admin/storage-list", adminAuth, async (c) => {
+  try {
+    const { data: eventFolders, error: err1 } = await sb().storage.from(BUCKET).list("events", { limit: 200 });
+    if (err1) return c.json({ error: `Erro ao listar bucket: ${err1.message}` }, 500);
+
+    const folders: { name: string; fileCount: number; files: string[] }[] = [];
+    for (const folder of eventFolders ?? []) {
+      if ((folder as any).metadata?.mimetype) continue;
+      const { data: files } = await sb().storage.from(BUCKET).list(`events/${folder.name}`, { limit: 100 });
+      const imageFiles = (files ?? []).filter((f: any) => f.name && /\.(jpg|jpeg|png|webp)$/i.test(f.name));
+      folders.push({ name: folder.name, fileCount: imageFiles.length, files: imageFiles.slice(0, 10).map((f: any) => f.name) });
+    }
+    return c.json({ bucket: BUCKET, folders, totalFolders: folders.length });
+  } catch (err) {
+    console.log("Erro no storage-list:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
   }
 });
 

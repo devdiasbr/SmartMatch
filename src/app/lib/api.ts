@@ -44,10 +44,16 @@ async function adminRequest<T = any>(
     ...(options.headers as Record<string, string>),
   };
 
+  console.log(`[API] Request ${options.method ?? 'GET'} ${BASE}${path}`);
   const res = await fetch(`${BASE}${path}`, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
+  console.log(`[API] Response ${res.status} ${res.statusText}`);
+  const data = await res.json().catch((e) => {
+    console.error('[API] Erro ao parsear JSON:', e);
+    return {};
+  });
 
   if (!res.ok) {
+    console.error('[API] Erro HTTP:', res.status, data);
     throw new Error(data.error ?? `HTTP ${res.status}`);
   }
   return data as T;
@@ -67,6 +73,32 @@ const aPut  = <T>(path: string, body: unknown, token: string) =>
   adminRequest<T>(path, { method: 'PUT', body: JSON.stringify(body) }, token);
 const aDel  = <T>(path: string, token: string) =>
   adminRequest<T>(path, { method: 'DELETE' }, token);
+
+/**
+ * ADMIN multipart upload — envia FormData binário sem base64.
+ * NÃO define Content-Type: o browser precisa definir automaticamente
+ * com o boundary correto do multipart (ex: "multipart/form-data; boundary=----XYZ").
+ * Definir Content-Type manualmente quebraria o parse no servidor.
+ */
+async function adminFormData<T = any>(path: string, body: FormData, token: string): Promise<T> {
+  const headers: Record<string, string> = {
+    // SEM Content-Type — browser define multipart/form-data + boundary
+    Authorization: `Bearer ${publicAnonKey}`,
+    'X-Admin-Token': token,
+  };
+  console.log(`[API] Enviando FormData para ${BASE}${path}`);
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', body, headers });
+  console.log(`[API] Resposta: ${res.status} ${res.statusText}`);
+  const data = await res.json().catch((e) => {
+    console.error('[API] Erro ao parsear JSON:', e);
+    return {};
+  });
+  if (!res.ok) {
+    console.error('[API] Erro HTTP:', res.status, data);
+    throw new Error(data.error ?? `HTTP ${res.status}`);
+  }
+  return data as T;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -206,7 +238,7 @@ export const api = {
   getEvent: (id: string) =>
     get<{ event: EventRecord }>(`/events/${id}`),
 
-  // ── Public Branding ──────────────────────────────────────────────────────
+  // ── Public Branding ─────────────────────────────────────────────────────
   getPublicBranding: () =>
     get<BrandingConfig>('/branding/public'),
 
@@ -244,6 +276,24 @@ export const api = {
     data: { base64: string; fileName: string; mimeType: string; tag: string },
     token: string,
   ) => aPost<{ photo: PhotoRecord }>(`/events/${eventId}/photos`, data, token),
+
+  /**
+   * Upload binário via multipart/form-data — sem base64.
+   * 37% menos payload, sem encode/decode, streaming zero-copy até o Storage.
+   * Usa o endpoint POST /events/:id/photos/stream.
+   */
+  uploadPhotoStream: (
+    eventId: string,
+    blob: Blob,
+    fileName: string,
+    tag: string,
+    token: string,
+  ) => {
+    const fd = new FormData();
+    fd.append('file', blob, fileName);
+    fd.append('tag', tag);
+    return adminFormData<{ photo: PhotoRecord }>(`/events/${eventId}/photos/stream`, fd, token);
+  },
 
   deletePhoto: (eventId: string, photoId: string, token: string) =>
     aDel<{ success: boolean }>(`/events/${eventId}/photos/${photoId}`, token),
@@ -356,11 +406,106 @@ export const api = {
       token,
     ),
 
-  /** Busca todos os descritores do evento para comparação client-side */
+  /** Busca todos os descritores do evento para comparação client-side (legado) */
   getEventFaces: (eventId: string) =>
     get<{ faces: { photoId: string; descriptors: number[][] }[] }>(
       `/events/${eventId}/faces`,
     ),
+
+  /**
+   * Busca fotos por embedding no pgvector (server-side ANN search).
+   * Envia apenas 1 vetor 128-dim, recebe IDs das fotos com match.
+   * Muito mais rápido que baixar todos os descritores: O(log n) vs O(n).
+   */
+  searchFacesByEmbedding: (
+    eventId: string,
+    embedding: number[],
+    threshold?: number,
+  ) =>
+    post<{ matches: { photoId: string; similarity: number }[] }>(
+      '/faces/search',
+      { eventId, embedding, ...(threshold !== undefined ? { threshold } : {}) },
+    ),
+
+  /**
+   * Migração batch KV → pgvector (admin).
+   * Lê todos os descritores do KV e re-indexa no pgvector.
+   * Idempotente — seguro de rodar múltiplas vezes.
+   */
+  migrateFacesToPgvector: (token: string) =>
+    aPost<{
+      success: boolean;
+      stats: {
+        totalEvents: number;
+        totalPhotos: number;
+        totalFaces: number;
+        skippedPhotos: number;
+        elapsedMs: number;
+        errors: string[];
+        usedFallback?: boolean;
+      };
+    }>('/admin/migrate-faces-pgvector', {}, token),
+
+  /** Diagnóstico: lê a tabela kv_store_68454e9b diretamente e agrupa por prefixo */
+  diagnoseKv: (token: string) =>
+    aGet<{
+      total: number;
+      prefixCounts: Record<string, number>;
+      sampleKeys: string[];
+      error?: string;
+    }>('/admin/diagnose-kv', token),
+
+  /** Diagnóstico pgvector: verifica quantos embeddings estão indexados */
+  diagnosePgvector: (token: string) =>
+    aGet<{
+      totalEmbeddings: number;
+      totalPhotos: number;
+      totalEvents: number;
+      eventIds: string[];
+      samplePhotos: Array<{ photo_id: string; event_id: string }>;
+      error?: string;
+    }>('/admin/diagnose-pgvector', token),
+
+  /** Estatísticas de faces de um evento específico */
+  getEventFaceStats: (eventId: string, token: string) =>
+    aGet<{
+      totalPhotos: number;
+      photosWithFaces: number;
+      photosWithoutFaces: number;
+      totalFaces: number;
+      photos: Array<{ id: string; fileName: string; faceCount: number }>;
+    }>(`/admin/events/${eventId}/face-stats`, token),
+
+  /** Inicia reindexação de faces de um evento — retorna lista de fotos para processar */
+  startFaceReindex: (eventId: string, token: string) =>
+    aPost<{
+      eventId: string;
+      photos: Array<{ id: string; url: string; fileName: string }>;
+      totalPhotos: number;
+    }>(`/admin/events/${eventId}/reindex-faces`, {}, token),
+
+  /** Lista pastas de evento no bucket S3 para diagnóstico */
+  storageList: (token: string) =>
+    aGet<{
+      bucket: string;
+      folders: { name: string; fileCount: number; files: string[] }[];
+      totalFolders: number;
+    }>('/admin/storage-list', token),
+
+  /** Sincroniza Storage → KV: importa eventos+fotos que existem no S3 mas não no KV */
+  syncStorage: (token: string, skipComplete = false) =>
+    aPost<{
+      success: boolean;
+      message?: string;
+      stats: {
+        eventsCreated: number;
+        photosImported: number;
+        eventsSkipped: number;
+        photosSkipped: number;
+        elapsedMs: number;
+        errors: string[];
+      };
+    }>(`/admin/sync-storage${skipComplete ? '?skipComplete=true' : ''}`, {}, token),
 
   // ── Auth ─────────────────────────────────────────────────────────────────
 

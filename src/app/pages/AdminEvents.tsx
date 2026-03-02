@@ -19,6 +19,8 @@ import {
   Store,
   ClipboardList,
   Settings,
+  RefreshCw,
+  HardDriveDownload,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -30,25 +32,54 @@ import * as faceService from '../lib/faceService'; // import estático → pré-
 import { enqueue as faceQueueEnqueue } from '../lib/faceQueue';
 
 /* ─── helpers ─── */
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => {
-      const result = reader.result as string;
-      resolve(result.split(',')[1]);
-    };
-    reader.onerror = reject;
-  });
-}
 
 /**
- * Comprime a imagem via Canvas antes de codificar em base64.
- * Reduz dimensões para no máximo 1600px e qualidade progressiva
- * até o resultado caber em ~600 KB de base64 (≈ 440 KB de imagem).
- * Fotos ficam disponíveis em menos de 1 minuto mesmo em lotes grandes.
+ * Comprime a imagem para um Blob JPEG binário — sem base64.
+ *
+ * Fast path: OffscreenCanvas + createImageBitmap
+ *   • Não bloqueia o main thread (sem FileReader, sem Image element)
+ *   • convertToBlob() retorna Blob binário diretamente — zero encoding overhead
+ *   • bitmap.close() libera memória GPU imediatamente
+ *
+ * Fallback: HTMLCanvasElement.toBlob() (Safari antigo / ambientes sem OffscreenCanvas)
+ *
+ * Ambos os caminhos usam qualidade progressiva até atingir ~440 KB.
  */
-async function compressToBase64(file: File): Promise<string> {
+async function compressToBlob(
+  file: File,
+  maxDim = 1600,
+  targetKB = 440,
+): Promise<{ blob: Blob; fileName: string }> {
+  const mimeType = 'image/jpeg';
+  const fileName = (file.name || 'photo.jpg').replace(/\.[^.]+$/, '.jpg');
+  const targetBytes = targetKB * 1024;
+
+  // ── Fast path: OffscreenCanvas (non-blocking) ─────────────────────────────
+  if (typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file);
+      let { width, height } = bitmap;
+      if (width > maxDim || height > maxDim) {
+        const r = Math.min(maxDim / width, maxDim / height);
+        width = Math.round(width * r);
+        height = Math.round(height * r);
+      }
+      const oc = new OffscreenCanvas(width, height);
+      (oc.getContext('2d') as OffscreenCanvasRenderingContext2D).drawImage(bitmap, 0, 0, width, height);
+      bitmap.close(); // libera referência GPU imediatamente
+      let quality = 0.75;
+      let blob = await oc.convertToBlob({ type: mimeType, quality });
+      while (blob.size > targetBytes && quality > 0.2) {
+        quality = parseFloat((quality - 0.1).toFixed(1));
+        blob = await oc.convertToBlob({ type: mimeType, quality });
+      }
+      return { blob, fileName };
+    } catch {
+      // OffscreenCanvas pode falhar em alguns contextos — cai no fallback
+    }
+  }
+
+  // ── Fallback: Canvas regular + toBlob ────────────────────────────────────
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -56,32 +87,24 @@ async function compressToBase64(file: File): Promise<string> {
       const img = new Image();
       img.onload = () => {
         let { width, height } = img;
-
-        // Reduz dimensões — 1600px mantém boa qualidade e acelera upload
-        const MAX_DIM = 1600;
-        if (width > MAX_DIM || height > MAX_DIM) {
-          const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
-          width  = Math.round(width  * ratio);
-          height = Math.round(height * ratio);
+        if (width > maxDim || height > maxDim) {
+          const r = Math.min(maxDim / width, maxDim / height);
+          width = Math.round(width * r);
+          height = Math.round(height * r);
         }
-
         const canvas = document.createElement('canvas');
-        canvas.width  = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, width, height);
-
-        // Reduz qualidade progressivamente até ~600 KB de base64
-        const MAX_B64_BYTES = 600 * 1024;
+        canvas.width = width; canvas.height = height;
+        canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
         let quality = 0.75;
-        let dataUrl = canvas.toDataURL('image/jpeg', quality);
-
-        while (dataUrl.length > MAX_B64_BYTES && quality > 0.2) {
-          quality -= 0.1;
-          dataUrl = canvas.toDataURL('image/jpeg', quality);
-        }
-
-        resolve(dataUrl.split(',')[1]);
+        const tryBlob = () => {
+          canvas.toBlob((b) => {
+            if (!b) { reject(new Error(`Falha ao converter ${file.name}`)); return; }
+            if (b.size > targetBytes && quality > 0.2) {
+              quality = parseFloat((quality - 0.1).toFixed(1)); tryBlob();
+            } else resolve({ blob: b, fileName });
+          }, mimeType, quality);
+        };
+        tryBlob();
       };
       img.onerror = () => reject(new Error(`Falha ao decodificar ${file.name}`));
       img.src = reader.result as string;
@@ -320,7 +343,15 @@ export function AdminEvents() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [uploadPhase, setUploadPhase] = useState<'compressing' | 'uploading' | ''>('');
   const [dragOver, setDragOver] = useState(false);
+
+  // Sync storage
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState('');
+  const [syncError, setSyncError] = useState('');
+  const [skipCompleteSync, setSkipCompleteSync] = useState(true);
 
   // Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -330,7 +361,7 @@ export function AdminEvents() {
   const [eventsPage, setEventsPage] = useState(1);
 
   // Pagination — photos grid
-  const PHOTOS_PER_PAGE = 12;
+  const PHOTOS_PER_PAGE = 24;  // Aumentado de 12 para 24 para ver mais fotos por página
   const [photosPage, setPhotosPage] = useState(1);
 
   // Photo price (dynamic)
@@ -349,6 +380,10 @@ export function AdminEvents() {
 
   // Viewer — session type inline edit
   const [viewerSessionTypeInput, setViewerSessionTypeInput] = useState('');
+  
+  // Viewer — date/time inline edit
+  const [viewerDateInput, setViewerDateInput] = useState('');
+  const [viewerTimeInput, setViewerTimeInput] = useState('');
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -432,8 +467,26 @@ export function AdminEvents() {
     setPhotosLoading(true);
     setPhotosPage(1); // reset photo page when switching events
     setViewerSessionTypeInput(selectedEvent.sessionType ?? '');
+    
+    // Initialize date/time fields
+    if (selectedEvent.slug && /^\d{12}$/.test(selectedEvent.slug)) {
+      const y = selectedEvent.slug.slice(0, 4);
+      const m = selectedEvent.slug.slice(4, 6);
+      const d = selectedEvent.slug.slice(6, 8);
+      const h = selectedEvent.slug.slice(8, 10);
+      const min = selectedEvent.slug.slice(10, 12);
+      setViewerDateInput(`${y}-${m}-${d}`);
+      setViewerTimeInput(`${h}:${min}`);
+    } else {
+      setViewerDateInput('');
+      setViewerTimeInput('');
+    }
+    
     api.getEventPhotos(selectedEvent.id, 1, 500)
-      .then((res) => setEventPhotos(res.photos))
+      .then((res) => {
+        console.log(`[AdminEvents] Fotos carregadas para evento ${selectedEvent.id}:`, res.photos.length);
+        setEventPhotos(res.photos);
+      })
       .catch((err) => console.log('Erro ao buscar fotos:', err))
       .finally(() => setPhotosLoading(false));
   }, [selectedEvent]);
@@ -494,6 +547,39 @@ export function AdminEvents() {
 
   const [creatingEvent, setCreatingEvent] = useState(false);
 
+  // Sync from storage (state declared above)
+  const [syncResult, setSyncResult] = useState<{ eventsCreated: number; photosImported: number; eventsSkipped: number; photosSkipped: number; errors: string[] } | null>(null);
+
+  const handleSyncStorage = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    setSyncProgress('Iniciando sincronização...');
+    setSyncError('');
+    try {
+      const token = await getToken();
+      if (!token) { navigate('/admin/login'); return; }
+      setSyncProgress('Varrendo pastas do S3...');
+      const res = await api.syncStorage(token, skipCompleteSync);
+      setSyncResult(res.stats);
+      setSyncProgress(`Concluído: ${res.stats.eventsCreated} evento(s), ${res.stats.photosImported} foto(s)`);
+      if (res.stats.eventsCreated > 0 || res.stats.photosImported > 0) {
+        // Reload events list
+        await loadEvents();
+        showSuccess(`Sincronizado: ${res.stats.eventsCreated} evento(s) novo(s), ${res.stats.photosImported} foto(s) importada(s)`);
+      }
+    } catch (err: any) {
+      setSyncError(`Erro ao sincronizar: ${err.message}`);
+      setErrorMsg(`Erro ao sincronizar: ${err.message}`);
+      setTimeout(() => setErrorMsg(null), 5000);
+    } finally {
+      setSyncing(false);
+      setTimeout(() => {
+        setSyncProgress('');
+        setSyncError('');
+      }, 3000);
+    }
+  };
+
   /** Cria o evento vazio (sem fotos) e abre o viewer. */
   const handleCreateEventOnly = async () => {
     if (!uploadDate || !uploadTime) {
@@ -545,13 +631,16 @@ export function AdminEvents() {
 
       if (targetEvent) {
         // Upload direto para o evento já selecionado — sem criar novo
+        console.log(`[Upload] Usando evento existente: ${targetEvent.id} (${targetEvent.name})`);
         event = targetEvent;
       } else {
         // Step 1 — Find or create the event by date+time slug
         const dateISO = `${uploadDate}T${uploadTime}:00`;
         const resolvedSessionType = uploadSessionType || 'Tour';
+        console.log(`[Upload] Criando/buscando evento: ${dateISO}, tipo=${resolvedSessionType}`);
         const eventRes = await api.createEvent({ date: dateISO, sessionType: resolvedSessionType }, token);
         event = eventRes.event;
+        console.log(`[Upload] Evento obtido: ${event.id} (${event.name})`);
 
         // Auto-register new session type in branding
         await registerSessionTypeIfNew(resolvedSessionType, token);
@@ -566,43 +655,67 @@ export function AdminEvents() {
         setSelectedEvent(event);
       }
 
-      // Step 2 — Compress all files first, then upload in parallel batches of 3
+      // Step 2 — Compress all files concurrently (CPU, não-bloqueante com OffscreenCanvas),
+      // depois envia em lotes paralelos de 3 via multipart binário (sem base64).
       let count = 0;
       const uploadedPhotos: { id: string; url: string }[] = [];
       const fileArr = Array.from(files);
+      console.log(`[Upload] Iniciando compressão de ${fileArr.length} fotos...`);
 
-      // Pre-compress all images concurrently (uses only CPU, no network)
+      // Set total and phase
+      setUploadTotal(fileArr.length);
+      setUploadPhase('compressing');
+
+      // Compressão paralela — OffscreenCanvas não bloqueia o main thread
       const compressed = await Promise.all(
         fileArr.map(async (file) => {
           try {
-            const base64 = await compressToBase64(file);
-            return { base64, fileName: file.name, mimeType: file.type || 'image/jpeg' };
+            return await compressToBlob(file);
           } catch (err: any) {
-            console.log('Erro ao comprimir foto:', err.message);
+            console.error('[Upload] Erro ao comprimir foto:', err.message);
             return null;
           }
         })
       );
-      const validFiles = compressed.filter(Boolean) as { base64: string; fileName: string; mimeType: string }[];
+      const validFiles = compressed.filter(Boolean) as { blob: Blob; fileName: string }[];
+      console.log(`[Upload] Compressão completa: ${validFiles.length}/${fileArr.length} fotos válidas`);
 
-      // Upload in parallel batches of 3
+      // Switch to uploading phase
+      setUploadPhase('uploading');
+      setUploadTotal(validFiles.length);
+
+      // Upload em lotes paralelos de 3 via FormData binário (sem base64, sem atob)
       const BATCH_SIZE = 3;
       for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
         const batch = validFiles.slice(i, i + BATCH_SIZE);
         const results = await Promise.allSettled(
           batch.map(async (item) => {
-            const res = await api.uploadPhoto(event.id, {
-              base64: item.base64,
-              fileName: item.fileName,
-              mimeType: item.mimeType,
-              tag: 'Geral',
-            }, token);
-            return res;
+            try {
+              // Try stream upload first (37% less payload)
+              console.log(`[Upload] Tentando stream para ${item.fileName} no evento ${event.id}`);
+              return await api.uploadPhotoStream(event.id, item.blob, item.fileName, 'Geral', token);
+            } catch (streamErr: any) {
+              // Fallback to base64 upload if stream fails
+              console.warn(`[Upload] Stream falhou para ${item.fileName}, tentando base64:`, streamErr.message);
+              const reader = new FileReader();
+              const base64 = await new Promise<string>((resolve, reject) => {
+                reader.onload = () => {
+                  const result = reader.result as string;
+                  resolve(result.split(',')[1] || result);
+                };
+                reader.onerror = () => reject(new Error('FileReader failed'));
+                reader.readAsDataURL(item.blob);
+              });
+              console.log(`[Upload] Tentando base64 para ${item.fileName}`);
+              return await api.uploadPhoto(event.id, { base64, fileName: item.fileName, mimeType: 'image/jpeg', tag: 'Geral' }, token);
+            }
           })
         );
+        const failedErrors: string[] = [];
         for (const result of results) {
           if (result.status === 'fulfilled') {
             const res = result.value;
+            console.log(`[Upload] ✓ Sucesso: ${res.photo.fileName} (${res.photo.id})`);
             setEventPhotos((prev) => [...prev, res.photo]);
             setEvents((prev) => prev.map((e) =>
               e.id === event.id ? { ...e, photoCount: e.photoCount + 1 } : e
@@ -613,13 +726,20 @@ export function AdminEvents() {
               uploadedPhotos.push({ id: res.photo.id, url: res.photo.url });
             }
           } else {
-            console.log('Erro ao enviar foto:', result.reason);
+            const errMsg = result.reason?.message ?? String(result.reason);
+            console.error('[Upload] ✗ Erro:', errMsg, result.reason);
+            failedErrors.push(errMsg);
           }
+        }
+        // Show partial errors immediately
+        if (failedErrors.length > 0 && count > 0) {
+          setUploadError(`${failedErrors.length} foto(s) falharam: ${failedErrors[0]}`);
         }
       }
 
       if (count === 0) {
-        setUploadError('Nenhuma foto foi enviada. Verifique os arquivos e tente novamente.');
+        console.error(`[Upload] NENHUMA foto enviada. validFiles=${validFiles.length}, fileArr=${fileArr.length}`);
+        setUploadError(`Nenhuma foto foi enviada (${validFiles.length} arquivo(s) comprimidos, todos falharam no upload). Verifique os logs do console (F12) para detalhes.`);
       } else if (uploadedPhotos.length > 0) {
         // Enfileira na fila global — processa em background sem bloquear a UI
         // O toast de progresso é exibido globalmente via FaceQueueToast no Root
@@ -634,6 +754,8 @@ export function AdminEvents() {
       setUploadError(err.message ?? 'Erro ao processar upload.');
     } finally {
       setUploading(false);
+      setUploadPhase('');
+      setUploadTotal(0);
     }
   };
 
@@ -770,6 +892,98 @@ export function AdminEvents() {
                   </button>
                 )}
               </div>
+
+              {/* Sync from Storage */}
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="skipCompleteSync"
+                    checked={skipCompleteSync}
+                    onChange={(e) => setSkipCompleteSync(e.target.checked)}
+                    className="w-3.5 h-3.5 rounded cursor-pointer"
+                    style={{ accentColor: green }}
+                  />
+                  <label htmlFor="skipCompleteSync" className="text-xs cursor-pointer flex-1" style={{ color: mutedText }}>
+                    Pular eventos com 100% de sincronização
+                  </label>
+                </div>
+                <motion.button
+                  whileHover={!syncing ? { scale: 1.02 } : {}}
+                  whileTap={!syncing ? { scale: 0.97 } : {}}
+                  onClick={handleSyncStorage}
+                  disabled={syncing}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold transition-all"
+                  style={{
+                    background: isDark ? 'rgba(251,191,36,0.08)' : 'rgba(217,119,6,0.06)',
+                    border: `1px solid ${isDark ? 'rgba(251,191,36,0.2)' : 'rgba(217,119,6,0.15)'}`,
+                    color: isDark ? '#fbbf24' : '#b45309',
+                    opacity: syncing ? 0.7 : 1,
+                  }}
+                >
+                  {syncing
+                    ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> {syncProgress || 'Sincronizando...'}</>
+                    : <><HardDriveDownload className="w-3.5 h-3.5" /> Sincronizar do Storage (S3)</>}
+                </motion.button>
+              </div>
+
+              {/* Sync progress */}
+              {syncing && syncProgress && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="text-[10px] p-2.5 rounded-xl"
+                  style={{
+                    background: isDark ? 'rgba(251,191,36,0.05)' : 'rgba(217,119,6,0.04)',
+                    border: `1px solid ${isDark ? 'rgba(251,191,36,0.12)' : 'rgba(217,119,6,0.1)'}`,
+                    color: isDark ? 'rgba(251,191,36,0.8)' : '#92400e',
+                  }}
+                >
+                  <p className="flex items-center gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    {syncProgress}
+                  </p>
+                </motion.div>
+              )}
+
+              {/* Sync error */}
+              {syncError && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="text-[10px] p-2.5 rounded-xl"
+                  style={{
+                    background: isDark ? 'rgba(252,165,165,0.08)' : 'rgba(220,38,38,0.06)',
+                    border: `1px solid ${isDark ? 'rgba(252,165,165,0.2)' : 'rgba(220,38,38,0.15)'}`,
+                    color: isDark ? '#fca5a5' : '#dc2626',
+                  }}
+                >
+                  <p className="flex items-center gap-1.5">
+                    <AlertCircle className="w-3 h-3" />
+                    {syncError}
+                  </p>
+                </motion.div>
+              )}
+
+              {/* Sync result */}
+              {syncResult && !syncing && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="text-[10px] p-2.5 rounded-xl space-y-0.5"
+                  style={{
+                    background: isDark ? 'rgba(251,191,36,0.05)' : 'rgba(217,119,6,0.04)',
+                    border: `1px solid ${isDark ? 'rgba(251,191,36,0.12)' : 'rgba(217,119,6,0.1)'}`,
+                    color: isDark ? 'rgba(251,191,36,0.8)' : '#92400e',
+                  }}
+                >
+                  <p><strong>{syncResult.eventsCreated}</strong> evento(s) criado(s) · <strong>{syncResult.photosImported}</strong> foto(s) importada(s)</p>
+                  <p style={{ opacity: 0.7 }}>{syncResult.eventsSkipped} evento(s) já existiam · {syncResult.photosSkipped} foto(s) já existiam</p>
+                  {syncResult.errors.length > 0 && (
+                    <p style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>⚠ {syncResult.errors.length} erro(s)</p>
+                  )}
+                </motion.div>
+              )}
             </div>
 
             {/* Event list */}
@@ -1117,8 +1331,29 @@ export function AdminEvents() {
                         <>
                           <Loader2 className="w-8 h-8 animate-spin" style={{ color: green }} />
                           <p className="text-sm" style={{ color: mutedText }}>
-                            Enviando fotos{uploadSuccess > 0 ? ` (${uploadSuccess} ok)` : ''}...
+                            {uploadPhase === 'compressing' ? 'Comprimindo fotos...' : 'Enviando fotos...'}
                           </p>
+                          {uploadTotal > 0 && (
+                            <div className="w-full max-w-xs">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-xs font-semibold" style={{ color: green }}>
+                                  {uploadSuccess}/{uploadTotal}
+                                </span>
+                                <span className="text-xs" style={{ color: mutedText }}>
+                                  {Math.round((uploadSuccess / uploadTotal) * 100)}%
+                                </span>
+                              </div>
+                              <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }}>
+                                <div
+                                  className="h-full transition-all duration-300"
+                                  style={{
+                                    width: `${(uploadSuccess / uploadTotal) * 100}%`,
+                                    background: `linear-gradient(90deg, ${green}, ${cyan})`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
                         </>
                       ) : uploadSuccess > 0 ? (
                         <>
@@ -1282,6 +1517,66 @@ export function AdminEvents() {
                     )}
                   </div>
 
+                  {/* Date/Time inline editor */}
+                  <div className="px-5 py-3 border-t" style={{ borderColor: cardBorder }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[11px] flex-shrink-0" style={{ color: mutedText, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Data e hora:</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="w-3 h-3" style={{ color: green }} />
+                        <input
+                          type="date"
+                          value={viewerDateInput}
+                          onChange={(e) => setViewerDateInput(e.target.value)}
+                          className="px-2.5 py-1 rounded-lg text-xs outline-none"
+                          style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor }}
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-3 h-3" style={{ color: green }} />
+                        <input
+                          type="time"
+                          value={viewerTimeInput}
+                          onChange={(e) => setViewerTimeInput(e.target.value)}
+                          className="px-2.5 py-1 rounded-lg text-xs outline-none"
+                          style={{ background: inputBg, border: `1px solid ${cardBorder}`, color: textColor }}
+                        />
+                      </div>
+                      {(() => {
+                        if (!selectedEvent || !viewerDateInput || !viewerTimeInput) return null;
+                        const [y, m, d] = viewerDateInput.split('-');
+                        const [h, min] = viewerTimeInput.split(':');
+                        const newSlug = `${y}${m}${d}${h}${min}`;
+                        const changed = newSlug !== selectedEvent.slug;
+                        if (!changed) return null;
+                        return (
+                          <button
+                            onClick={async () => {
+                              if (!selectedEvent) return;
+                              const token = await getToken();
+                              if (!token) return;
+                              try {
+                                await api.updateEvent(selectedEvent.id, { slug: newSlug, date: viewerDateInput }, token);
+                                const updatedEvent = { ...selectedEvent, slug: newSlug, date: viewerDateInput, name: `Tour ${d}/${m}/${y}, ${h}:${min}` };
+                                setSelectedEvent(updatedEvent);
+                                setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? updatedEvent : ev).sort((a, b) => b.date.localeCompare(a.date)));
+                                showSuccess('Data e hora atualizadas!');
+                              } catch (err: any) {
+                                setErrorMsg(`Erro ao atualizar data/hora: ${err.message}`);
+                                setTimeout(() => setErrorMsg(null), 4000);
+                              }
+                            }}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold flex-shrink-0"
+                            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}` }}
+                          >
+                            Salvar
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
                   {/* Actions bar */}
                   <div className="px-5 pb-1">
                   <div className="flex items-center gap-2">
@@ -1315,6 +1610,35 @@ export function AdminEvents() {
 
                   {/* Photos grid */}
                   <div className="flex-1 overflow-y-auto p-5">
+                    {/* Photo count header */}
+                    {eventPhotos.length > 0 && (
+                      <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ImageIcon className="w-4 h-4" style={{ color: green }} />
+                          <span className="text-sm font-bold" style={{ color: textColor }}>
+                            {eventPhotos.length} foto{eventPhotos.length !== 1 ? 's' : ''} no evento
+                          </span>
+                          {photosTotalPages > 1 && (
+                            <span 
+                              className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                              style={{ 
+                                background: isDark ? 'rgba(251,191,36,0.15)' : 'rgba(251,191,36,0.2)', 
+                                color: isDark ? '#fbbf24' : '#d97706',
+                                border: `1px solid ${isDark ? 'rgba(251,191,36,0.3)' : 'rgba(251,191,36,0.4)'}`
+                              }}
+                            >
+                              {photosTotalPages} páginas
+                            </span>
+                          )}
+                        </div>
+                        {photosTotalPages > 1 && (
+                          <span className="text-xs" style={{ color: mutedText }}>
+                            Página {photosPage} de {photosTotalPages}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    
                     {photosLoading ? (
                       <div className="flex items-center justify-center py-12">
                         <Loader2 className="w-6 h-6 animate-spin" style={{ color: mutedText }} />
@@ -1357,6 +1681,74 @@ export function AdminEvents() {
                         ))}
                       </div>
                     )}
+
+                    {/* ── Seção de Envio de Novas Fotos ── */}
+                    {eventPhotos.length > 0 && (
+                      <div className="mt-6">
+                        <div className="mb-3">
+                          <p className="text-xs uppercase tracking-wider" style={{ color: mutedText, fontWeight: 600 }}>
+                            OU ENVIE FOTOS AGORA
+                          </p>
+                        </div>
+                        <div
+                          className="min-h-[100px] rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-all p-4"
+                          style={{
+                            borderColor: dragOver
+                              ? isDark ? 'rgba(134,239,172,0.5)' : 'rgba(0,107,43,0.4)'
+                              : isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+                            background: dragOver
+                              ? isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.03)'
+                              : 'transparent',
+                          }}
+                          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                          onDragLeave={() => setDragOver(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setDragOver(false);
+                            handleFileUpload(e.dataTransfer.files, selectedEvent ?? undefined);
+                          }}
+                          onClick={() => viewerFileInputRef.current?.click()}
+                        >
+                          {uploading ? (
+                            <>
+                              <Loader2 className="w-6 h-6 animate-spin" style={{ color: green }} />
+                              <p className="text-xs" style={{ color: mutedText }}>
+                                {uploadPhase === 'compressing' ? 'Comprimindo...' : 'Enviando...'}
+                              </p>
+                              {uploadTotal > 0 && (
+                                <div className="w-full max-w-[180px]">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-[10px] font-semibold" style={{ color: green }}>
+                                      {uploadSuccess}/{uploadTotal}
+                                    </span>
+                                    <span className="text-[10px]" style={{ color: mutedText }}>
+                                      {Math.round((uploadSuccess / uploadTotal) * 100)}%
+                                    </span>
+                                  </div>
+                                  <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }}>
+                                    <div
+                                      className="h-full transition-all duration-300"
+                                      style={{
+                                        width: `${(uploadSuccess / uploadTotal) * 100}%`,
+                                        background: `linear-gradient(90deg, ${green}, ${isDark ? '#7dd3fc' : '#0284c7'})`,
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-6 h-6" style={{ color: mutedText }} />
+                              <p className="text-xs text-center" style={{ color: mutedText }}>
+                                Arraste fotos ou <span style={{ color: green, fontWeight: 700 }}>clique aqui</span>
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Info + paginação de fotos */}
                     {eventPhotos.length > 0 && (
                       <div className="mt-4 flex flex-col gap-2">

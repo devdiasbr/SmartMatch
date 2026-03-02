@@ -7,6 +7,7 @@ import {
   BarChart3, CalendarDays, DollarSign, ClipboardList, Store,
   Home, Tag, Eye,
   Palette, Layout, FileText, Save, Layers, Scan, List, X as XIcon,
+  Database, Cpu, Zap, RefreshCw, ShieldCheck, AlertTriangle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -300,13 +301,14 @@ const ADMIN_TABS = [
 
 // ── CONFIG INTERNAL TABS ──────────────────────────────────────────────────────
 
-type ConfigTab = 'marca' | 'home' | 'eventos' | 'watermark';
+type ConfigTab = 'marca' | 'home' | 'eventos' | 'watermark' | 'sistema';
 
 const CONFIG_TABS: { key: ConfigTab; label: string; icon: React.ElementType; desc: string }[] = [
   { key: 'marca',     label: 'Marca',       icon: Palette,     desc: 'Logo, nome e identidade visual' },
   { key: 'home',      label: 'Home',         icon: Home,        desc: 'Textos e conteúdo da página inicial' },
   { key: 'eventos',   label: 'Eventos',      icon: CalendarDays, desc: 'Textos da página de eventos' },
   { key: 'watermark', label: 'Marca d\'água', icon: Layers,     desc: 'Texto sobreposto nas fotos' },
+  { key: 'sistema',   label: 'Sistema',      icon: Cpu,         desc: 'IA, banco vetorial e manutenção' },
 ];
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
@@ -319,6 +321,47 @@ export function AdminConfig() {
   const { refreshBranding } = useBranding();
 
   const [activeTab, setActiveTab] = useState<ConfigTab>('marca');
+
+  // ── migration state ──
+  type MigrStatus = 'idle' | 'running' | 'done' | 'error';
+  const [migrStatus, setMigrStatus] = useState<MigrStatus>('idle');
+  const [migrResult, setMigrResult] = useState<{
+    totalEvents: number; totalPhotos: number; totalFaces: number;
+    skippedPhotos: number; elapsedMs: number; errors: string[]; usedFallback?: boolean;
+  } | null>(null);
+  const [migrError, setMigrError] = useState('');
+
+  // ── KV Diagnose state ──
+  type DiagStatus = 'idle' | 'running' | 'done' | 'error';
+  const [diagStatus, setDiagStatus] = useState<DiagStatus>('idle');
+  const [diagResult, setDiagResult] = useState<{
+    total: number; prefixCounts: Record<string, number>; sampleKeys: string[];
+  } | null>(null);
+  const [diagError, setDiagError] = useState('');
+
+  // ── Face Reindex state ──
+  type ReindexStatus = 'idle' | 'loading' | 'processing' | 'done' | 'error';
+  const [reindexStatus, setReindexStatus] = useState<ReindexStatus>('idle');
+  const [reindexEventId, setReindexEventId] = useState<string>('');
+  const [reindexProgress, setReindexProgress] = useState({ current: 0, total: 0 });
+  const [reindexResult, setReindexResult] = useState<{ processed: number; failed: number; faces: number } | null>(null);
+  const [reindexError, setReindexError] = useState('');
+  const [availableEvents, setAvailableEvents] = useState<Array<{ id: string; name: string; photoCount: number }>>([]);
+
+  // ── Storage Sync state ──
+  type SyncStatus = 'idle' | 'running' | 'done' | 'error';
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [syncProgress, setSyncProgress] = useState('');
+  const [syncResult, setSyncResult] = useState<{
+    eventsCreated: number;
+    photosImported: number;
+    eventsSkipped: number;
+    photosSkipped: number;
+    elapsedMs: number;
+    errors: string[];
+  } | null>(null);
+  const [syncError, setSyncError] = useState('');
+  const [skipCompleteSync, setSkipCompleteSync] = useState(true);
 
   // ── branding state ──
   const [branding, setBranding] = useState<BrandingConfig | null>(null);
@@ -459,6 +502,13 @@ export function AdminConfig() {
   useEffect(() => {
     if (token) { loadBranding(); }
   }, [token, loadBranding]);
+
+  // Load events when Sistema tab is active
+  useEffect(() => {
+    if (activeTab === 'sistema' && token) {
+      loadEventsForReindex();
+    }
+  }, [activeTab, token]);
 
   // ── Save Marca ──
   const saveMarca = async () => {
@@ -643,6 +693,160 @@ export function AdminConfig() {
       await refreshBranding(); await loadBranding();
     } catch (err: any) { showToast('err', err.message); }
     finally { setDeletingScanner(false); }
+  };
+
+  // ── diagnóstico KV ──
+  const runDiagnose = async () => {
+    const t = await getToken(); if (!t) return;
+    setDiagStatus('running');
+    setDiagResult(null);
+    setDiagError('');
+    try {
+      const data = await api.diagnoseKv(t);
+      if (data.error) throw new Error(data.error);
+      setDiagResult(data);
+      setDiagStatus('done');
+    } catch (err: any) {
+      setDiagError(err.message ?? 'Erro desconhecido');
+      setDiagStatus('error');
+    }
+  };
+
+  // ── migrar faces KV → pgvector ──
+  const runMigration = async () => {
+    const t = await getToken(); if (!t) return;
+    setMigrStatus('running');
+    setMigrResult(null);
+    setMigrError('');
+    try {
+      const { stats } = await api.migrateFacesToPgvector(t);
+      setMigrResult(stats);
+      setMigrStatus('done');
+    } catch (err: any) {
+      setMigrError(err.message ?? 'Erro desconhecido');
+      setMigrStatus('error');
+    }
+  };
+
+  // ── Load events for reindex ──
+  const loadEventsForReindex = async () => {
+    const t = await getToken(); if (!t) return;
+    try {
+      const { events } = await api.getEvents();
+      setAvailableEvents(events.filter(e => e.photoCount > 0).map(e => ({
+        id: e.id,
+        name: e.name,
+        photoCount: e.photoCount,
+      })));
+    } catch (err: any) {
+      console.error('Erro ao carregar eventos:', err);
+    }
+  };
+
+  // ── Reindex faces for an event ──
+  const startReindex = async () => {
+    if (!reindexEventId) {
+      setReindexError('Selecione um evento');
+      return;
+    }
+    const t = await getToken(); if (!t) return;
+
+    setReindexStatus('loading');
+    setReindexResult(null);
+    setReindexError('');
+    setReindexProgress({ current: 0, total: 0 });
+
+    try {
+      // Get list of photos to process
+      const { photos } = await api.startFaceReindex(reindexEventId, t);
+      
+      if (photos.length === 0) {
+        setReindexError('Nenhuma foto encontrada neste evento');
+        setReindexStatus('error');
+        return;
+      }
+
+      setReindexProgress({ current: 0, total: photos.length });
+      setReindexStatus('processing');
+
+      let processed = 0;
+      let failed = 0;
+      let totalFaces = 0;
+
+      // Import face detection dependencies
+      const faceService = await import('../lib/faceService');
+      await faceService.loadModels();
+
+      // Balanceamento: batch size moderado, qualidade mantida
+      const BATCH_SIZE = 4; // 4 fotos em paralelo (bom balanço)
+      
+      for (let i = 0; i < photos.length; i += BATCH_SIZE) {
+        const batch = photos.slice(i, Math.min(i + BATCH_SIZE, photos.length));
+        
+        // Process batch in parallel
+        await Promise.all(
+          batch.map(async (photo) => {
+            try {
+              // Load and resize image (960px mantém qualidade)
+              const img = await faceService.loadImage(photo.url);
+              const resized = faceService.resizeImage(img, 960); // Aumentado de 800 para 960
+              
+              // Detect faces - inputSize 416 é bom balanço velocidade/qualidade
+              const descriptors = await faceService.detectAllFaces(resized, { 
+                inputSize: 416,  // Aumentado de 320 para 416 (melhor qualidade)
+                scoreThreshold: 0.35  // Threshold padrão
+              });
+
+              // Save descriptors
+              if (descriptors.length > 0) {
+                await api.saveFaceDescriptors(reindexEventId, photo.id, descriptors, t);
+                totalFaces += descriptors.length;
+              }
+              
+              processed++;
+            } catch (err: any) {
+              console.error(`Erro ao processar foto ${photo.id}:`, err);
+              failed++;
+            }
+          })
+        );
+
+        // Update progress and yield to browser
+        setReindexProgress({ current: Math.min(i + BATCH_SIZE, photos.length), total: photos.length });
+        await new Promise(resolve => setTimeout(resolve, 10)); // 10ms entre batches
+      }
+
+      setReindexResult({ processed, failed, faces: totalFaces });
+      setReindexStatus('done');
+      showToast('ok', `Reindexação concluída: ${totalFaces} faces detectadas`);
+    } catch (err: any) {
+      setReindexError(err.message ?? 'Erro desconhecido');
+      setReindexStatus('error');
+    }
+  };
+
+  // ── Sync Storage → KV ──
+  const runStorageSync = async () => {
+    const t = await getToken(); if (!t) return;
+    setSyncStatus('running');
+    setSyncResult(null);
+    setSyncError('');
+    setSyncProgress('Varrendo pastas do Storage S3...');
+    
+    try {
+      const res = await api.syncStorage(t, skipCompleteSync);
+      setSyncResult(res.stats);
+      setSyncStatus('done');
+      setSyncProgress(`Concluído: ${res.stats.eventsCreated} evento(s), ${res.stats.photosImported} foto(s)`);
+      if (res.stats.eventsCreated > 0 || res.stats.photosImported > 0) {
+        showToast('ok', `Sincronizado: ${res.stats.eventsCreated} evento(s), ${res.stats.photosImported} foto(s)`);
+      }
+    } catch (err: any) {
+      setSyncError(err.message ?? 'Erro desconhecido');
+      setSyncStatus('error');
+    } finally {
+      setTimeout(() => setSyncProgress(''), 3000);
+    }
   };
 
   // ── Render ──
@@ -1751,6 +1955,564 @@ export function AdminConfig() {
               </div>
             </motion.div>
           )}
+          {/* ════════════════════ TAB: SISTEMA ════════════════════ */}
+          {activeTab === 'sistema' && (
+            <motion.div key="sistema" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+              <div className="max-w-2xl space-y-5">
+
+                {/* ── Card: Sincronizar Storage → KV ── */}
+                <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
+                  <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: isDark ? 'rgba(139,92,246,0.08)' : 'rgba(109,40,217,0.07)', border: `1px solid ${isDark ? 'rgba(139,92,246,0.18)' : 'rgba(109,40,217,0.15)'}` }}>
+                        <Database className="w-4 h-4" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }} />
+                      </div>
+                      <div>
+                        <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
+                          Sincronizar Storage → KV
+                        </h3>
+                        <p className="text-xs mt-0.5" style={{ color: muted }}>Importa eventos e fotos do S3/Storage para o KV Store</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-5 space-y-4">
+                    {/* O que faz */}
+                    <div className="rounded-xl p-4 space-y-2.5" style={{ background: isDark ? 'rgba(139,92,246,0.04)' : 'rgba(109,40,217,0.04)', border: `1px solid ${isDark ? 'rgba(139,92,246,0.1)' : 'rgba(109,40,217,0.1)'}` }}>
+                      <p className="text-xs font-bold uppercase tracking-widest" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }}>O que essa sincronização faz</p>
+                      {[
+                        { icon: Database, text: 'Varre as pastas do bucket S3 (Supabase Storage)' },
+                        { icon: CalendarDays, text: 'Cria eventos automaticamente a partir das pastas (evento-YYYY-MM-DD-HH-MM)' },
+                        { icon: Camera, text: 'Importa fotos que existem no Storage mas não estão no KV' },
+                        { icon: ShieldCheck, text: 'Idempotente: pode ser rodada várias vezes com segurança' },
+                      ].map(({ icon: Icon, text: t }) => (
+                        <div key={t} className="flex items-start gap-2.5">
+                          <Icon className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: isDark ? '#a78bfa' : '#7c3aed', opacity: 0.7 }} />
+                          <p className="text-xs leading-relaxed" style={{ color: muted }}>{t}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Checkbox */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="skipCompleteSync"
+                        checked={skipCompleteSync}
+                        onChange={(e) => setSkipCompleteSync(e.target.checked)}
+                        disabled={syncStatus === 'running'}
+                        className="w-3.5 h-3.5 rounded cursor-pointer"
+                        style={{ accentColor: green }}
+                      />
+                      <label htmlFor="skipCompleteSync" className="text-xs cursor-pointer flex-1" style={{ color: muted }}>
+                        Pular eventos com 100% de sincronização
+                      </label>
+                    </div>
+
+                    {/* Botão */}
+                    <motion.button
+                      whileHover={syncStatus !== 'running' ? { scale: 1.02 } : {}}
+                      whileTap={syncStatus !== 'running' ? { scale: 0.98 } : {}}
+                      onClick={runStorageSync}
+                      disabled={syncStatus === 'running'}
+                      className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl text-sm font-bold transition-all"
+                      style={{
+                        background: syncStatus === 'running'
+                          ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
+                          : 'linear-gradient(135deg,rgba(109,40,217,0.95),rgba(139,92,246,0.9))',
+                        border: `1px solid ${syncStatus === 'running' ? cardBorder : 'rgba(139,92,246,0.25)'}`,
+                        color: syncStatus === 'running' ? muted : '#fff',
+                        cursor: syncStatus === 'running' ? 'not-allowed' : 'pointer',
+                        fontFamily: "'Montserrat',sans-serif",
+                      }}
+                    >
+                      {syncStatus === 'running' ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> {syncProgress || 'Sincronizando...'}</>
+                      ) : syncStatus === 'done' ? (
+                        <><RefreshCw className="w-4 h-4" /> Rodar sincronização novamente</>
+                      ) : (
+                        <><Database className="w-4 h-4" /> Iniciar sincronização</>
+                      )}
+                    </motion.button>
+
+                    {/* Resultado — sucesso */}
+                    {syncStatus === 'done' && syncResult && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 space-y-4"
+                        style={{ background: isDark ? 'rgba(139,92,246,0.05)' : 'rgba(109,40,217,0.05)', border: `1px solid ${isDark ? 'rgba(139,92,246,0.2)' : 'rgba(109,40,217,0.15)'}` }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#a78bfa' : '#7c3aed' }} />
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#a78bfa' : '#7c3aed', fontFamily: "'Montserrat',sans-serif" }}>
+                            Sincronização concluída em {(syncResult.elapsedMs / 1000).toFixed(1)}s
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {[
+                            { label: 'Eventos novos', value: syncResult.eventsCreated, accent: syncResult.eventsCreated > 0 },
+                            { label: 'Fotos importadas', value: syncResult.photosImported, accent: syncResult.photosImported > 0 },
+                            { label: 'Eventos pulados', value: syncResult.eventsSkipped, accent: false },
+                            { label: 'Fotos puladas', value: syncResult.photosSkipped, accent: false },
+                          ].map(({ label, value, accent }) => (
+                            <div key={label} className="rounded-lg p-3 text-center"
+                              style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}>
+                              <p className="text-xl font-black" style={{ 
+                                color: accent ? (isDark ? '#a78bfa' : '#7c3aed') : text, 
+                                fontFamily: "'Montserrat',sans-serif" 
+                              }}>{value}</p>
+                              <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {syncResult.eventsCreated === 0 && syncResult.photosImported === 0 && (
+                          <div className="rounded-xl p-3 text-xs" style={{ background: isDark ? 'rgba(251,191,36,0.07)' : 'rgba(180,130,0,0.05)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.2)' : 'rgba(180,130,0,0.15)'}`, color: isDark ? '#fbbf24' : '#92400e' }}>
+                            <strong>Nada para sincronizar.</strong> Todos os eventos e fotos do Storage já estão no KV.
+                          </div>
+                        )}
+
+                        {syncResult.errors.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#fbbf24' : '#b45309' }}>
+                              {syncResult.errors.length} erro(s) parciais:
+                            </p>
+                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                              {syncResult.errors.map((e, i) => (
+                                <p key={i} className="text-[11px] font-mono px-2 py-1 rounded" style={{ background: isDark ? 'rgba(251,191,36,0.07)' : 'rgba(180,130,0,0.06)', color: isDark ? '#fbbf24' : '#92400e' }}>
+                                  {e}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+
+                    {/* Resultado — erro */}
+                    {syncStatus === 'error' && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 flex items-start gap-3"
+                        style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.25)' : 'rgba(220,38,38,0.2)'}` }}
+                      >
+                        <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
+                        <div>
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Falha na sincronização</p>
+                          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: muted }}>{syncError}</p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Card: KV Diagnóstico ── */}
+                <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
+                  <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: isDark ? 'rgba(251,191,36,0.08)' : 'rgba(180,130,0,0.06)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.18)' : 'rgba(180,130,0,0.15)'}` }}>
+                        <Zap className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#b45309' }} />
+                      </div>
+                      <div>
+                        <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
+                          Diagnóstico do KV Store
+                        </h3>
+                        <p className="text-xs mt-0.5" style={{ color: muted }}>Inspeciona as chaves reais na tabela kv_store para depurar a migração</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-5 space-y-4">
+                    <motion.button
+                      whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                      onClick={runDiagnose}
+                      disabled={diagStatus === 'running'}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold transition-all"
+                      style={{
+                        background: isDark ? 'rgba(251,191,36,0.12)' : 'rgba(180,130,0,0.09)',
+                        border: `1px solid ${isDark ? 'rgba(251,191,36,0.3)' : 'rgba(180,130,0,0.25)'}`,
+                        color: isDark ? '#fbbf24' : '#92400e',
+                        opacity: diagStatus === 'running' ? 0.6 : 1,
+                        cursor: diagStatus === 'running' ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {diagStatus === 'running'
+                        ? <><Loader2 className="w-4 h-4 animate-spin" /> Analisando KV…</>
+                        : diagStatus === 'done'
+                        ? <><RefreshCw className="w-4 h-4" /> Reanalisar KV</>
+                        : <><Zap className="w-4 h-4" /> Analisar KV Store</>}
+                    </motion.button>
+
+                    {diagStatus === 'error' && (
+                      <p className="text-xs text-red-400">{diagError}</p>
+                    )}
+
+                    {diagStatus === 'done' && diagResult && (
+                      <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+                        <div className="flex items-center gap-2 justify-between">
+                          <span className="text-sm font-bold" style={{ color: text }}>
+                            Total de registros no KV:
+                          </span>
+                          <span className="text-lg font-black px-3 py-0.5 rounded-lg"
+                            style={{ background: isDark ? 'rgba(251,191,36,0.1)' : 'rgba(180,130,0,0.07)', color: isDark ? '#fbbf24' : '#92400e', fontFamily: "'Montserrat',sans-serif" }}>
+                            {diagResult.total}
+                          </span>
+                        </div>
+
+                        {diagResult.total === 0 ? (
+                          <div className="rounded-xl p-3 text-sm" style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.25)' : 'rgba(220,38,38,0.2)'}`, color: isDark ? '#f87171' : '#dc2626' }}>
+                            <strong>KV vazio.</strong> Nenhum dado foi salvo ainda. Crie eventos e faça upload de fotos pelo painel admin para popular o KV.
+                          </div>
+                        ) : (
+                          <>
+                            <div className="space-y-1">
+                              <p className="text-xs font-bold uppercase tracking-wider" style={{ color: muted }}>Registros por prefixo</p>
+                              {Object.entries(diagResult.prefixCounts).sort((a, b) => b[1] - a[1]).map(([prefix, count]) => (
+                                <div key={prefix} className="flex items-center justify-between px-3 py-1.5 rounded-lg"
+                                  style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)', border: `1px solid ${cardBorder}` }}>
+                                  <code className="text-[11px] font-mono" style={{ color: isDark ? '#86efac' : '#065f46' }}>{prefix}:*</code>
+                                  <span className="text-xs font-bold" style={{ color: text }}>{count}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs font-bold uppercase tracking-wider" style={{ color: muted }}>Amostra de chaves (até 30)</p>
+                              <div className="max-h-40 overflow-y-auto rounded-xl p-2 space-y-0.5"
+                                style={{ background: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}>
+                                {diagResult.sampleKeys.map((k, i) => (
+                                  <p key={i} className="text-[10px] font-mono truncate px-1" style={{ color: muted }}>{k}</p>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Card: pgvector migration ── */}
+                <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
+                  {/* header */}
+                  <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.18)' : 'rgba(0,107,43,0.15)'}` }}>
+                        <Database className="w-4.5 h-4.5" style={{ color: green }} />
+                      </div>
+                      <div>
+                        <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
+                          Migrar Faces para pgvector
+                        </h3>
+                        <p className="text-xs mt-0.5" style={{ color: muted }}>Indexa os embeddings faciais do KV no banco vetorial</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* body */}
+                  <div className="p-5 space-y-5">
+                    {/* O que faz */}
+                    <div className="rounded-xl p-4 space-y-2.5" style={{ background: isDark ? 'rgba(0,255,127,0.04)' : 'rgba(0,107,43,0.04)', border: `1px solid ${isDark ? 'rgba(0,255,127,0.1)' : 'rgba(0,107,43,0.1)'}` }}>
+                      <p className="text-xs font-bold uppercase tracking-widest" style={{ color: green }}>O que essa migração faz</p>
+                      {[
+                        { icon: Database, text: 'Lê todos os descritores faciais armazenados no KV Store' },
+                        { icon: Cpu,      text: 'Insere cada embedding 128-dim na tabela face_embeddings_68454e9b' },
+                        { icon: Zap,      text: 'A busca passa a usar HNSW ANN — O(log n) ao invés de O(n)' },
+                        { icon: ShieldCheck, text: 'Idempotente: pode ser rodada várias vezes com segurança' },
+                      ].map(({ icon: Icon, text: t }) => (
+                        <div key={t} className="flex items-start gap-2.5">
+                          <Icon className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" style={{ color: green, opacity: 0.7 }} />
+                          <p className="text-xs leading-relaxed" style={{ color: muted }}>{t}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Aviso */}
+                    <div className="rounded-xl p-3.5 flex items-start gap-2.5"
+                      style={{ background: isDark ? 'rgba(251,191,36,0.06)' : 'rgba(180,130,0,0.06)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.18)' : 'rgba(180,130,0,0.18)'}` }}>
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: isDark ? '#fbbf24' : '#b45309' }} />
+                      <p className="text-xs leading-relaxed" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                        Fotos novas já são indexadas automaticamente. Esta migração é necessária apenas para fotos
+                        que foram processadas <strong>antes</strong> da atualização pgvector.
+                      </p>
+                    </div>
+
+                    {/* Botão */}
+                    <motion.button
+                      whileHover={migrStatus !== 'running' ? { scale: 1.02 } : {}}
+                      whileTap={migrStatus !== 'running' ? { scale: 0.98 } : {}}
+                      onClick={runMigration}
+                      disabled={migrStatus === 'running'}
+                      className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl text-sm font-bold transition-all"
+                      style={{
+                        background: migrStatus === 'running'
+                          ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
+                          : 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))',
+                        border: `1px solid ${migrStatus === 'running' ? cardBorder : 'rgba(134,239,172,0.25)'}`,
+                        color: migrStatus === 'running' ? muted : '#fff',
+                        cursor: migrStatus === 'running' ? 'not-allowed' : 'pointer',
+                        fontFamily: "'Montserrat',sans-serif",
+                      }}
+                    >
+                      {migrStatus === 'running' ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Migrando — aguarde…</>
+                      ) : migrStatus === 'done' ? (
+                        <><RefreshCw className="w-4 h-4" /> Rodar migração novamente</>
+                      ) : (
+                        <><Database className="w-4 h-4" /> Iniciar migração pgvector</>
+                      )}
+                    </motion.button>
+
+                    {/* Resultado — sucesso */}
+                    {migrStatus === 'done' && migrResult && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 space-y-4"
+                        style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.05)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}` }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4" style={{ color: green }} />
+                          <p className="text-sm font-bold" style={{ color: green, fontFamily: "'Montserrat',sans-serif" }}>
+                            Migração concluída em {(migrResult.elapsedMs / 1000).toFixed(1)}s
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                          {[
+                            { label: 'Eventos', value: migrResult.totalEvents, accent: false },
+                            { label: 'Fotos c/ face', value: migrResult.totalPhotos, accent: false },
+                            { label: 'Faces indexadas', value: migrResult.totalFaces, accent: false },
+                            { label: 'Sem descritor', value: migrResult.skippedPhotos, accent: true },
+                          ].map(({ label, value, accent }) => (
+                            <div key={label} className="rounded-lg p-3 text-center"
+                              style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}>
+                              <p className="text-xl font-black" style={{ color: accent && value > 0 ? (isDark ? '#fbbf24' : '#b45309') : text, fontFamily: "'Montserrat',sans-serif" }}>{value}</p>
+                              <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {migrResult.totalPhotos === 0 && migrResult.skippedPhotos === 0 && (
+                          <div className="rounded-xl p-3 text-xs" style={{ background: isDark ? 'rgba(251,191,36,0.07)' : 'rgba(180,130,0,0.05)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.2)' : 'rgba(180,130,0,0.15)'}`, color: isDark ? '#fbbf24' : '#92400e' }}>
+                            <strong>KV vazio ou sem descritores.</strong> Rode o <em>Diagnóstico do KV Store</em> acima para ver o que está salvo. Se o KV estiver vazio, certifique-se de que os eventos e fotos foram criados e processados pelo painel admin.
+                          </div>
+                        )}
+                        {migrResult.skippedPhotos > 0 && migrResult.totalPhotos === 0 && (
+                          <p className="text-xs" style={{ color: isDark ? '#fbbf24' : '#b45309' }}>
+                            {migrResult.skippedPhotos} foto(s) encontrada(s) no KV, mas nenhuma tem descritores faciais.
+                            Isso ocorre quando o reconhecimento facial falhou ou não foi executado no upload.
+                          </p>
+                        )}
+                        {migrResult.skippedPhotos > 0 && migrResult.totalPhotos > 0 && (
+                          <p className="text-xs" style={{ color: muted }}>
+                            {migrResult.skippedPhotos} foto(s) sem rosto detectado foram ignoradas.
+                          </p>
+                        )}
+                        {migrResult.usedFallback && (
+                          <p className="text-xs" style={{ color: muted }}>
+                            ℹ️ Usou fallback via <code>events:index</code> (getByPrefix retornou vazio).
+                          </p>
+                        )}
+
+                        {migrResult.errors.length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-xs font-bold uppercase tracking-wider" style={{ color: isDark ? '#fbbf24' : '#b45309' }}>
+                              {migrResult.errors.length} erro(s) parciais:
+                            </p>
+                            <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                              {migrResult.errors.map((e, i) => (
+                                <p key={i} className="text-[11px] font-mono px-2 py-1 rounded" style={{ background: isDark ? 'rgba(251,191,36,0.07)' : 'rgba(180,130,0,0.06)', color: isDark ? '#fbbf24' : '#92400e' }}>
+                                  {e}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+
+                    {/* Resultado — erro */}
+                    {migrStatus === 'error' && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 flex items-start gap-3"
+                        style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.25)' : 'rgba(220,38,38,0.2)'}` }}
+                      >
+                        <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
+                        <div>
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Falha na migração</p>
+                          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: muted }}>{migrError}</p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Card: Reindexação de Faces ── */}
+                <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
+                  {/* header */}
+                  <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                        style={{ background: isDark ? 'rgba(6,182,212,0.08)' : 'rgba(8,145,178,0.07)', border: `1px solid ${isDark ? 'rgba(6,182,212,0.18)' : 'rgba(8,145,178,0.15)'}` }}>
+                        <Scan className="w-4.5 h-4.5" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
+                      </div>
+                      <div>
+                        <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
+                          Reindexar Faces de Evento
+                        </h3>
+                        <p className="text-xs mt-0.5" style={{ color: muted }}>Processa novamente todas as fotos de um evento e detecta faces</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* body */}
+                  <div className="p-5 space-y-4">
+                    {/* Aviso */}
+                    <div className="rounded-xl p-3.5 flex items-start gap-2.5"
+                      style={{ background: isDark ? 'rgba(6,182,212,0.06)' : 'rgba(8,145,178,0.06)', border: `1px solid ${isDark ? 'rgba(6,182,212,0.18)' : 'rgba(8,145,178,0.18)'}` }}>
+                      <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
+                      <div className="text-xs leading-relaxed space-y-1" style={{ color: isDark ? '#06b6d4' : '#0e7490' }}>
+                        <p><strong>Use esta ferramenta se:</strong></p>
+                        <ul className="list-disc list-inside space-y-0.5 ml-1">
+                          <li>Fotos foram importadas do Storage sem detectar faces</li>
+                          <li>A migração pgvector retornou 0 faces</li>
+                          <li>Você precisa reprocessar um evento específico</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* Select evento */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: muted }}>
+                        Selecione um evento
+                      </label>
+                      <select
+                        value={reindexEventId}
+                        onChange={(e) => setReindexEventId(e.target.value)}
+                        disabled={reindexStatus === 'processing'}
+                        className="w-full px-4 py-2.5 rounded-xl text-sm transition-all"
+                        style={{
+                          background: inputBg,
+                          border: `1px solid ${inputBrd}`,
+                          color: text,
+                          cursor: reindexStatus === 'processing' ? 'not-allowed' : 'pointer',
+                          opacity: reindexStatus === 'processing' ? 0.6 : 1,
+                        }}
+                      >
+                        <option value="">-- Escolha um evento --</option>
+                        {availableEvents.map(evt => (
+                          <option key={evt.id} value={evt.id}>
+                            {evt.name} ({evt.photoCount} fotos)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Botão */}
+                    <motion.button
+                      whileHover={reindexStatus === 'idle' && reindexEventId ? { scale: 1.02 } : {}}
+                      whileTap={reindexStatus === 'idle' && reindexEventId ? { scale: 0.98 } : {}}
+                      onClick={startReindex}
+                      disabled={!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing'}
+                      className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl text-sm font-bold transition-all"
+                      style={{
+                        background: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing')
+                          ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
+                          : 'linear-gradient(135deg,rgba(8,145,178,0.95),rgba(6,182,212,0.9))',
+                        border: `1px solid ${(!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') ? cardBorder : 'rgba(6,182,212,0.25)'}`,
+                        color: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') ? muted : '#fff',
+                        cursor: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') ? 'not-allowed' : 'pointer',
+                        fontFamily: "'Montserrat',sans-serif",
+                      }}
+                    >
+                      {reindexStatus === 'loading' ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Carregando fotos…</>
+                      ) : reindexStatus === 'processing' ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Processando {reindexProgress.current}/{reindexProgress.total}…</>
+                      ) : (
+                        <><Scan className="w-4 h-4" /> Iniciar reindexação</>
+                      )}
+                    </motion.button>
+
+                    {/* Progress bar */}
+                    {reindexStatus === 'processing' && reindexProgress.total > 0 && (
+                      <div className="space-y-2">
+                        <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                          <motion.div
+                            initial={{ width: 0 }}
+                            animate={{ width: `${(reindexProgress.current / reindexProgress.total) * 100}%` }}
+                            className="h-full rounded-full"
+                            style={{ background: 'linear-gradient(90deg,#0891b2,#06b6d4)' }}
+                          />
+                        </div>
+                        <p className="text-xs text-center" style={{ color: muted }}>
+                          {reindexProgress.current} de {reindexProgress.total} fotos processadas
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Resultado — sucesso */}
+                    {reindexStatus === 'done' && reindexResult && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 space-y-3"
+                        style={{ background: isDark ? 'rgba(6,182,212,0.05)' : 'rgba(8,145,178,0.05)', border: `1px solid ${isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.15)'}` }}
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#06b6d4' : '#0891b2', fontFamily: "'Montserrat',sans-serif" }}>
+                            Reindexação concluída!
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2">
+                          {[
+                            { label: 'Processadas', value: reindexResult.processed, accent: false },
+                            { label: 'Faces detectadas', value: reindexResult.faces, accent: true },
+                            { label: 'Falhas', value: reindexResult.failed, accent: reindexResult.failed > 0 },
+                          ].map(({ label, value, accent }) => (
+                            <div key={label} className="rounded-lg p-3 text-center"
+                              style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}>
+                              <p className="text-xl font-black" style={{ 
+                                color: accent && value > 0 ? (isDark ? '#fbbf24' : '#b45309') : text, 
+                                fontFamily: "'Montserrat',sans-serif" 
+                              }}>{value}</p>
+                              <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {reindexResult.faces > 0 && (
+                          <p className="text-xs" style={{ color: muted }}>
+                            ✅ Agora rode a <strong>Migração pgvector</strong> acima para indexar as faces detectadas no banco vetorial.
+                          </p>
+                        )}
+                      </motion.div>
+                    )}
+
+                    {/* Resultado — erro */}
+                    {reindexStatus === 'error' && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                        className="rounded-xl p-4 flex items-start gap-3"
+                        style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.25)' : 'rgba(220,38,38,0.2)'}` }}
+                      >
+                        <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
+                        <div>
+                          <p className="text-sm font-bold" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Falha na reindexação</p>
+                          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: muted }}>{reindexError}</p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </motion.div>
+          )}
+
         </AnimatePresence>
       </div>
 

@@ -1,3 +1,4 @@
+import { useLocation, Outlet } from 'react-router';
 import { Header } from './Header';
 import { Footer } from './Footer';
 import { CartDrawer } from './CartDrawer';

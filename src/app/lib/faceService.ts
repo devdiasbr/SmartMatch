@@ -17,16 +17,53 @@
  *      Distância mínima por foto (min-pool sobre todos os descritores),
  *      rankeado por proximidade, dois passes (strict 0.45 → relaxed 0.55).
  *
- * Performance vs versão anterior:
- *      Modelos: ~12.5 MB → ~6.5 MB (sem SsdMobilenetv1 + faceLandmark68Net)
- *      Detecção por foto: ~800 ms → ~50 ms (TinyFaceDetector é 15-20× mais rápido)
- *      Pré-carregamento: inicia imediatamente ao importar o módulo
+ * Cache de modelos:
+ *      Os pesos (~6.3 MB) são persistidos na Cache Storage do navegador.
+ *      F5 carrega do disco em vez da rede — praticamente instantâneo após
+ *      o primeiro download.
  */
 
 const MODEL_URL =
   'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
 
-// ── Singleton: carrega modelos apenas uma vez ─────────────────────────────────
+// ── Cache Storage — persiste entre reloads (ao contrário da memória) ──────────
+
+const CACHE_NAME = 'smart-match-face-models-v2';
+
+/**
+ * Fetch com cache persistente via Cache Storage API.
+ * Apenas requests para o CDN do face-api são cacheadas; o resto passa direto.
+ * Compatível com a assinatura esperada por faceapi.env.monkeyPatch.
+ */
+async function cachedFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  const url = input.toString();
+
+  // Só cacheia os pesos do face-api (CDN estático, nunca muda para a mesma tag)
+  if (!url.includes('justadudewhohacks')) {
+    return fetch(input, init);
+  }
+
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const hit = await cache.match(url);
+    if (hit) return hit; // cache hit — instantâneo
+
+    const response = await fetch(input, init);
+    if (response.ok) {
+      // Clona antes de guardar pois a Response só pode ser lida uma vez
+      await cache.put(url, response.clone());
+    }
+    return response;
+  } catch {
+    // Fallback para fetch normal se Cache API não estiver disponível
+    return fetch(input, init);
+  }
+}
+
+// ── Singleton: carrega modelos apenas uma vez por sessão ──────────────────────
 
 let _modelsPromise: Promise<void> | null = null;
 
@@ -39,6 +76,18 @@ export function loadModels(): Promise<void> {
 
 async function _doLoad(): Promise<void> {
   const faceapi = await import('face-api.js');
+
+  // Instala o fetch com cache antes de qualquer download de modelo
+  faceapi.env.monkeyPatch({ fetch: cachedFetch as typeof globalThis.fetch });
+
+  // Monkey-patch para corrigir "Illegal constructor" do HTMLCanvasElement
+  // face-api.js tenta criar canvas com `new HTMLCanvasElement()` que não é permitido
+  faceapi.env.monkeyPatch({
+    Canvas: HTMLCanvasElement as any,
+    createCanvasElement: () => document.createElement('canvas'),
+    createImageElement: () => document.createElement('img'),
+  });
+
   await Promise.all([
     // TinyFaceDetector — 190 KB (vs 6 MB do SsdMobilenetv1), 15-20× mais rápido
     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
@@ -51,7 +100,7 @@ async function _doLoad(): Promise<void> {
 
 // ── Pré-carrega em background assim que o módulo é importado ─────────────────
 // Isso garante que quando o usuário clicar em "buscar por rosto" os modelos
-// já estarão (ou estarão quase) prontos.
+// já estarão (ou estarão quase) prontos — especialmente rápido quando há cache.
 loadModels().catch(() => {/* silencia erros de pré-carregamento */});
 
 // ── Opções TinyFaceDetector ───────────────────────────────────────────────────
@@ -66,15 +115,16 @@ function tinyOpts(inputSize: 320 | 416 | 512 = 320, scoreThreshold = 0.35) {
 }
 
 // ── Detecta UM rosto (para selfie do usuário) ─────────────────────────────────
-// Tenta com inputSize crescente para maximizar recall sem travar a câmera.
+// Balanceado: tenta 320, 416 e 512 para garantir detecção de qualidade.
 
 export async function detectSingleFace(
   input: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement,
 ): Promise<{ descriptor: Float32Array; box: { x: number; y: number; width: number; height: number } } | null> {
   const faceapi = await import('face-api.js');
 
+  // Tenta 3 tamanhos: 320 (rápido), 416 (balanceado), 512 (máxima qualidade)
   for (const inputSize of [320, 416, 512] as const) {
-    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.30 });
+    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.35 }); // Threshold padrão
     const result = await faceapi
       .detectSingleFace(input, opts)
       .withFaceLandmarks(true)   // true = usa faceLandmark68TinyNet (mais rápido)
@@ -87,13 +137,18 @@ export async function detectSingleFace(
 }
 
 // ── Detecta TODOS os rostos (para fotos do evento — admin upload) ─────────────
-// Usa inputSize 512 para máximo recall em fotos de grupo / multidão.
+// Usa inputSize 416 por padrão (bom balanço velocidade/recall).
+// Aceita opções para permitir ajuste por contexto.
 
 export async function detectAllFaces(
   input: HTMLImageElement | HTMLCanvasElement,
+  options: { inputSize?: 320 | 416 | 512; scoreThreshold?: number } = {},
 ): Promise<number[][]> {
   const faceapi = await import('face-api.js');
-  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.35 });
+  const opts = new faceapi.TinyFaceDetectorOptions({ 
+    inputSize: options.inputSize ?? 416,   // 416 é ~30% mais rápido que 512, mantém boa qualidade
+    scoreThreshold: options.scoreThreshold ?? 0.35 
+  });
   const results = await faceapi
     .detectAllFaces(input, opts)
     .withFaceLandmarks(true)     // true = usa faceLandmark68TinyNet
@@ -101,16 +156,68 @@ export async function detectAllFaces(
   return results.map((r) => Array.from(r.descriptor));
 }
 
+// ── Redimensiona imagem para acelerar detecção ────────────────────────────────
+// Mantém aspect ratio e limita dimensão máxima.
+// OTIMIZAÇÃO: Usa menor resolução mas mantém qualidade adequada para face recognition
+
+export function resizeImage(img: HTMLImageElement, maxDim = 1200): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  let { width, height } = img;
+  
+  // Ajuste de resolução: 960px é bom balanço entre velocidade e qualidade
+  // Menor que isso prejudica o face recognition (ResNet precisa de detalhes)
+  const effectiveMax = maxDim > 1200 ? 960 : maxDim;
+  
+  if (width > effectiveMax || height > effectiveMax) {
+    if (width > height) {
+      height = (height / width) * effectiveMax;
+      width = effectiveMax;
+    } else {
+      width = (width / height) * effectiveMax;
+      height = effectiveMax;
+    }
+  }
+  
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { alpha: false })!; // Desabilita alpha para +10% velocidade
+  
+  // REVERTIDO: image smoothing é NECESSÁRIO para qualidade do face recognition
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, width, height);
+  return canvas;
+}
+
 // ── Carrega uma imagem crossOrigin via URL ────────────────────────────────────
+// Otimizado: usa cache de objetos Image para evitar re-downloads
+
+const imageCache = new Map<string, Promise<HTMLImageElement>>();
 
 export function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+  // Se já está em cache (ou carregando), retorna a Promise existente
+  if (imageCache.has(url)) {
+    return imageCache.get(url)!;
+  }
+
+  const promise = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`Falha ao carregar imagem: ${url}`));
+    img.onerror = () => {
+      imageCache.delete(url); // Remove do cache em caso de erro
+      reject(new Error(`Falha ao carregar imagem: ${url}`));
+    };
     img.src = url;
   });
+
+  imageCache.set(url, promise);
+  return promise;
+}
+
+// Limpa o cache de imagens (útil para liberar memória após processamento em batch)
+export function clearImageCache(): void {
+  imageCache.clear();
 }
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
