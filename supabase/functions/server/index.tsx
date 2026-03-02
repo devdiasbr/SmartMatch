@@ -1502,9 +1502,14 @@ app.post("/make-server-68454e9b/faces/search", async (c) => {
       return c.json({ error: "eventId e embedding são obrigatórios" }, 400);
     }
 
-    console.log(`[faces/search] Buscando faces para evento ${eventId}, embedding length: ${embedding.length}, threshold: ${threshold ?? 0.55}`);
+    console.log(`[faces/search] Buscando faces para evento ${eventId}, embedding length: ${embedding.length}, threshold: ${threshold ?? 0.78}`);
 
-    const searchThreshold = typeof threshold === "number" ? threshold : 0.55;
+    // Threshold 0.78 cosine similarity ≈ euclidean distance 0.66
+    // Equivalência: cos_sim = 1 - (d_eucl² / 2)
+    //   strict  eucl 0.55 → cos_sim 0.85
+    //   relaxed eucl 0.70 → cos_sim 0.76
+    //   default 0.78 → entre strict e relaxed, bom balanço
+    const searchThreshold = typeof threshold === "number" ? threshold : 0.78;
     const matches = await faces.searchFaces(embedding, eventId, searchThreshold);
 
     console.log(`[faces/search] ✓ Encontrados ${matches.length} matches para evento ${eventId}`);

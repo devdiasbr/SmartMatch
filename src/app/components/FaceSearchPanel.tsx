@@ -155,7 +155,7 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
       let conf = 0;
 
       try {
-        const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor);
+        const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor, 0.78);
         matched = matches.map((m) => m.photoId);
         // Confiança baseada na melhor similaridade coseno (0..1 → 0..100%)
         const best = matches.length > 0 ? matches[0].similarity : 0;

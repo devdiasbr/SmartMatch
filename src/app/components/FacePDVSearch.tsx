@@ -132,7 +132,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
       let conf = 0;
 
       try {
-        const { matches } = await api.searchFacesByEmbedding(eventId, queryDesc);
+        const { matches } = await api.searchFacesByEmbedding(eventId, queryDesc, 0.78);
         matched = matches.map(m => m.photoId);
         const best = matches.length > 0 ? matches[0].similarity : 0;
         conf = Math.max(0, Math.min(100, Math.round(best * 100)));
@@ -158,6 +158,14 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
       setConfidence(conf);
       setStage('results');
       onMatches(matched.map(String));
+
+      // Auto-fecha o modal após encontrar matches, com breve delay para o usuário ver o resultado
+      if (matched.length > 0) {
+        setTimeout(() => {
+          stopCamera();
+          onClose();
+        }, 1500);
+      }
     } catch (err: any) {
       setError(err.message ?? 'Erro no reconhecimento facial.');
       setStage('error');

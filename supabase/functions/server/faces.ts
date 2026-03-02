@@ -149,7 +149,7 @@ export async function indexFaces(
 export async function searchFaces(
   queryEmbedding: number[],
   eventId: string,
-  threshold = 0.55,
+  threshold = 0.78,
   maxResults = 50,
 ): Promise<SearchResult[]> {
   console.log(
