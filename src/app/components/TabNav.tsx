@@ -75,7 +75,7 @@ export function TabNav({
 
   return (
     <div
-      className={`flex rounded-2xl overflow-hidden ${fullWidth ? '' : isMobile ? 'w-full' : 'ml-auto w-fit'} ${className}`}
+      className={`flex rounded-2xl overflow-hidden ${fullWidth ? '' : isMobile ? 'w-full' : 'mx-auto w-fit'} ${className}`}
       style={{
         background: containerBg,
         border: `1px solid ${containerBorder}`,

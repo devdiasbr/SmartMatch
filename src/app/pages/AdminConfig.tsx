@@ -1123,7 +1123,7 @@ export function AdminConfig() {
         <TabNav className="mb-8" active="config-none" tabs={ADMIN_TABS} />
 
         {/* ── Config internal tabs ── */}
-        <div className="flex gap-2 mb-8 overflow-x-auto pb-1">
+        <div className="flex gap-2 mb-8 overflow-x-auto pb-1 justify-center">
           {CONFIG_TABS.map(tab => {
             const Icon = tab.icon;
             const active = activeTab === tab.key;
