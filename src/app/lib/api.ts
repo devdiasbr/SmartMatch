@@ -446,6 +446,41 @@ export const api = {
       };
     }>('/admin/migrate-faces-pgvector', {}, token),
 
+  /** Retorna a lista de IDs de fotos de um evento (admin, sem URLs assinadas — rápido) */
+  getEventPhotoIds: (eventId: string, token: string) =>
+    aGet<{ photoIds: string[]; total: number }>(`/admin/events/${eventId}/photo-ids`, token),
+
+  /**
+   * Reindexar UMA foto no pgvector.
+   * Chamado foto a foto para progresso granular (X/Y) em tempo real.
+   */
+  reindexPhoto: (eventId: string, photoId: string, token: string) =>
+    aPost<{
+      success: boolean;
+      notFound?: boolean;
+      noFace?: boolean;
+      faces: number;
+      fileName?: string;
+      error?: string;
+    }>('/admin/reindex-photo', { eventId, photoId }, token),
+
+  /** Reindexar faces de um único evento no pgvector */
+  reindexEvent: (eventId: string, token: string) =>
+    aPost<{
+      success: boolean;
+      error?: string;
+      stats: {
+        totalPhotos: number;      // fotos com face indexada com sucesso
+        totalFaces: number;       // embeddings inseridos no pgvector
+        noFacePhotos: number;     // fotos sem nenhum rosto (normal)
+        notFoundPhotos: number;   // fotos ausentes no KV (dado corrompido)
+        skippedPhotos: number;    // noFacePhotos + notFoundPhotos (legado)
+        processedPhotos: number;  // total iterado
+        elapsedMs: number;
+        errors: string[];         // falhas reais ao indexar
+      };
+    }>('/admin/reindex-event', { eventId }, token),
+
   /** Diagnóstico: lê a tabela kv_store_68454e9b diretamente e agrupa por prefixo */
   diagnoseKv: (token: string) =>
     aGet<{

@@ -348,9 +348,13 @@ export function AdminConfig() {
   const [reindexStatus, setReindexStatus] = useState<ReindexStatus>('idle');
   const [reindexEventId, setReindexEventId] = useState<string>('');
   const [reindexProgress, setReindexProgress] = useState({ current: 0, total: 0 });
-  const [reindexResult, setReindexResult] = useState<{ processed: number; failed: number; faces: number } | null>(null);
+  const [reindexResult, setReindexResult] = useState<{ processed: number; noFace: number; failed: number; faces: number } | null>(null);
   const [reindexError, setReindexError] = useState('');
   const [availableEvents, setAvailableEvents] = useState<Array<{ id: string; name: string; photoCount: number }>>([]);
+  const [reindexCurrentEvent, setReindexCurrentEvent] = useState<string>(''); // Nome do evento atual
+  const [reindexEventIndex, setReindexEventIndex] = useState(0); // Índice do evento atual (para TODOS)
+  const [reindexLiveStats, setReindexLiveStats] = useState({ processed: 0, faces: 0, noFace: 0, failed: 0 }); // Acumulado em tempo real
+  const [reindexPhotoProgress, setReindexPhotoProgress] = useState({ current: 0, total: 0 }); // Progresso foto a foto
 
   // ── Storage Sync state ──
   type SyncStatus = 'idle' | 'running' | 'done' | 'error';
@@ -368,9 +372,9 @@ export function AdminConfig() {
   const [skipCompleteSync, setSkipCompleteSync] = useState(true);
 
   // ── Complete Flow state ──
-  type FlowStatus = 'idle' | 'sync' | 'reindex' | 'migrate' | 'done' | 'error';
+  type FlowStatus = 'idle' | 'sync' | 'reindex' | 'done' | 'error';
   const [flowStatus, setFlowStatus] = useState<FlowStatus>('idle');
-  const [flowStep, setFlowStep] = useState(0); // 0=idle, 1=sync, 2=reindex, 3=migrate
+  const [flowStep, setFlowStep] = useState(0); // 0=idle, 1=sync, 2=reindex
   const [flowError, setFlowError] = useState('');
   const [flowResults, setFlowResults] = useState<{
     sync?: { eventsCreated: number; photosImported: number };
@@ -480,6 +484,13 @@ export function AdminConfig() {
     if (!t) return;
     try {
       const data = await api.getAdminBranding(t);
+      console.log('[AdminConfig] Branding carregado:', {
+        logoUrl: data.logoUrl ? '✓' : '✗',
+        faviconUrl: data.faviconUrl ? '✓' : '✗',
+        backgroundUrls: data.backgroundUrls?.length ?? 0,
+        ctaBgUrl: data.ctaBgUrl ? '✓' : '✗',
+        scannerImageUrl: data.scannerImageUrl ? '✓' : '✗',
+      });
       setBranding(data);
       setAppName(data.appName);
       setPageTitle(data.pageTitle);
@@ -762,7 +773,86 @@ export function AdminConfig() {
     }
   };
 
-  // ── Reindex faces for an event ──
+  // ── Helper: indexa um evento foto a foto, atualizando progresso em tempo real ──
+  /** Aguarda N ms — throttle entre requisições para evitar rate-limit */
+  const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+  /**
+   * Executa fn até maxAttempts vezes.
+   * Reinicia apenas em erros de rede (TypeError: Failed to fetch / NetworkError).
+   * Erros HTTP (4xx/5xx) são relançados imediatamente.
+   */
+  const withRetry = async <T,>(
+    fn: () => Promise<T>,
+    maxAttempts = 3,
+    baseDelayMs = 800,
+  ): Promise<T> => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        lastErr = err;
+        const isNetwork =
+          err instanceof TypeError ||
+          String(err?.message ?? '').toLowerCase().includes('fetch') ||
+          String(err?.message ?? '').toLowerCase().includes('network');
+        if (!isNetwork || attempt === maxAttempts) throw err;
+        const delay = baseDelayMs * attempt;
+        console.warn(`[retry] Tentativa ${attempt}/${maxAttempts} falhou (${err.message}). Aguardando ${delay}ms…`);
+        await sleep(delay);
+      }
+    }
+    throw lastErr;
+  };
+
+  // ── Helper: indexa um evento foto a foto, atualizando progresso em tempo real ──
+  const reindexEventByPhoto = async (
+    eventId: string,
+    token: string,
+    onPhotoProgress: (current: number, total: number) => void,
+    onStats: (delta: { processed: number; faces: number; noFace: number; failed: number }) => void,
+  ) => {
+    // 1. Buscar lista de IDs — com retry em falhas de rede
+    const { photoIds, total } = await withRetry(
+      () => api.getEventPhotoIds(eventId, token),
+      3,
+      1000,
+    );
+    onPhotoProgress(0, total);
+
+    let processed = 0, faces = 0, noFace = 0, failed = 0;
+
+    // 2. Indexar foto a foto (throttle 60 ms entre chamadas para não saturar a Edge Function)
+    for (let j = 0; j < photoIds.length; j++) {
+      try {
+        const res = await withRetry(
+          () => api.reindexPhoto(eventId, photoIds[j], token),
+          2,
+          500,
+        );
+        if (res.noFace || res.notFound) {
+          noFace++;
+        } else if (res.success) {
+          processed++;
+          faces += res.faces;
+        } else {
+          failed++;
+        }
+      } catch {
+        failed++;
+      }
+      onPhotoProgress(j + 1, total);
+      onStats({ processed, faces, noFace, failed });
+
+      // Pequena pausa para não sobrecarregar a Edge Function do Supabase
+      if (j < photoIds.length - 1) await sleep(60);
+    }
+
+    return { processed, faces, noFace, failed, total };
+  };
+
+  // ── Reindex faces for an event (server-side via pgvector) ──
   const startReindex = async () => {
     if (!reindexEventId) {
       setReindexError('Selecione um evento');
@@ -770,81 +860,37 @@ export function AdminConfig() {
     }
     const t = await getToken(); if (!t) return;
 
-    setReindexStatus('loading');
+    setReindexStatus('processing');
     setReindexResult(null);
     setReindexError('');
     setReindexProgress({ current: 0, total: 0 });
+    setReindexPhotoProgress({ current: 0, total: 0 });
+    setReindexLiveStats({ processed: 0, faces: 0, noFace: 0, failed: 0 });
+
+    const event = availableEvents.find(e => e.id === reindexEventId);
+    setReindexCurrentEvent(event?.name ?? reindexEventId);
 
     try {
-      // Get list of photos to process
-      const { photos } = await api.startFaceReindex(reindexEventId, t);
-      
-      if (photos.length === 0) {
-        setReindexError('Nenhuma foto encontrada neste evento');
-        setReindexStatus('error');
-        return;
-      }
+      const stats = await reindexEventByPhoto(
+        reindexEventId,
+        t,
+        (cur, tot) => setReindexPhotoProgress({ current: cur, total: tot }),
+        ({ processed, faces, noFace, failed }) =>
+          setReindexLiveStats({ processed, faces, noFace, failed }),
+      );
 
-      setReindexProgress({ current: 0, total: photos.length });
-      setReindexStatus('processing');
-
-      let processed = 0;
-      let failed = 0;
-      let totalFaces = 0;
-
-      // Import face detection dependencies
-      const faceService = await import('../lib/faceService');
-      await faceService.loadModels();
-
-      // Balanceamento: batch size moderado, qualidade mantida
-      const BATCH_SIZE = 4; // 4 fotos em paralelo (bom balanço)
-      
-      for (let i = 0; i < photos.length; i += BATCH_SIZE) {
-        const batch = photos.slice(i, Math.min(i + BATCH_SIZE, photos.length));
-        
-        // Process batch in parallel
-        await Promise.all(
-          batch.map(async (photo) => {
-            try {
-              // Load and resize image (960px mantém qualidade)
-              const img = await faceService.loadImage(photo.url);
-              const resized = faceService.resizeImage(img, 960); // Aumentado de 800 para 960
-              
-              // Detect faces - inputSize 416 é bom balanço velocidade/qualidade
-              const descriptors = await faceService.detectAllFaces(resized, { 
-                inputSize: 416,  // Aumentado de 320 para 416 (melhor qualidade)
-                scoreThreshold: 0.35  // Threshold padrão
-              });
-
-              // Save descriptors
-              if (descriptors.length > 0) {
-                await api.saveFaceDescriptors(reindexEventId, photo.id, descriptors, t);
-                totalFaces += descriptors.length;
-              }
-              
-              processed++;
-            } catch (err: any) {
-              console.error(`Erro ao processar foto ${photo.id}:`, err);
-              failed++;
-            }
-          })
-        );
-
-        // Update progress and yield to browser
-        setReindexProgress({ current: Math.min(i + BATCH_SIZE, photos.length), total: photos.length });
-        await new Promise(resolve => setTimeout(resolve, 10)); // 10ms entre batches
-      }
-
-      setReindexResult({ processed, failed, faces: totalFaces });
+      const finalResult = { processed: stats.processed, noFace: stats.noFace, failed: stats.failed, faces: stats.faces };
+      setReindexResult(finalResult);
+      setReindexProgress({ current: 1, total: 1 });
       setReindexStatus('done');
-      showToast('ok', `Reindexação concluída: ${totalFaces} faces detectadas`);
+      showToast('ok', `Reindexação concluída: ${stats.faces} faces em ${stats.total} fotos`);
     } catch (err: any) {
       setReindexError(err.message ?? 'Erro desconhecido');
       setReindexStatus('error');
     }
   };
 
-  // ── Reindex ALL events ──
+  // ── Reindex ALL events (foto a foto por evento) ──
   const startReindexAll = async () => {
     if (availableEvents.length === 0) {
       setReindexError('Nenhum evento disponível');
@@ -852,79 +898,66 @@ export function AdminConfig() {
     }
     const t = await getToken(); if (!t) return;
 
-    setReindexStatus('loading');
+    setReindexStatus('processing');
     setReindexResult(null);
     setReindexError('');
-    setReindexProgress({ current: 0, total: 0 });
+    setReindexProgress({ current: 0, total: availableEvents.length });
+    setReindexPhotoProgress({ current: 0, total: 0 });
+    setReindexEventIndex(0);
+    setReindexLiveStats({ processed: 0, faces: 0, noFace: 0, failed: 0 });
 
     try {
       let totalProcessed = 0;
+      let totalNoFace = 0;
       let totalFailed = 0;
       let totalFacesAll = 0;
-      let totalPhotosAll = 0;
 
-      // Import face detection dependencies
-      const faceService = await import('../lib/faceService');
-      await faceService.loadModels();
+      for (let i = 0; i < availableEvents.length; i++) {
+        const event = availableEvents[i];
+        setReindexEventIndex(i + 1);
+        setReindexCurrentEvent(event.name);
+        setReindexPhotoProgress({ current: 0, total: 0 });
 
-      const BATCH_SIZE = 4;
-
-      for (const event of availableEvents) {
         try {
-          // Get photos for this event
-          const { photos } = await api.startFaceReindex(event.id, t);
-          
-          if (photos.length === 0) continue;
-
-          totalPhotosAll += photos.length;
-          setReindexStatus('processing');
-
-          // Process photos in batches
-          for (let i = 0; i < photos.length; i += BATCH_SIZE) {
-            const batch = photos.slice(i, Math.min(i + BATCH_SIZE, photos.length));
-            
-            await Promise.all(
-              batch.map(async (photo) => {
-                try {
-                  const img = await faceService.loadImage(photo.url);
-                  const resized = faceService.resizeImage(img, 960);
-                  
-                  const descriptors = await faceService.detectAllFaces(resized, { 
-                    inputSize: 416,
-                    scoreThreshold: 0.35
-                  });
-
-                  if (descriptors.length > 0) {
-                    await api.saveFaceDescriptors(event.id, photo.id, descriptors, t);
-                    totalFacesAll += descriptors.length;
-                  }
-                  
-                  totalProcessed++;
-                } catch (err: any) {
-                  console.error(`Erro ao processar foto ${photo.id}:`, err);
-                  totalFailed++;
-                }
-              })
-            );
-
-            setReindexProgress({ current: totalProcessed, total: totalPhotosAll });
-            await new Promise(resolve => setTimeout(resolve, 10));
-          }
+          await reindexEventByPhoto(
+            event.id,
+            t,
+            (cur, tot) => setReindexPhotoProgress({ current: cur, total: tot }),
+            ({ processed, faces, noFace, failed }) => {
+              setReindexLiveStats({
+                processed: totalProcessed + processed,
+                faces: totalFacesAll + faces,
+                noFace: totalNoFace + noFace,
+                failed: totalFailed + failed,
+              });
+            },
+          ).then(stats => {
+            totalProcessed += stats.processed;
+            totalNoFace    += stats.noFace;
+            totalFailed    += stats.failed;
+            totalFacesAll  += stats.faces;
+          });
         } catch (err: any) {
           console.error(`Erro ao processar evento ${event.id}:`, err);
+          totalFailed += 1;
         }
+
+        setReindexProgress({ current: i + 1, total: availableEvents.length });
+        setReindexLiveStats({ processed: totalProcessed, faces: totalFacesAll, noFace: totalNoFace, failed: totalFailed });
       }
 
-      setReindexResult({ processed: totalProcessed, failed: totalFailed, faces: totalFacesAll });
+      setReindexResult({ processed: totalProcessed, noFace: totalNoFace, failed: totalFailed, faces: totalFacesAll });
       setReindexStatus('done');
+      setReindexCurrentEvent('');
       showToast('ok', `Reindexação total concluída: ${totalFacesAll} faces em ${availableEvents.length} eventos`);
     } catch (err: any) {
       setReindexError(err.message ?? 'Erro desconhecido');
       setReindexStatus('error');
+      setReindexCurrentEvent('');
     }
   };
 
-  // ── COMPLETE FLOW: Sync → Reindex → Migrate ──
+  // ── COMPLETE FLOW: Sync → Reindex (pipeline otimizado) ──
   const runCompleteFlow = async () => {
     const t = await getToken(); if (!t) return;
     
@@ -932,9 +965,16 @@ export function AdminConfig() {
     setFlowStep(1);
     setFlowError('');
     setFlowResults({});
+    setSyncProgress('');
+    setReindexProgress({ current: 0, total: 0 });
+    setReindexPhotoProgress({ current: 0, total: 0 });
+    setReindexCurrentEvent('');
+    setReindexLiveStats({ processed: 0, faces: 0, noFace: 0, failed: 0 });
     
     try {
+      // ═══════════════════════════════════════════════════════════════════════
       // STEP 1: Sync Storage → KV
+      // ═══════════════════════════════════════════════════════════════════════
       setSyncStatus('running');
       setSyncProgress('Varrendo pastas do Storage S3...');
       const syncRes = await api.syncStorage(t, skipCompleteSync);
@@ -957,85 +997,68 @@ export function AdminConfig() {
       }
       
       // Recarrega lista de eventos
-      await loadAvailableEvents(t);
+      await loadEventsForReindex();
       
-      // STEP 2: Reindex ALL events
+      // ═══════════════════════════════════════════════════════════════════════
+      // STEP 2: Reindex ALL events (server-side, direto no pgvector)
+      // ═══════════════════════════════════════════════════════════════════════
       setFlowStatus('reindex');
       setFlowStep(2);
-      setReindexStatus('loading');
-      
-      const faceService = await import('../lib/faceService');
-      await faceService.loadModels();
-      
-      const BATCH_SIZE = 4;
-      let totalProcessed = 0;
-      let totalFaces = 0;
-      
-      // Pega eventos atualizados
-      const eventsRes = await api.getEvents(t);
-      const events = eventsRes.events;
-      
       setReindexStatus('processing');
       
-      for (const event of events) {
-        try {
-          const { photos } = await api.startFaceReindex(event.id, t);
-          if (photos.length === 0) continue;
-          
-          for (let i = 0; i < photos.length; i += BATCH_SIZE) {
-            const batch = photos.slice(i, Math.min(i + BATCH_SIZE, photos.length));
-            
-            await Promise.all(
-              batch.map(async (photo) => {
-                try {
-                  const img = await faceService.loadImage(photo.url);
-                  const resized = faceService.resizeImage(img, 960);
-                  
-                  const descriptors = await faceService.detectAllFaces(resized, { 
-                    inputSize: 416,
-                    scoreThreshold: 0.35
-                  });
+      // Pega eventos atualizados
+      const eventsRes = await api.getEvents();
+      const events = eventsRes.events;
+      
+      let totalProcessed = 0;
+      let totalFaces = 0;
+      let totalFailed = 0;
+      
+      setReindexProgress({ current: 0, total: events.length });
+      setReindexPhotoProgress({ current: 0, total: 0 });
+      
+      // Processa evento por evento (foto a foto)
+      for (let i = 0; i < events.length; i++) {
+        const event = events[i];
+        setReindexCurrentEvent(event.name);
+        setReindexEventIndex(i + 1);
+        setReindexPhotoProgress({ current: 0, total: 0 });
 
-                  if (descriptors.length > 0) {
-                    await api.saveFaceDescriptors(event.id, photo.id, descriptors, t);
-                    totalFaces += descriptors.length;
-                  }
-                  
-                  totalProcessed++;
-                } catch (err: any) {
-                  console.error(`Erro ao processar foto ${photo.id}:`, err);
-                }
-              })
-            );
-            
-            setReindexProgress({ current: totalProcessed, total: totalProcessed });
-            await new Promise(resolve => setTimeout(resolve, 10));
-          }
+        try {
+          await reindexEventByPhoto(
+            event.id,
+            t,
+            (cur, tot) => setReindexPhotoProgress({ current: cur, total: tot }),
+            ({ processed, faces, noFace, failed }) => {
+              // processed/faces/noFace/failed são cumulativos DENTRO do evento atual
+              setReindexLiveStats({
+                processed: totalProcessed + processed,
+                faces: totalFaces + faces,
+                noFace: totalFailed + noFace,
+                failed: totalFailed + failed,
+              });
+            },
+          ).then(stats => {
+            totalProcessed += stats.processed;
+            totalFaces += stats.faces;
+            totalFailed += stats.failed;
+          });
         } catch (err: any) {
           console.error(`Erro ao processar evento ${event.id}:`, err);
+          totalFailed += 1;
         }
+
+        setReindexProgress({ current: i + 1, total: events.length });
       }
       
       setReindexStatus('done');
-      setReindexResult({ processed: totalProcessed, failed: 0, faces: totalFaces });
+      setReindexResult({ processed: totalProcessed, noFace: 0, failed: totalFailed, faces: totalFaces });
+      setReindexCurrentEvent('');
       setFlowResults(prev => ({ ...prev, reindex: { processed: totalProcessed, faces: totalFaces } }));
       
-      // Se não detectou faces, para aqui
-      if (totalFaces === 0) {
-        setFlowStatus('done');
-        showToast('ok', 'Fluxo concluído: nenhuma face detectada');
-        return;
-      }
-      
-      // STEP 3: Migrate to pgvector
-      setFlowStatus('migrate');
-      setFlowStep(3);
-      
-      const migrateRes = await api.migrateToPgvector(t);
-      setFlowResults(prev => ({ ...prev, migrate: { embeddings: migrateRes.embeddings } }));
-      
+      // Já indexamos no pgvector diretamente, então não precisa do step 3!
       setFlowStatus('done');
-      showToast('ok', `Fluxo completo: ${totalFaces} faces indexadas no pgvector!`);
+      showToast('ok', `✅ Fluxo completo: ${totalFaces} faces indexadas no pgvector em ${events.length} eventos!`);
       
     } catch (err: any) {
       console.error('Erro no fluxo completo:', err);
@@ -2200,7 +2223,7 @@ export function AdminConfig() {
                           🚀 Executar Fluxo Completo
                         </h3>
                         <p className="text-xs mt-0.5" style={{ color: muted }}>
-                          Sincroniza Storage → Detecta Faces → Indexa no pgvector automaticamente
+                          Sincroniza Storage → Indexa Faces no pgvector — tudo automaticamente
                         </p>
                       </div>
                     </div>
@@ -2210,9 +2233,8 @@ export function AdminConfig() {
                     {/* Steps indicator */}
                     <div className="flex items-center gap-3">
                       {[
-                        { num: 1, label: 'Sync', status: flowStep >= 1 },
-                        { num: 2, label: 'Faces', status: flowStep >= 2 },
-                        { num: 3, label: 'Index', status: flowStep >= 3 },
+                        { num: 1, label: 'Sync Storage', status: flowStep >= 1 },
+                        { num: 2, label: 'Index Faces', status: flowStep >= 2 },
                       ].map(({ num, label, status }) => (
                         <div key={num} className="flex items-center gap-2 flex-1">
                           <div className="flex items-center justify-center w-7 h-7 rounded-full text-xs font-black transition-all"
@@ -2254,9 +2276,14 @@ export function AdminConfig() {
                       }}
                     >
                       {flowStatus === 'idle' && <><Zap className="w-5 h-5" /> Executar fluxo completo agora</>}
-                      {flowStatus === 'sync' && <><Loader2 className="w-5 h-5 animate-spin" /> 1/3 Sincronizando Storage...</>}
-                      {flowStatus === 'reindex' && <><Loader2 className="w-5 h-5 animate-spin" /> 2/3 Detectando faces...</>}
-                      {flowStatus === 'migrate' && <><Loader2 className="w-5 h-5 animate-spin" /> 3/3 Indexando pgvector...</>}
+                      {flowStatus === 'sync' && <><Loader2 className="w-5 h-5 animate-spin" /> 1/2 Sincronizando Storage...</>}
+                      {flowStatus === 'reindex' && (
+                        reindexCurrentEvent ? (
+                          <><Loader2 className="w-5 h-5 animate-spin" /> 2/2 {reindexCurrentEvent} ({reindexProgress.current}/{reindexProgress.total})</>
+                        ) : (
+                          <><Loader2 className="w-5 h-5 animate-spin" /> 2/2 Indexando faces no pgvector...</>
+                        )
+                      )}
                       {flowStatus === 'done' && <><CheckCircle2 className="w-5 h-5" /> Executar novamente</>}
                       {flowStatus === 'error' && <><AlertCircle className="w-5 h-5" /> Tentar novamente</>}
                     </motion.button>
@@ -2279,19 +2306,19 @@ export function AdminConfig() {
                             <p className="text-lg font-black" style={{ color: isDark ? '#10b981' : '#059669' }}>
                               {flowResults.sync?.photosImported || 0}
                             </p>
-                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Fotos</p>
+                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Fotos Importadas</p>
+                          </div>
+                          <div className="rounded-lg p-2.5 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+                            <p className="text-lg font-black" style={{ color: isDark ? '#10b981' : '#059669' }}>
+                              {flowResults.reindex?.processed || 0}
+                            </p>
+                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Fotos Processadas</p>
                           </div>
                           <div className="rounded-lg p-2.5 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
                             <p className="text-lg font-black" style={{ color: isDark ? '#10b981' : '#059669' }}>
                               {flowResults.reindex?.faces || 0}
                             </p>
-                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Faces</p>
-                          </div>
-                          <div className="rounded-lg p-2.5 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
-                            <p className="text-lg font-black" style={{ color: isDark ? '#10b981' : '#059669' }}>
-                              {flowResults.migrate?.embeddings || 0}
-                            </p>
-                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Indexados</p>
+                            <p className="text-[10px] uppercase tracking-wider font-medium mt-0.5" style={{ color: muted }}>Faces Indexadas</p>
                           </div>
                         </div>
                       </motion.div>
@@ -2598,8 +2625,8 @@ export function AdminConfig() {
                   </div>
                 </div>
 
-                {/* ── Card: pgvector migration ── */}
-                <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
+                {/* ── Card: pgvector migration — REMOVIDO (obsoleto) ── */}
+                {false && <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
                   {/* header */}
                   <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
                     <div className="flex items-center gap-3 mb-1">
@@ -2779,7 +2806,7 @@ export function AdminConfig() {
                       </motion.div>
                     )}
                   </div>
-                </div>
+                </div>}
 
                 {/* ── Card: Reindexação de Faces ── */}
                 <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
@@ -2787,7 +2814,7 @@ export function AdminConfig() {
                   <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
                     <div className="flex items-center gap-3 mb-1">
                       <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black" style={{ background: isDark ? 'rgba(6,182,212,0.15)' : 'rgba(8,145,178,0.12)', color: isDark ? '#06b6d4' : '#0891b2', border: `1px solid ${isDark ? 'rgba(6,182,212,0.3)' : 'rgba(8,145,178,0.25)'}` }}>3</span>
+                        <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black" style={{ background: isDark ? 'rgba(6,182,212,0.15)' : 'rgba(8,145,178,0.12)', color: isDark ? '#06b6d4' : '#0891b2', border: `1px solid ${isDark ? 'rgba(6,182,212,0.3)' : 'rgba(8,145,178,0.25)'}` }}>2</span>
                         <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
                           style={{ background: isDark ? 'rgba(6,182,212,0.08)' : 'rgba(8,145,178,0.07)', border: `1px solid ${isDark ? 'rgba(6,182,212,0.18)' : 'rgba(8,145,178,0.15)'}` }}>
                           <Scan className="w-4.5 h-4.5" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
@@ -2812,7 +2839,7 @@ export function AdminConfig() {
                         <p><strong>Use esta ferramenta se:</strong></p>
                         <ul className="list-disc list-inside space-y-0.5 ml-1">
                           <li>Fotos foram importadas do Storage sem detectar faces</li>
-                          <li>A migração pgvector retornou 0 faces</li>
+                          <li>A busca facial retornou 0 resultados para um evento</li>
                           <li>Você precisa reprocessar um evento específico</li>
                         </ul>
                       </div>
@@ -2881,7 +2908,11 @@ export function AdminConfig() {
                       {reindexStatus === 'loading' ? (
                         <><Loader2 className="w-4 h-4 animate-spin" /> Carregando fotos…</>
                       ) : reindexStatus === 'processing' ? (
-                        <><Loader2 className="w-4 h-4 animate-spin" /> Processando {reindexProgress.current}/{reindexProgress.total}…</>
+                        reindexEventId === 'ALL' ? (
+                          <><Loader2 className="w-4 h-4 animate-spin" /> Evento {reindexEventIndex}/{availableEvents.length} · Foto {reindexPhotoProgress.current}/{reindexPhotoProgress.total || '…'}</>
+                        ) : (
+                          <><Loader2 className="w-4 h-4 animate-spin" /> Foto {reindexPhotoProgress.current}/{reindexPhotoProgress.total || '…'}</>
+                        )
                       ) : reindexEventId === 'ALL' ? (
                         <><Zap className="w-4 h-4" /> Reindexar TODOS os eventos</>
                       ) : (
@@ -2894,38 +2925,115 @@ export function AdminConfig() {
                       <div className="space-y-2">
                         <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
                           <motion.div
-                            animate={{
-                              x: ['-100%', '200%'],
-                            }}
-                            transition={{
-                              duration: 1.5,
-                              repeat: Infinity,
-                              ease: 'linear',
-                            }}
+                            animate={{ x: ['-100%', '200%'] }}
+                            transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
                             className="h-full w-1/3 rounded-full"
                             style={{ background: 'linear-gradient(90deg,#0891b2,#06b6d4)' }}
                           />
                         </div>
-                        <p className="text-xs text-center" style={{ color: muted }}>
-                          Carregando fotos do servidor...
-                        </p>
+                        <p className="text-xs text-center" style={{ color: muted }}>Carregando lista de eventos…</p>
                       </div>
                     )}
 
-                    {/* Progress bar determinada — processing */}
-                    {reindexStatus === 'processing' && reindexProgress.total > 0 && (
-                      <div className="space-y-2">
-                        <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${(reindexProgress.current / reindexProgress.total) * 100}%` }}
-                            className="h-full rounded-full"
-                            style={{ background: 'linear-gradient(90deg,#0891b2,#06b6d4)' }}
-                          />
+                    {/* Progress + live stats cards — processing */}
+                    {reindexStatus === 'processing' && (
+                      <div className="space-y-3">
+                        {/* Barra de progresso — foto a foto (granular) */}
+                        <div className="space-y-2">
+                          {/* Barra primária: fotos (mais granular) */}
+                          <div className="h-2 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                            {reindexPhotoProgress.total > 0 ? (
+                              <motion.div
+                                initial={{ width: 0 }}
+                                animate={{ width: `${(reindexPhotoProgress.current / reindexPhotoProgress.total) * 100}%` }}
+                                transition={{ duration: 0.15, ease: 'easeOut' }}
+                                className="h-full rounded-full"
+                                style={{ background: 'linear-gradient(90deg,#0891b2,#06b6d4)' }}
+                              />
+                            ) : (
+                              <motion.div
+                                animate={{ x: ['-100%', '200%'] }}
+                                transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                                className="h-full w-1/3 rounded-full"
+                                style={{ background: 'linear-gradient(90deg,#0891b2,#06b6d4)' }}
+                              />
+                            )}
+                          </div>
+                          {/* Barra secundária: eventos (apenas no modo ALL) */}
+                          {reindexEventId === 'ALL' && reindexProgress.total > 0 && (
+                            <div className="h-1 rounded-full overflow-hidden" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)' }}>
+                              <motion.div
+                                animate={{ width: `${(reindexProgress.current / reindexProgress.total) * 100}%` }}
+                                transition={{ duration: 0.3, ease: 'easeOut' }}
+                                className="h-full rounded-full"
+                                style={{ background: 'linear-gradient(90deg,rgba(139,92,246,0.7),rgba(168,85,247,0.7))' }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Labels evento + foto */}
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            {reindexCurrentEvent && (
+                              <span className="text-xs font-semibold" style={{ color: isDark ? '#06b6d4' : '#0891b2' }}>
+                                {reindexEventId === 'ALL'
+                                  ? `Evento ${reindexEventIndex}/${availableEvents.length}: ${reindexCurrentEvent}`
+                                  : reindexCurrentEvent}
+                              </span>
+                            )}
+                            {reindexPhotoProgress.total > 0 && (
+                              <>
+                                {reindexCurrentEvent && <span className="text-xs" style={{ color: muted }}>·</span>}
+                                <span className="text-xs tabular-nums" style={{ color: muted }}>
+                                  Foto <strong style={{ color: text }}>{reindexPhotoProgress.current}</strong>/{reindexPhotoProgress.total}
+                                </span>
+                              </>
+                            )}
+                            {!reindexCurrentEvent && reindexPhotoProgress.total === 0 && (
+                              <span className="text-xs" style={{ color: muted }}>Iniciando reindexação…</span>
+                            )}
+                          </div>
                         </div>
-                        <p className="text-xs text-center" style={{ color: muted }}>
-                          {reindexProgress.current} de {reindexProgress.total} fotos processadas
-                        </p>
+
+                        {/* Cards de estatísticas em tempo real */}
+                        <motion.div
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="grid grid-cols-3 gap-2"
+                        >
+                          {[
+                            { label: 'Indexadas', value: reindexLiveStats.processed, color: isDark ? '#06b6d4' : '#0891b2', dimColor: isDark ? 'rgba(6,182,212,0.12)' : 'rgba(8,145,178,0.1)', borderColor: isDark ? 'rgba(6,182,212,0.25)' : 'rgba(8,145,178,0.2)', title: 'Fotos com face indexada no pgvector' },
+                            { label: 'Faces',     value: reindexLiveStats.faces,     color: isDark ? '#86efac' : '#16a34a', dimColor: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,163,74,0.08)', borderColor: isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,163,74,0.18)', title: 'Embeddings inseridos no pgvector' },
+                            { label: 'Sem face',  value: reindexLiveStats.noFace,    color: muted, dimColor: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', borderColor: cardBorder, title: 'Fotos sem rosto detectado — esperado para fotos de cenário' },
+                          ].map(({ label, value, color, dimColor, borderColor, title }) => (
+                            <div key={label} className="rounded-xl p-3 text-center" style={{ background: dimColor, border: `1px solid ${borderColor}` }} title={title}>
+                              <motion.p
+                                key={value}
+                                initial={{ scale: 1.25, opacity: 0.6 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                className="text-xl font-black"
+                                style={{ color, fontFamily: "'Montserrat',sans-serif" }}
+                              >
+                                {value}
+                              </motion.p>
+                              <p className="text-[10px] mt-0.5 uppercase tracking-wider font-semibold" style={{ color: muted }}>{label}</p>
+                            </div>
+                          ))}
+                        </motion.div>
+
+                        {/* Pulsing dot de atividade */}
+                        <div className="flex items-center justify-center gap-2">
+                          <motion.span
+                            animate={{ scale: [1, 1.4, 1], opacity: [1, 0.4, 1] }}
+                            transition={{ duration: 1.2, repeat: Infinity }}
+                            className="w-2 h-2 rounded-full inline-block flex-shrink-0"
+                            style={{ background: isDark ? '#06b6d4' : '#0891b2' }}
+                          />
+                          <p className="text-[11px] tabular-nums" style={{ color: muted }}>
+                            {reindexPhotoProgress.total > 0
+                              ? `Indexando foto ${reindexPhotoProgress.current} de ${reindexPhotoProgress.total} no pgvector…`
+                              : 'Carregando lista de fotos…'}
+                          </p>
+                        </div>
                       </div>
                     )}
 
@@ -2972,24 +3080,30 @@ export function AdminConfig() {
                           <>
                             <div className="grid grid-cols-3 gap-2">
                               {[
-                                { label: 'Processadas', value: reindexResult.processed, accent: false },
-                                { label: 'Faces detectadas', value: reindexResult.faces, accent: true },
-                                { label: 'Falhas', value: reindexResult.failed, accent: reindexResult.failed > 0 },
-                              ].map(({ label, value, accent }) => (
-                                <div key={label} className="rounded-lg p-3 text-center"
-                                  style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}>
-                                  <p className="text-xl font-black" style={{ 
-                                    color: accent && value > 0 ? (isDark ? '#fbbf24' : '#b45309') : text, 
-                                    fontFamily: "'Montserrat',sans-serif" 
-                                  }}>{value}</p>
+                                { label: 'Indexadas', value: reindexResult.processed, color: isDark ? '#06b6d4' : '#0891b2', bg: isDark ? 'rgba(6,182,212,0.08)' : 'rgba(8,145,178,0.07)', border: isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.18)', title: 'Fotos com face indexada com sucesso' },
+                                { label: 'Faces', value: reindexResult.faces, color: isDark ? '#86efac' : '#16a34a', bg: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,163,74,0.06)', border: isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,163,74,0.18)', title: 'Embeddings inseridos no pgvector' },
+                                { label: 'Sem face', value: reindexResult.noFace ?? reindexResult.failed, color: muted, bg: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: cardBorder, title: 'Fotos sem rosto detectado — normal para fotos de cenário/arquitetura' },
+                              ].map(({ label, value, color, bg, border, title }) => (
+                                <div key={label} className="rounded-lg p-3 text-center" title={title}
+                                  style={{ background: bg, border: `1px solid ${border}` }}>
+                                  <p className="text-xl font-black" style={{ color, fontFamily: "'Montserrat',sans-serif" }}>{value}</p>
                                   <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
                                 </div>
                               ))}
                             </div>
 
+                            {reindexResult.failed > 0 && (
+                              <div className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.2)' : 'rgba(220,38,38,0.15)'}` }}>
+                                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
+                                <p className="text-xs" style={{ color: isDark ? '#fca5a5' : '#b91c1c' }}>
+                                  <strong>{reindexResult.failed}</strong> erro{reindexResult.failed !== 1 ? 's' : ''} reais ao indexar — verifique o console do servidor.
+                                </p>
+                              </div>
+                            )}
+
                             {reindexResult.faces > 0 && (
                               <p className="text-xs" style={{ color: muted }}>
-                                ✅ Agora rode a <strong>Migração pgvector</strong> acima para indexar as faces detectadas no banco vetorial.
+                                ✅ Faces indexadas no pgvector! Agora você pode usar o reconhecimento facial normalmente.
                               </p>
                             )}
                           </>

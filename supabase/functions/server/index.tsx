@@ -138,6 +138,13 @@ async function brandingWithUrls(bustCache = false) {
   }
 
   const b: any = (await kv.get(`${KV}branding`)) ?? {};
+  console.log(`[brandingWithUrls] Branding KV:`, {
+    logoPath: b.logoPath,
+    faviconPath: b.faviconPath,
+    ctaBgPath: b.ctaBgPath,
+    scannerImagePath: b.scannerImagePath,
+    backgroundPaths: b.backgroundPaths,
+  });
 
   // ── Batch-sign all storage paths in ONE round-trip ────────────────────────
   const pathsToSign: string[] = [
@@ -148,13 +155,26 @@ async function brandingWithUrls(bustCache = false) {
     ...(b.backgroundPaths ?? []),
   ].filter(Boolean) as string[];
 
+  console.log(`[brandingWithUrls] Paths para assinar (${pathsToSign.length}):`, pathsToSign);
+
   const urlMap: Record<string, string> = {};
   if (pathsToSign.length > 0) {
-    const { data: signed } = await sb().storage
+    const { data: signed, error } = await sb().storage
       .from(BUCKET)
       .createSignedUrls(pathsToSign, 3600);
+    
+    console.log(`[brandingWithUrls] Signed URLs result:`, {
+      signed: signed?.length ?? 0,
+      error: error?.message,
+    });
+    
     for (const item of signed ?? []) {
-      if (item.signedUrl) urlMap[item.path] = item.signedUrl;
+      if (item.signedUrl) {
+        urlMap[item.path] = item.signedUrl;
+        console.log(`[brandingWithUrls] ✓ ${item.path} → ${item.signedUrl.substring(0, 80)}...`);
+      } else {
+        console.log(`[brandingWithUrls] ✗ ${item.path} → SEM URL!`);
+      }
     }
   }
 
@@ -165,6 +185,14 @@ async function brandingWithUrls(bustCache = false) {
   const backgroundUrls = (b.backgroundPaths ?? [])
     .map((p: string) => urlMap[p])
     .filter(Boolean) as string[];
+
+  console.log(`[brandingWithUrls] URLs finais:`, {
+    logoUrl: logoUrl ? '✓' : '✗',
+    faviconUrl: faviconUrl ? '✓' : '✗',
+    ctaBgUrl: ctaBgUrl ? '✓' : '✗',
+    scannerImageUrl: scannerImageUrl ? '✓' : '✗',
+    backgroundUrls: backgroundUrls.length,
+  });
 
   const result = {
     appName: b.appName ?? "Smart Match",
@@ -1085,6 +1113,157 @@ app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async 
   }
 });
 
+// ── Reindex Single Event (pgvector) ───────────────────────────────────────────
+// POST /admin/reindex-event — admin auth
+// Reindexar faces de um único evento. Body: { eventId: string }
+app.post("/make-server-68454e9b/admin/reindex-event", adminAuth, async (c) => {
+  const startedAt = Date.now();
+  const errors: string[] = [];
+  let totalPhotos = 0;
+  let totalFaces = 0;
+  let noFacePhotos = 0;   // fotos sem descritor facial (normal — sem pessoa na foto)
+  let notFoundPhotos = 0; // fotos ausentes no KV (problema real de dados)
+  let processedPhotos = 0;
+
+  try {
+    const body = await c.req.json();
+    const eventId = body.eventId as string;
+
+    if (!eventId) {
+      return c.json({ error: "eventId é obrigatório" }, 400);
+    }
+
+    console.log(`[reindex-event] Iniciando reindexação do evento ${eventId}`);
+
+    // ── 1. Buscar todas as fotos do evento ────────────────────────────────────
+    const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
+    console.log(`[reindex-event] Evento ${eventId} tem ${photoIds.length} fotos`);
+
+    if (photoIds.length === 0) {
+      return c.json({
+        success: false,
+        error: `Nenhuma foto encontrada para o evento ${eventId}`,
+        stats: { totalPhotos: 0, totalFaces: 0, skippedPhotos: 0, processedPhotos: 0, elapsedMs: 0, errors: [] },
+      });
+    }
+
+    // ── 2. Processar cada foto ─────────────────────────────────────────────────
+    for (const photoId of photoIds) {
+      processedPhotos++;
+      const photo: any = await kv.get(`${KV}photo:${photoId}`);
+      
+      if (!photo) {
+        notFoundPhotos++;
+        console.log(`[reindex-event] ✗ Foto ${photoId} não encontrada no KV`);
+        continue;
+      }
+
+      const rawDesc = photo.faceDescriptors;
+      const hasDescriptors =
+        rawDesc != null &&
+        (Array.isArray(rawDesc)
+          ? rawDesc.length > 0
+          : Object.keys(rawDesc).length > 0);
+
+      if (!hasDescriptors) {
+        noFacePhotos++;
+        console.log(`[reindex-event] ○ Foto ${photoId} sem descritor facial (normal)`);
+        continue;
+      }
+
+      try {
+        await faces.indexFaces(photoId, eventId, rawDesc);
+        totalPhotos++;
+        const faceCount = Array.isArray(rawDesc) ? rawDesc.length : Object.keys(rawDesc).length;
+        totalFaces += faceCount;
+        console.log(`[reindex-event] ✓ Foto ${photoId}: ${faceCount} faces indexadas`);
+      } catch (e: any) {
+        errors.push(`foto=${photoId}: ${e.message}`);
+        console.log(`[reindex-event] ✗ Erro ao indexar foto ${photoId}:`, e.message);
+      }
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+    console.log(`[reindex-event] ✅ Evento ${eventId} concluído — ${totalPhotos} fotos, ${totalFaces} faces em ${elapsedMs}ms`);
+
+    return c.json({
+      success: true,
+      // noFacePhotos = sem rosto na foto (esperado); notFoundPhotos = dado faltante no KV; errors = falhas reais
+      stats: { totalPhotos, totalFaces, noFacePhotos, notFoundPhotos, skippedPhotos: noFacePhotos + notFoundPhotos, processedPhotos, elapsedMs, errors },
+    });
+  } catch (err) {
+    console.log("Erro ao reindexar evento:", err);
+    return c.json({ error: `Erro ao reindexar evento: ${err}` }, 500);
+  }
+});
+
+// ── Photo IDs for an event ────────────────────────────────────────────────────
+// GET /admin/events/:id/photo-ids — admin auth
+// Retorna a lista ordenada de IDs de fotos de um evento (sem sign URLs, rápido).
+app.get("/make-server-68454e9b/admin/events/:id/photo-ids", adminAuth, async (c) => {
+  try {
+    const id = c.req.param("id");
+    if (!id) return c.json({ error: "id do evento é obrigatório" }, 400);
+    const photoIds: string[] = await getList(`${KV}photos:event:${id}`);
+    console.log(`[photo-ids] Evento ${id}: ${photoIds.length} fotos`);
+    return c.json({ photoIds, total: photoIds.length });
+  } catch (err) {
+    console.log("Erro ao buscar IDs de fotos:", err);
+    // Retorna lista vazia em vez de 500 para que o frontend continue com os outros eventos
+    return c.json({ photoIds: [], total: 0, warning: `Erro ao buscar lista: ${err}` });
+  }
+});
+
+// ── Reindex Single Photo (pgvector) ───────────────────────────────────────────
+// POST /admin/reindex-photo — admin auth
+// Indexa os descritores faciais de UMA foto. Chamado pelo frontend foto a foto
+// para permitir progresso granular (foto X/Y) em tempo real.
+// Body: { eventId: string, photoId: string }
+app.post("/make-server-68454e9b/admin/reindex-photo", adminAuth, async (c) => {
+  try {
+    const { eventId, photoId } = await c.req.json();
+    if (!eventId || !photoId) {
+      return c.json({ error: "eventId e photoId são obrigatórios" }, 400);
+    }
+
+    const photo: any = await kv.get(`${KV}photo:${photoId}`);
+
+    if (!photo) {
+      console.log(`[reindex-photo] ✗ Foto ${photoId} não encontrada no KV`);
+      return c.json({ success: false, notFound: true, noFace: false, faces: 0 });
+    }
+
+    // faceDescriptors pode ser array de arrays, array de plain objects (Float32Array
+    // serializado via JSON) ou plain object de arrays — normalizeDescriptors() em
+    // faces.ts trata todos esses formatos automaticamente.
+    const rawDesc = photo.faceDescriptors;
+    const hasDescriptors =
+      rawDesc != null &&
+      (Array.isArray(rawDesc)
+        ? rawDesc.length > 0
+        : Object.keys(rawDesc).length > 0);
+
+    if (!hasDescriptors) {
+      return c.json({ success: true, notFound: false, noFace: true, faces: 0, fileName: photo.fileName ?? photoId });
+    }
+
+    await faces.indexFaces(photoId, eventId, rawDesc);
+
+    const faceCount = Array.isArray(rawDesc) ? rawDesc.length : Object.keys(rawDesc).length;
+    console.log(`[reindex-photo] ✓ ${photo.fileName ?? photoId}: ${faceCount} face(s)`);
+    return c.json({
+      success: true, notFound: false, noFace: false,
+      faces: faceCount,
+      fileName: photo.fileName ?? photoId,
+    });
+  } catch (err: any) {
+    const msg = err?.message ?? String(err);
+    console.log(`[reindex-photo] ✗ Erro: ${msg}`);
+    // Sem status 500 para que o frontend não receba "Failed to fetch"
+    return c.json({ success: false, notFound: false, noFace: false, faces: 0, error: msg });
+  }
+});
+
 // ── KV Diagnostic ─────────────────────────────────────────────────────────────
 // GET /admin/diagnose-kv — admin auth
 // Lê a tabela kv_store_68454e9b diretamente e retorna contagens por prefixo.
@@ -1432,21 +1611,38 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/download", async 
       return c.json({ error: "Foto não encontrada no storage" }, 404);
     }
 
-    // Generate signed download URL valid for 7 days
-    const { data, error: signErr } = await sb()
+    // ── Streaming proxy ────────────────────────────────────────────────────────
+    // Em vez de redirecionar para a signed URL do Supabase (que mobile browsers
+    // frequentemente ABREM em vez de baixar), o servidor busca o arquivo e o
+    // envia diretamente como blob — garantindo Content-Disposition: attachment
+    // funcione em todos os browsers, inclusive iOS Safari e Chrome mobile.
+    const fileName = photo.fileName ?? `foto-${photoId}.jpg`;
+
+    const { data: blob, error: dlErr } = await sb()
       .storage
       .from(BUCKET)
-      .createSignedUrl(photo.storagePath, 604800, {
-        download: photo.fileName ?? `foto-${photoId}.jpg`,
-      });
+      .download(photo.storagePath);
 
-    if (signErr || !data?.signedUrl) {
-      console.log("Erro ao gerar signed URL:", signErr?.message);
-      return c.json({ error: `Erro ao gerar link de download: ${signErr?.message}` }, 500);
+    if (dlErr || !blob) {
+      console.log("[download] Erro ao buscar arquivo do storage:", dlErr?.message);
+      // Fallback: signed URL redirect (melhor que nada)
+      const { data: signData } = await sb().storage
+        .from(BUCKET)
+        .createSignedUrl(photo.storagePath, 3600, { download: fileName });
+      if (signData?.signedUrl) return c.redirect(signData.signedUrl, 302);
+      return c.json({ error: `Erro ao baixar foto: ${dlErr?.message}` }, 500);
     }
 
-    // 302 redirect so the QR code scanner goes straight to the file
-    return c.redirect(data.signedUrl, 302);
+    const contentType = blob.type || "image/jpeg";
+    console.log(`[download] ✓ Streaming ${fileName} (${blob.size} bytes, ${contentType})`);
+
+    // c.body() do Hono garante que o middleware CORS adicione os headers corretamente.
+    // blob.stream() evita carregar o arquivo inteiro em memória no Edge Function.
+    return c.body(blob.stream() as ReadableStream, 200, {
+      "Content-Type": contentType,
+      "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
+      "Cache-Control": "private, max-age=3600",
+    });
   } catch (err) {
     console.log("Erro ao baixar foto:", err);
     return c.json({ error: `Erro ao gerar download: ${err}` }, 500);

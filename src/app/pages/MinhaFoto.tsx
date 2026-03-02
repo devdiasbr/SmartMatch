@@ -10,11 +10,14 @@ export function MinhaFoto() {
   const { orderId, photoId } = useParams<{ orderId: string; photoId: string }>();
 
   const [viewUrl,     setViewUrl]     = useState<string | null>(null);
+  // downloadUrl = signed URL do Supabase Storage com ?download=... (CORS aberto)
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [fileName,    setFileName]    = useState('minha-foto.jpg');
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');
+  const [downloading, setDownloading] = useState(false);
   const [downloaded,  setDownloaded]  = useState(false);
+  const [dlError,     setDlError]     = useState('');
 
   useEffect(() => {
     if (!orderId || !photoId) {
@@ -23,7 +26,6 @@ export function MinhaFoto() {
       return;
     }
 
-    // /signed-url retorna JSON — sem redirect, sem problema de CORS
     fetch(`${BASE}/orders/${orderId}/photos/${photoId}/signed-url`, {
       headers: { Authorization: `Bearer ${publicAnonKey}` },
     })
@@ -38,12 +40,70 @@ export function MinhaFoto() {
       .finally(() => setLoading(false));
   }, [orderId, photoId]);
 
+  /**
+   * Download confiável para todos os browsers (desktop e mobile, incluindo iOS Safari).
+   *
+   * FLUXO:
+   *   1. fetch(downloadUrl)  → downloadUrl é uma signed URL do Supabase Storage.
+   *      O Supabase Storage retorna Access-Control-Allow-Origin: * em todas as
+   *      respostas de signed URLs, então o fetch cross-origin funciona de qualquer
+   *      domínio (figma.site, localhost, produção, etc.).
+   *
+   *   2. response.blob()  → o arquivo vira um Blob local no browser.
+   *
+   *   3. URL.createObjectURL(blob)  → gera uma URL blob:// que é SEMPRE same-origin
+   *      com a página atual, independente de onde a foto veio.
+   *
+   *   4. <a href={blobUrl} download={fileName}>.click()  → como é same-origin,
+   *      o atributo `download` É respeitado em TODOS os browsers, inclusive iOS
+   *      Safari 11.3+ e Chrome mobile.
+   *
+   * POR QUE NÃO window.location.href = signedUrl?
+   *   → iOS Safari abre imagens (.jpg/.png) no próprio browser em vez de baixar,
+   *     ignorando Content-Disposition: attachment para tipos de imagem.
+   *
+   * POR QUE NÃO <a href={signedUrl} download>?
+   *   → O atributo `download` é ignorado em URLs cross-origin (specs do HTML5).
+   *     blob:// resolve isso por ser same-origin por definição.
+   */
   const handleDownload = async () => {
-    if (!downloadUrl) return;
-    // A signed URL do Supabase com option download já tem Content-Disposition: attachment.
-    // Redirecionar a janela atual é o método mais confiável em mobile (sem CORS, sem popup bloqueado).
-    window.location.href = downloadUrl;
-    setDownloaded(true);
+    if (!downloadUrl || downloading) return;
+    setDownloading(true);
+    setDlError('');
+
+    try {
+      // Busca o arquivo diretamente do Supabase Storage (CORS * configurado)
+      const res = await fetch(downloadUrl);
+      if (!res.ok) throw new Error(`Erro ao buscar foto: HTTP ${res.status}`);
+
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+
+      // Disparo do download via anchor same-origin — funciona em todos os browsers
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = fileName;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Libera a memória após 30s (garante que o download iniciou)
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
+
+      setDownloaded(true);
+    } catch (err: any) {
+      console.error('[MinhaFoto] Erro no download:', err);
+      // Fallback: abre a URL em nova aba; no Android costuma iniciar o download
+      if (downloadUrl) {
+        window.open(downloadUrl, '_blank');
+        setDownloaded(true);
+      } else {
+        setDlError('Não foi possível baixar. Tente novamente.');
+      }
+    } finally {
+      setDownloading(false);
+    }
   };
 
   return (
@@ -98,7 +158,7 @@ export function MinhaFoto() {
           </div>
         )}
 
-        {/* Erro */}
+        {/* Erro ao carregar */}
         {!loading && error && (
           <div className="flex flex-col items-center justify-center py-16 px-6 gap-4 text-center">
             <div
@@ -124,14 +184,15 @@ export function MinhaFoto() {
               </p>
             </div>
             <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.7rem' }}>
-              Se o problema persistir, procure o fotógrafo do evento.
+              Procure o fotógrafo do evento ou acesse smartmatch.com.br
             </p>
           </div>
         )}
 
-        {/* Foto carregada */}
+        {/* Foto carregada com sucesso */}
         {!loading && viewUrl && (
           <>
+            {/* Imagem */}
             <div className="relative bg-black" style={{ lineHeight: 0 }}>
               <img
                 src={viewUrl}
@@ -152,12 +213,14 @@ export function MinhaFoto() {
               </div>
             </div>
 
+            {/* Ações */}
             <div className="p-5 flex flex-col gap-3">
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={handleDownload}
-                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl text-sm font-bold"
+                disabled={downloading}
+                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl"
                 style={{
                   background: downloaded
                     ? 'rgba(0,255,127,0.12)'
@@ -168,15 +231,40 @@ export function MinhaFoto() {
                   fontWeight: 800,
                   fontSize: '0.95rem',
                   letterSpacing: '-0.01em',
+                  opacity: downloading ? 0.75 : 1,
+                  cursor: downloading ? 'not-allowed' : 'pointer',
                 }}
               >
-                <Download className="w-4 h-4" />
-                {downloaded ? '✓ Download iniciado' : 'Baixar minha foto'}
+                {downloading ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Preparando download…</>
+                ) : downloaded ? (
+                  <><CheckCircle2 className="w-4 h-4" /> Download concluído</>
+                ) : (
+                  <><Download className="w-4 h-4" /> Baixar minha foto</>
+                )}
               </motion.button>
+
+              {/* Erro de download */}
+              {dlError && (
+                <p className="text-center text-xs" style={{ color: '#f87171', lineHeight: 1.5 }}>
+                  {dlError}
+                </p>
+              )}
+
+              {/* Dica pós-download (especialmente útil para iOS) */}
+              {downloaded && !dlError && (
+                <p
+                  className="text-center text-xs"
+                  style={{ color: 'rgba(255,255,255,0.35)', lineHeight: 1.6 }}
+                >
+                  📱 No iPhone: acesse o app <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Arquivos</strong> → Downloads<br />
+                  📱 No Android: verifique a pasta <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Downloads</strong> ou Galeria
+                </p>
+              )}
 
               <p
                 className="text-center"
-                style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.7rem', lineHeight: 1.5 }}
+                style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.68rem', lineHeight: 1.5 }}
               >
                 Foto exclusiva do Tour Palmeiras · Smart<span style={{ color: '#00FF7F' }}>Match</span>
               </p>
