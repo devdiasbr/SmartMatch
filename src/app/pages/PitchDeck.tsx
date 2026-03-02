@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Camera, Database, Zap, DollarSign, TrendingUp, Server, ShieldCheck, Smartphone, Home, Download, FileText } from 'lucide-react';
 import { Link } from 'react-router';
-import exampleImage from 'figma:asset/28cc77f8da9969b7be442b7fdb54fbf553f509cf.png';
 
 const slides = [
   {
@@ -48,7 +47,6 @@ const slides = [
   {
     id: 'infrastructure',
     title: 'Infraestrutura & Custos',
-    image: exampleImage,
     content: [
       { title: 'Eficiência de Custo', text: 'Modelo "Pay as you go". Custos escalam apenas com vendas.' },
       { title: 'Storage', text: 'Supabase Storage para armazenamento seguro e barato de milhares de fotos.' },
