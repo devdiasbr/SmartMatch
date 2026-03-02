@@ -25,8 +25,10 @@ const getPublicPhotoUrl = (orderId: string, photoId: string) =>
 // URL de download DIRETO — endpoint público do servidor que faz streaming com
 // Content-Disposition: attachment. Quando o celular escaneia o QR e abre esta URL,
 // o browser inicia o download automaticamente (sem precisar clicar em botão).
+// Inclui ?apikey= para que o gateway do Supabase Edge Functions aceite
+// a request sem header Authorization (ex: QR code aberto no celular).
 const getDirectDownloadUrl = (orderId: string, photoId: string) =>
-  `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b/orders/${orderId}/photos/${photoId}/download`;
+  `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b/orders/${orderId}/photos/${photoId}/download?apikey=${publicAnonKey}`;
 
 // Busca URL pública fresca para exibição/impressão (evita URLs assinadas expiradas)
 const BASE_SERVER = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
