@@ -13,14 +13,8 @@ import { Cart } from './pages/Cart';
 import { AdminLogin } from './pages/AdminLogin';
 import { MinhaFoto } from './pages/MinhaFoto';
 
-import { PitchDeck } from './pages/PitchDeck';
-
 export const router = createBrowserRouter([
-  // Rotas standalone (sem layout Root — sem Header/Footer)
-  {
-    path: '/pitch',
-    Component: PitchDeck,
-  },
+  // Rota standalone (sem layout Root — sem Header/Footer)
   {
     path: '/minha-foto/:orderId/:photoId',
     Component: MinhaFoto,
