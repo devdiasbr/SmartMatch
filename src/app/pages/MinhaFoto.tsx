@@ -100,12 +100,95 @@ export function MinhaFoto() {
   }, [downloadUrl, loading, error]);
 
   /**
+   * Adiciona rodapé de branding à foto via Canvas e retorna um novo Blob.
+   * Funciona com qualquer imagem CORS-aberta (signed URLs do Supabase Storage).
+   */
+  async function addFooterToBlob(originalBlob: Blob): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      const objUrl = URL.createObjectURL(originalBlob);
+
+      img.onload = () => {
+        const W = img.naturalWidth;
+        const H = img.naturalHeight;
+
+        // Altura do rodapé proporcional à largura (mínimo 80px, máximo 160px)
+        const footerH = Math.max(80, Math.min(160, Math.round(W * 0.13)));
+        const padding = Math.round(footerH * 0.22);
+
+        const canvas = document.createElement('canvas');
+        canvas.width  = W;
+        canvas.height = H + footerH;
+        const ctx = canvas.getContext('2d')!;
+
+        // Foto original
+        ctx.drawImage(img, 0, 0, W, H);
+
+        // Fundo do rodapé — gradiente escuro igual ao da página
+        const grad = ctx.createLinearGradient(0, H, 0, H + footerH);
+        grad.addColorStop(0, '#06120A');
+        grad.addColorStop(1, '#08080E');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, H, W, footerH);
+
+        // Linha separadora verde
+        ctx.fillStyle = '#00FF7F';
+        ctx.fillRect(0, H, W, Math.max(2, Math.round(footerH * 0.025)));
+
+        // Tamanhos de fonte
+        const fontBig   = Math.round(footerH * 0.36);
+        const fontSmall = Math.round(footerH * 0.22);
+        const cy        = H + footerH / 2;
+
+        // "Smart" (branco)
+        ctx.font = `900 ${fontBig}px Montserrat, Arial Black, Arial, sans-serif`;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign    = 'left';
+        ctx.fillStyle    = '#ffffff';
+        const smartW = ctx.measureText('Smart').width;
+
+        // "Match" (verde)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Smart', padding, cy - fontSmall * 0.3);
+        ctx.fillStyle = '#00FF7F';
+        ctx.fillText('Match', padding + smartW, cy - fontSmall * 0.3);
+
+        // Subtítulo
+        ctx.font = `400 ${fontSmall}px Montserrat, Arial, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.45)';
+        ctx.fillText('Tour Palmeiras · Allianz Parque', padding, cy + fontBig * 0.42);
+
+        // Site (direita)
+        ctx.textAlign = 'right';
+        ctx.font = `700 ${fontSmall}px Montserrat, Arial, sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.fillText('smartmatch.com.br', W - padding, cy);
+
+        URL.revokeObjectURL(objUrl);
+
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob);
+          else reject(new Error('Canvas toBlob retornou null'));
+        }, 'image/jpeg', 0.92);
+      };
+
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        reject(new Error('Falha ao carregar imagem no canvas'));
+      };
+
+      img.src = objUrl;
+    });
+  }
+
+  /**
    * Download confiável em todos os browsers (incluindo iOS Safari e Chrome mobile).
    *
    * Fluxo:
-   *  1. fetch(downloadUrl) → a signed URL do Storage tem CORS aberto (Access-Control-Allow-Origin: *)
-   *  2. response.blob() → arquivo vira Blob local
-   *  3. URL.createObjectURL(blob) → URL blob:// é sempre same-origin → atributo `download` funciona
+   *  1. fetch(downloadUrl) → signed URL do Storage (CORS *)
+   *  2. addFooterToBlob()  → compõe rodapé via Canvas
+   *  3. URL.createObjectURL(blob) → blob:// é same-origin → atributo `download` funciona
    */
   const handleDownload = async () => {
     if (!downloadUrl || downloading) return;
@@ -121,12 +204,23 @@ export function MinhaFoto() {
         throw new Error(`Erro ao buscar foto no storage: HTTP ${res.status}`);
       }
 
-      const blob = await res.blob();
-      const blobUrl = URL.createObjectURL(blob);
+      const originalBlob = await res.blob();
+
+      // Compõe o rodapé e gera blob final
+      let finalBlob: Blob;
+      try {
+        finalBlob = await addFooterToBlob(originalBlob);
+      } catch (canvasErr) {
+        console.warn('[MinhaFoto] Canvas footer falhou, usando blob original:', canvasErr);
+        finalBlob = originalBlob;
+      }
+
+      const blobUrl = URL.createObjectURL(finalBlob);
 
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = fileName;
+      // Sempre .jpg porque exportamos do canvas como JPEG
+      a.download = fileName.replace(/\.[^.]+$/, '') + '_smartmatch.jpg';
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -137,7 +231,6 @@ export function MinhaFoto() {
     } catch (err: any) {
       console.error('[MinhaFoto] Erro no download:', err);
       setDlError(`Falha no download: ${err.message ?? 'erro desconhecido'}. Tente o botão abaixo.`);
-      // Fallback: abre em nova aba (funciona em Android)
       window.open(downloadUrl, '_blank');
     } finally {
       setDownloading(false);
