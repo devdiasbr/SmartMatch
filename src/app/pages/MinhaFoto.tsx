@@ -98,12 +98,7 @@ async function loadImgRobust(src: string): Promise<HTMLImageElement | null> {
  * Compõe a foto com o rodapé oficial (imagem carregada do servidor)
  * e o QR code posicionado conforme o slider configurado no admin.
  *
- * Layout:
- *   ┌──────────────────── foto ─────────────────────┐
- *   ├── [   imagem do rodapé   ] [  QR code  ]  ────┤  ← footerQrRight %
- *   └───────────────────────────────────────────────┘
- *
- * Se o rodapé não estiver configurado no servidor, cai no fallback de texto.
+ * Se não houver rodapé configurado, retorna a foto original sem modificação.
  */
 async function composePhotoWithFooter(
   photoBlobOrUrl: Blob | string,
@@ -127,7 +122,7 @@ async function composePhotoWithFooter(
     const W = photoImg.naturalWidth;
     const H = photoImg.naturalHeight;
 
-    // ── 2. Rodapé: imagem do servidor OU fallback texto ──────────────────────
+    // ── Rodapé: SOMENTE a imagem real do servidor ────────────────────────────
     let footerImg: HTMLImageElement | null = null;
     if (footerImgUrl) {
       console.log('[composePhotoWithFooter] Carregando rodapé de:', footerImgUrl.slice(0, 100));
@@ -138,14 +133,22 @@ async function composePhotoWithFooter(
       console.warn('[composePhotoWithFooter] footerImgUrl é null — sem rodapé configurado no servidor');
     }
 
-    // Altura do rodapé: usa aspect ratio real da imagem (igual ao CSS do PDV: width:100% + display:block)
-    // Se não houver imagem, usa proporção padrão 10%
-    let FH: number;
-    if (footerImg) {
-      FH = Math.round(W * (footerImg.naturalHeight / footerImg.naturalWidth));
-    } else {
-      FH = Math.max(80, Math.min(240, Math.round(W * 0.10)));
+    // Sem imagem de rodapé → retorna a foto original sem nada inventado
+    if (!footerImg) {
+      const canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(photoImg, 0, 0, W, H);
+      canvas.toBlob(
+        blob => blob ? resolve(blob) : reject(new Error('canvas.toBlob retornou null')),
+        'image/jpeg', 0.93,
+      );
+      return;
     }
+
+    // Altura do rodapé: aspect ratio real da imagem (igual ao CSS do PDV: width:100% + display:block)
+    const FH = Math.round(W * (footerImg.naturalHeight / footerImg.naturalWidth));
 
     const canvas = document.createElement('canvas');
     canvas.width  = W;
@@ -155,26 +158,9 @@ async function composePhotoWithFooter(
     // ── 1. Foto original ────────────────────────────────────────────────────
     ctx.drawImage(photoImg, 0, 0, W, H);
 
-    if (footerImg) {
-      // Desenha a imagem do rodapé estendida ao longo de toda a largura (aspect ratio real)
-      ctx.drawImage(footerImg, 0, H, W, FH);
-      // Libera blob URL se foi criado via loadImgRobust
-      if ((footerImg as any)._blobUrl) URL.revokeObjectURL((footerImg as any)._blobUrl);
-    } else {
-      // Fallback: barra verde escura simples
-      const grad = ctx.createLinearGradient(0, H, 0, H + FH);
-      grad.addColorStop(0, '#003D17');
-      grad.addColorStop(1, '#006B2B');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, H, W, FH);
-
-      const fSize = Math.round(FH * 0.4);
-      ctx.font      = `900 italic ${fSize}px Montserrat, 'Arial Black', Arial, sans-serif`;
-      ctx.fillStyle = '#00E05A';
-      ctx.textBaseline = 'middle';
-      ctx.textAlign    = 'left';
-      ctx.fillText('TOUR Palmeiras · Allianz Parque', Math.round(FH * 0.2), H + FH / 2);
-    }
+    // ── 2. Imagem do rodapé (a REAL, do servidor) ───────────────────────────
+    ctx.drawImage(footerImg, 0, H, W, FH);
+    if ((footerImg as any)._blobUrl) URL.revokeObjectURL((footerImg as any)._blobUrl);
 
     // ── 3. QR code sobreposto ao rodapé na posição configurada ───────────────
     // Replica EXATAMENTE o CSS do print: right:qrRight%, top:6%, height:88%, aspect-ratio:1/1

@@ -927,13 +927,13 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                         <input
                           type="range"
                           min={0}
-                          max={50}
+                          max={100}
                           step={0.5}
                           value={qrRight}
                           onChange={e => syncQrRight(Number(e.target.value))}
                           className="w-full h-2 rounded-full appearance-none cursor-pointer"
                           style={{
-                            background: `linear-gradient(to right, ${green} 0%, ${green} ${(qrRight / 50) * 100}%, ${inputBg} ${(qrRight / 50) * 100}%, ${inputBg} 100%)`,
+                            background: `linear-gradient(to right, ${green} 0%, ${green} ${qrRight}%, ${inputBg} ${qrRight}%, ${inputBg} 100%)`,
                             accentColor: green,
                           }}
                         />
@@ -1104,6 +1104,14 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                     <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-xs"
                       style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', color:'#ef4444' }}>
                       <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{error}
+                    </div>
+                  )}
+
+                  {!footerSrc && cart.length > 0 && (
+                    <div className="flex items-center gap-2 p-3 rounded-xl mb-3 text-xs"
+                      style={{ background:'rgba(251,191,36,0.08)', border:'1px solid rgba(251,191,36,0.2)', color:'#f59e0b' }}>
+                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span>Configure a <strong>imagem do rodapé</strong> antes de finalizar a venda. Sem ela, a foto não pode ser impressa.</span>
                     </div>
                   )}
 
