@@ -40,6 +40,10 @@ async function fetchFooterConfig(): Promise<{ footerImageUrl: string | null; foo
     const res = await fetch(`${BASE}/branding/public?apikey=${encodeURIComponent(publicAnonKey)}`);
     if (!res.ok) throw new Error(`branding/public retornou ${res.status}`);
     const data = await res.json();
+    console.log('[fetchFooterConfig] Resposta do servidor:', {
+      footerImageUrl: data.footerImageUrl ? data.footerImageUrl.slice(0, 80) + '…' : null,
+      footerQrRight: data.footerQrRight,
+    });
     return {
       footerImageUrl: data.footerImageUrl ?? null,
       footerQrRight:  typeof data.footerQrRight === 'number' ? data.footerQrRight : 16,
@@ -52,16 +56,42 @@ async function fetchFooterConfig(): Promise<{ footerImageUrl: string | null; foo
 
 // ── Canvas utilities ──────────────────────────────────────────────────────────
 
-/** Carrega uma imagem de URL com crossOrigin; retorna null se falhar em 5s */
+/** Carrega uma imagem de URL com crossOrigin; retorna null se falhar em 10s */
 function loadImg(src: string): Promise<HTMLImageElement | null> {
   return new Promise(resolve => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    const timer = setTimeout(() => resolve(null), 5000);
+    const timer = setTimeout(() => { console.warn('[loadImg] Timeout:', src.slice(0, 80)); resolve(null); }, 10000);
     img.onload  = () => { clearTimeout(timer); resolve(img); };
-    img.onerror = () => { clearTimeout(timer); resolve(null); };
+    img.onerror = () => { clearTimeout(timer); console.warn('[loadImg] Erro ao carregar:', src.slice(0, 80)); resolve(null); };
     img.src = src;
   });
+}
+
+/**
+ * Carrega imagem via fetch → blob → objectURL (evita problemas de CORS com signed URLs).
+ * Fallback para loadImg direto se fetch falhar.
+ */
+async function loadImgRobust(src: string): Promise<HTMLImageElement | null> {
+  // Estratégia 1: fetch como blob (bypass CORS do canvas)
+  try {
+    const res = await fetch(src);
+    if (res.ok) {
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      const img = await loadImg(objUrl);
+      if (img) {
+        // Não revogamos aqui — será usado no canvas. Revogamos depois do draw.
+        (img as any)._blobUrl = objUrl;
+        return img;
+      }
+      URL.revokeObjectURL(objUrl);
+    }
+  } catch (e) {
+    console.warn('[loadImgRobust] fetch falhou, tentando direto:', e);
+  }
+  // Estratégia 2: carrega direto (funciona para data URLs e URLs sem CORS)
+  return loadImg(src);
 }
 
 /**
@@ -97,8 +127,26 @@ async function composePhotoWithFooter(
     const W = photoImg.naturalWidth;
     const H = photoImg.naturalHeight;
 
-    // Altura do rodapé é proporcional à largura (10%), min 80, max 240px
-    const FH  = Math.max(80, Math.min(240, Math.round(W * 0.10)));
+    // ── 2. Rodapé: imagem do servidor OU fallback texto ──────────────────────
+    let footerImg: HTMLImageElement | null = null;
+    if (footerImgUrl) {
+      console.log('[composePhotoWithFooter] Carregando rodapé de:', footerImgUrl.slice(0, 100));
+      footerImg = await loadImgRobust(footerImgUrl);
+      if (!footerImg) console.warn('[composePhotoWithFooter] FALHA ao carregar imagem do rodapé!');
+      else console.log('[composePhotoWithFooter] Rodapé carregado OK:', footerImg.naturalWidth, 'x', footerImg.naturalHeight);
+    } else {
+      console.warn('[composePhotoWithFooter] footerImgUrl é null — sem rodapé configurado no servidor');
+    }
+
+    // Altura do rodapé: usa aspect ratio real da imagem (igual ao CSS do PDV: width:100% + display:block)
+    // Se não houver imagem, usa proporção padrão 10%
+    let FH: number;
+    if (footerImg) {
+      FH = Math.round(W * (footerImg.naturalHeight / footerImg.naturalWidth));
+    } else {
+      FH = Math.max(80, Math.min(240, Math.round(W * 0.10)));
+    }
+
     const canvas = document.createElement('canvas');
     canvas.width  = W;
     canvas.height = H + FH;
@@ -107,12 +155,11 @@ async function composePhotoWithFooter(
     // ── 1. Foto original ────────────────────────────────────────────────────
     ctx.drawImage(photoImg, 0, 0, W, H);
 
-    // ── 2. Rodapé: imagem do servidor OU fallback texto ──────────────────────
-    const footerImg = footerImgUrl ? await loadImg(footerImgUrl) : null;
-
     if (footerImg) {
-      // Desenha a imagem do rodapé estendida ao longo de toda a largura
+      // Desenha a imagem do rodapé estendida ao longo de toda a largura (aspect ratio real)
       ctx.drawImage(footerImg, 0, H, W, FH);
+      // Libera blob URL se foi criado via loadImgRobust
+      if ((footerImg as any)._blobUrl) URL.revokeObjectURL((footerImg as any)._blobUrl);
     } else {
       // Fallback: barra verde escura simples
       const grad = ctx.createLinearGradient(0, H, 0, H + FH);
