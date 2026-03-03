@@ -332,6 +332,13 @@ export function AdminConfig() {
   const [migrError, setMigrError] = useState('');
   const [migrProgress, setMigrProgress] = useState({ current: 0, total: 0 });
 
+  // ── Reclaim Ownership state ──
+  // ── Flatten to Global state ──
+  const [flattenFromId,   setFlattenFromId]   = useState('30a616f9-1c98-46c7-97c5-ef094b22ab63');
+  const [flattenStatus,   setFlattenStatus]   = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [flattenResult,   setFlattenResult]   = useState<{ migrated: string[]; tenantKeysFound: string[]; message: string } | null>(null);
+  const [flattenError,    setFlattenError]    = useState('');
+
   // ── KV Diagnose state ──
   type DiagStatus = 'idle' | 'running' | 'done' | 'error';
   const [diagStatus, setDiagStatus] = useState<DiagStatus>('idle');
@@ -719,6 +726,24 @@ export function AdminConfig() {
       await refreshBranding(); await loadBranding();
     } catch (err: any) { showToast('err', err.message); }
     finally { setDeletingScanner(false); }
+  };
+
+  // ── Flatten to Global ──
+  const runFlattenToGlobal = async () => {
+    const t = await getToken(); if (!t) return;
+    setFlattenStatus('running');
+    setFlattenResult(null);
+    setFlattenError('');
+    try {
+      const data = await api.flattenToGlobal(flattenFromId.trim() || undefined, t);
+      if (data.error) throw new Error(data.error);
+      setFlattenResult(data);
+      setFlattenStatus('done');
+      showToast('ok', data.migrated.length > 0 ? `✓ Migração concluída: ${data.migrated.join(', ')}` : '✓ Dados já estavam globais');
+    } catch (err: any) {
+      setFlattenError(err.message ?? 'Erro desconhecido');
+      setFlattenStatus('error');
+    }
   };
 
   // ── diagnóstico KV ──
@@ -3138,11 +3163,88 @@ export function AdminConfig() {
                       </p>
                     </div>
 
-                    {/* Placeholder para ferramentas avançadas */}
-                    <div className="rounded-xl p-6 text-center" style={{ background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)', border: `1px dashed ${cardBorder}` }}>
-                      <p className="text-sm" style={{ color: muted }}>
-                        Ferramentas de diagnóstico serão movidas para cá
-                      </p>
+                    {/* ── Card: Flatten to Global ── */}
+                    <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid rgba(168,85,247,0.2)` }}>
+                      <div className="p-5 border-b" style={{ borderColor: 'rgba(168,85,247,0.15)' }}>
+                        <div className="flex items-center gap-3 mb-1">
+                          <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                            style={{ background: 'rgba(168,85,247,0.08)', border: '1px solid rgba(168,85,247,0.2)' }}>
+                            <Database className="w-4 h-4" style={{ color: '#a855f7' }} />
+                          </div>
+                          <div>
+                            <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>
+                              Migrar Dados para Global
+                            </h3>
+                            <p className="text-xs mt-0.5" style={{ color: muted }}>
+                              Copia índices de prefixos legados para o prefixo global ef:
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-5 space-y-4">
+                        <div className="rounded-xl p-3 text-xs" style={{ background: isDark ? 'rgba(168,85,247,0.06)' : 'rgba(168,85,247,0.04)', border: '1px solid rgba(168,85,247,0.15)', color: isDark ? '#d8b4fe' : '#7e22ce', lineHeight: 1.6 }}>
+                          Use esta ferramenta uma vez se seus eventos não aparecem no painel. Ela copia os índices de qualquer prefixo tenant legado para o índice global <code className="px-1 rounded" style={{ background: 'rgba(0,0,0,0.1)' }}>ef:events:index</code>.
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold mb-1.5" style={{ color: muted }}>
+                            UUID do tenant de origem (opcional)
+                          </label>
+                          <input
+                            type="text"
+                            value={flattenFromId}
+                            onChange={e => { setFlattenFromId(e.target.value); setFlattenStatus('idle'); setFlattenError(''); }}
+                            placeholder="Deixe em branco para varrer todos os prefixos"
+                            className="w-full px-3 py-2 rounded-xl text-xs font-mono outline-none transition-all"
+                            style={{ background: inputBg, border: `1px solid ${inputBrd}`, color: text }}
+                          />
+                        </div>
+
+                        <motion.button
+                          whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                          onClick={runFlattenToGlobal}
+                          disabled={flattenStatus === 'running'}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-bold transition-all"
+                          style={{
+                            background: flattenStatus === 'running' ? 'rgba(168,85,247,0.05)' : 'rgba(168,85,247,0.12)',
+                            border: '1px solid rgba(168,85,247,0.3)',
+                            color: '#a855f7',
+                            cursor: flattenStatus === 'running' ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {flattenStatus === 'running'
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Migrando…</>
+                            : <><Database className="w-4 h-4" /> Executar Migração</>}
+                        </motion.button>
+
+                        {flattenStatus === 'done' && flattenResult && (
+                          <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}
+                            className="rounded-xl p-4 space-y-2"
+                            style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.2)' }}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <CheckCircle2 className="w-4 h-4" style={{ color: '#22c55e' }} />
+                              <span className="text-xs font-black" style={{ color: '#22c55e' }}>Concluído!</span>
+                            </div>
+                            <p className="text-xs" style={{ color: muted }}>{flattenResult.message}</p>
+                            {flattenResult.migrated.length > 0 && (
+                              <div className="space-y-1 pt-1">
+                                {flattenResult.migrated.map(m => (
+                                  <div key={m} className="text-xs font-mono px-2 py-1 rounded-lg" style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', color: text }}>✓ {m}</div>
+                                ))}
+                              </div>
+                            )}
+                            <p className="text-xs pt-1" style={{ color: muted }}>Recarregue a página para ver os dados.</p>
+                          </motion.div>
+                        )}
+
+                        {flattenStatus === 'error' && (
+                          <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}>
+                            <AlertTriangle className="w-3.5 h-3.5 inline mr-1.5" />
+                            {flattenError}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
 

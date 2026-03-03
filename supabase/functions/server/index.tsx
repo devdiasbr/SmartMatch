@@ -1,4 +1,4 @@
-import { Hono } from "npm:hono";
+import { Hono } from "npm:hono@4";
 import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -6,30 +6,7 @@ import * as kv from "./kv_store.tsx";
 import * as faces from "./faces.ts";
 
 const BUCKET = "make-68454e9b-eventface";
-const KV = "ef:"; // Global entity prefix (photo, event, order by ID)
-
-// ── Multi-tenant KV prefix — isolates indexes/config per admin user ──────────
-function tenantKV(userId: string): string {
-  return `ef:${userId}:`;
-}
-
-// Resolve org for public routes: ?org= param → tenant prefix, fallback to legacy "ef:"
-// Real isolation lives in ADMIN routes (JWT + getOwnedEvent ownership check).
-// Public routes use ?org= for scoping when available, fallback = legacy index.
-function resolvePublicPrefix(c: any): string {
-  const org = c.req.query("org");
-  if (org) return tenantKV(org);
-  return KV;
-}
-
-// ── Ownership check helper ──────────────────────────────────────────────────
-// STRICT: returns event only if ownerId === userId. No ownerId = orphan = denied.
-async function getOwnedEvent(eventId: string, userId: string): Promise<{ event: any; error?: undefined } | { event?: undefined; error: string }> {
-  const event: any = await kv.get(`${KV}event:${eventId}`);
-  if (!event) return { error: "Evento não encontrado" };
-  if (event.ownerId !== userId) return { error: "Acesso negado: este evento pertence a outro tenant" };
-  return { event };
-}
+const KV = "ef:"; // Global entity prefix
 
 const app = new Hono();
 
@@ -58,25 +35,17 @@ function sb() {
   return _sb;
 }
 
-// ── In-memory branding cache (per-tenant) ─────────────────────────────────────
+// ── In-memory branding cache ──────────────────────────────────────────────────
 
 interface BrandingCacheEntry { data: any; ts: number; }
 const brandingCacheMap = new Map<string, BrandingCacheEntry>();
 const BRANDING_TTL = 30_000; // 30 s
 
-function bustBrandingCache(prefix?: string) {
-  if (prefix) brandingCacheMap.delete(prefix);
-  else brandingCacheMap.clear();
+function bustBrandingCache() {
+  brandingCacheMap.clear();
 }
 
-// ── Auth middleware ───────────────────────────────────────────────────────────
-
 // ── JWT crypto helpers ────────────────────────────────────────────────────────
-// Validate Supabase JWTs locally using SUPABASE_JWT_SECRET (always available in
-// Edge Functions). This avoids calling supabase.auth.getUser(jwt) which checks
-// for an ACTIVE SESSION — causing spurious "Auth session missing!" 401s when
-// the session expires server-side even though the JWT is still cryptographically
-// valid (within its 1-hour exp window).
 
 function base64UrlDecode(str: string): Uint8Array {
   const pad = str.length % 4;
@@ -116,9 +85,8 @@ async function verifySupabaseJWT(jwt: string): Promise<{ userId: string } | null
 
     const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1])));
 
-    // Reject tokens past their exp claim
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-      console.log(`[adminAuth] Token expirado (exp=${payload.exp} < now=${Math.floor(Date.now() / 1000)})`);
+      console.log(`[adminAuth] Token expirado (exp=${payload.exp})`);
       return null;
     }
 
@@ -134,9 +102,10 @@ async function verifySupabaseJWT(jwt: string): Promise<{ userId: string } | null
   }
 }
 
+// ── Admin auth middleware ─────────────────────────────────────────────────────
+// Single-tenant: any authenticated user can access all admin routes.
+
 async function adminAuth(c: any, next: () => Promise<void>) {
-  // ONLY use X-Admin-Token for admin auth — Authorization header carries the
-  // publicAnonKey (for the Supabase gateway) and must NOT be treated as an admin token.
   const adminToken = c.req.header("X-Admin-Token");
 
   if (!adminToken) {
@@ -144,42 +113,24 @@ async function adminAuth(c: any, next: () => Promise<void>) {
     return c.json({ error: "Não autorizado: token de admin ausente (X-Admin-Token)" }, 401);
   }
 
-  // ── Primary: cryptographic JWT verification (no active-session check needed) ──
-  // SUPABASE_JWT_SECRET is automatically available in all Supabase Edge Functions.
-  // This eliminates "Auth session missing!" errors caused by expired/cleaned sessions.
+  // Primary: cryptographic JWT verification
   const verified = await verifySupabaseJWT(adminToken);
   if (verified?.userId) {
-    // JWT is valid — fetch user via admin API (bypasses session state entirely)
     const { data: { user }, error } = await sb().auth.admin.getUserById(verified.userId);
     if (error || !user) {
-      console.log("adminAuth: usuário não encontrado via getUserById:", error?.message);
+      console.log("adminAuth: usuário não encontrado:", error?.message);
       return c.json({ error: "Não autorizado: usuário não encontrado" }, 401);
     }
-
-    // Check role: only 'owner' users can access admin routes.
-    // Legacy users (created before role was added) are allowed through.
-    const role = user.user_metadata?.role;
-    if (role && role !== "owner") {
-      console.log(`adminAuth: user ${user.id} tem role '${role}', esperado 'owner'`);
-      return c.json({ error: "Não autorizado: permissão insuficiente" }, 403);
-    }
-
     c.set("userId", user.id);
     return await next();
   }
 
-  // ── Fallback: session-based validation (if SUPABASE_JWT_SECRET not available) ──
+  // Fallback: session-based validation
   console.log("adminAuth: verificação crypto falhou, usando getUser() como fallback");
   const { data: { user }, error } = await sb().auth.getUser(adminToken);
   if (error || !user) {
     console.log("adminAuth getUser() falhou:", error?.message ?? "token inválido");
     return c.json({ error: `Não autorizado: ${error?.message ?? "token inválido"}` }, 401);
-  }
-
-  const role = user.user_metadata?.role;
-  if (role && role !== "owner") {
-    console.log(`adminAuth: user ${user.id} tem role '${role}', esperado 'owner'`);
-    return c.json({ error: "Não autorizado: permissão insuficiente" }, 403);
   }
 
   c.set("userId", user.id);
@@ -206,92 +157,48 @@ async function removeFromList(key: string, id: string) {
   await kv.set(key, list.filter((i) => i !== id));
 }
 
-// ── Auto-claim orphan data ──────────────────────────────────────────────────
-// Stamps ownerId on ALL records that don't have one yet, and indexes them
-// under the tenant prefix. Idempotent — safe to run on every admin request.
-// Uses an in-memory set so it only runs once per user per cold start.
-const _claimRanFor = new Set<string>();
+// ── Flatten tenant data → global (one-time repair) ────────────────────────────
+// Runs once per cold start per userId. If the global ef:events:index is empty
+// but the user's tenant prefix has data, copy it to global. This fixes the
+// state left behind by the old multi-tenant system.
+const _flattenRan = new Set<string>();
 
-async function autoClaimOrphans(userId: string): Promise<void> {
-  if (_claimRanFor.has(userId)) return;
-  _claimRanFor.add(userId);
-
-  const T = tenantKV(userId);
-  const claimed: string[] = [];
+async function flattenToGlobal(userId: string): Promise<void> {
+  if (_flattenRan.has(userId)) return;
+  _flattenRan.add(userId);
 
   try {
-    // ── Events ──
-    const legacyEventIds = await getList(`${KV}events:index`);
-    for (const eid of legacyEventIds) {
-      const ev: any = await kv.get(`${KV}event:${eid}`);
-      if (!ev) continue;
-      if (!ev.ownerId) {
-        ev.ownerId = userId;
-        ev.updatedAt = new Date().toISOString();
-        await kv.set(`${KV}event:${eid}`, ev);
-        claimed.push(`event:${eid}`);
-      }
-      if (ev.ownerId === userId) {
-        await appendToList(`${T}events:index`, eid);
+    const globalEvents = await getList(`${KV}events:index`);
+    if (globalEvents.length > 0) return; // already have global data
+
+    const tenantPrefix = `ef:${userId}:`;
+    const tenantEvents = await getList(`${tenantPrefix}events:index`);
+    if (tenantEvents.length > 0) {
+      await kv.set(`${KV}events:index`, tenantEvents);
+      console.log(`[flattenToGlobal] Copiou ${tenantEvents.length} eventos de ${tenantPrefix}`);
+    }
+
+    const globalOrders = await getList(`${KV}orders:index`);
+    if (!globalOrders.length) {
+      const tenantOrders = await getList(`${tenantPrefix}orders:index`);
+      if (tenantOrders.length > 0) {
+        await kv.set(`${KV}orders:index`, tenantOrders);
+        console.log(`[flattenToGlobal] Copiou ${tenantOrders.length} pedidos de ${tenantPrefix}`);
       }
     }
 
-    // ── Orders ──
-    const legacyOrderIds = await getList(`${KV}orders:index`);
-    for (const oid of legacyOrderIds) {
-      const order: any = await kv.get(`${KV}order:${oid}`);
-      if (!order) continue;
-      if (!order.ownerId) {
-        order.ownerId = userId;
-        order.updatedAt = new Date().toISOString();
-        await kv.set(`${KV}order:${oid}`, order);
-        claimed.push(`order:${oid}`);
-      }
-      if (order.ownerId === userId) {
-        await appendToList(`${T}orders:index`, oid);
-      }
+    if (!await kv.get(`${KV}config`)) {
+      const tc = await kv.get(`${tenantPrefix}config`);
+      if (tc) { await kv.set(`${KV}config`, tc); console.log(`[flattenToGlobal] Copiou config`); }
     }
 
-    // ── Photos ──
-    const allEventIds = [...new Set([...legacyEventIds, ...(await getList(`${T}events:index`))])];
-    for (const eid of allEventIds) {
-      const photoIds = await getList(`${KV}photos:event:${eid}`);
-      for (const pid of photoIds) {
-        const photo: any = await kv.get(`${KV}photo:${pid}`);
-        if (!photo) continue;
-        if (!photo.ownerId) {
-          photo.ownerId = userId;
-          await kv.set(`${KV}photo:${pid}`, photo);
-          claimed.push(`photo:${pid}`);
-        }
-      }
-    }
-
-    // ── Config & Branding → copy to tenant prefix ──
-    const tenantCfg: any = await kv.get(`${T}config`);
-    if (!tenantCfg) {
-      const legacyCfg: any = await kv.get(`${KV}config`);
-      if (legacyCfg) {
-        await kv.set(`${T}config`, { ...legacyCfg });
-        claimed.push("config");
-      }
-    }
-    const tenantBrand: any = await kv.get(`${T}branding`);
-    if (!tenantBrand) {
-      const legacyBrand: any = await kv.get(`${KV}branding`);
-      if (legacyBrand) {
-        await kv.set(`${T}branding`, { ...legacyBrand });
-        claimed.push("branding");
-      }
-    }
-
-    if (claimed.length > 0) {
-      console.log(`[autoClaimOrphans] userId=${userId} claimed ${claimed.length} records: ${claimed.join(", ")}`);
+    if (!await kv.get(`${KV}branding`)) {
+      const tb = await kv.get(`${tenantPrefix}branding`);
+      if (tb) { await kv.set(`${KV}branding`, tb); bustBrandingCache(); console.log(`[flattenToGlobal] Copiou branding`); }
     }
   } catch (err) {
-    console.log(`[autoClaimOrphans] Erro:`, err);
-    // Don't block the request — just log
-    _claimRanFor.delete(userId); // allow retry on next request
+    console.log("[flattenToGlobal] Erro:", err);
+    _flattenRan.delete(userId); // allow retry
   }
 }
 
@@ -309,9 +216,6 @@ async function initStorage() {
   }
 }
 
-// ── Seed ──────────────────────────────────────────────────────────────────────
-
-// Initialize on startup
 initStorage();
 
 // ── Health ────────────────────────────────────────────────────────────────────
@@ -322,8 +226,7 @@ app.get("/make-server-68454e9b/health", (c) => c.json({ status: "ok" }));
 
 app.get("/make-server-68454e9b/stats/public", async (c) => {
   try {
-    const P = resolvePublicPrefix(c);
-    const eventIds = await getList(`${P}events:index`);
+    const eventIds = await getList(`${KV}events:index`);
     const events: any[] = (
       await Promise.all(eventIds.map((id) => kv.get(`${KV}event:${id}`)))
     ).filter(Boolean);
@@ -340,70 +243,42 @@ app.get("/make-server-68454e9b/stats/public", async (c) => {
 
 // ── Branding ──────────────────────────────────────────────────────────────────
 
-async function brandingWithUrls(bustCache = false, prefix = KV) {
-  // Serve from in-memory cache when fresh (per-tenant)
+async function brandingWithUrls(bustCache = false) {
+  const cacheKey = "global";
   const now = Date.now();
-  const cached = brandingCacheMap.get(prefix);
+  const cached = brandingCacheMap.get(cacheKey);
   if (!bustCache && cached && now - cached.ts < BRANDING_TTL) {
     return cached.data;
   }
 
-  const b: any = (await kv.get(`${prefix}branding`)) ?? {};
+  const b: any = (await kv.get(`${KV}branding`)) ?? {};
   console.log(`[brandingWithUrls] Branding KV:`, {
-    logoPath: b.logoPath,
-    faviconPath: b.faviconPath,
-    ctaBgPath: b.ctaBgPath,
-    scannerImagePath: b.scannerImagePath,
+    logoPath: b.logoPath, faviconPath: b.faviconPath,
+    ctaBgPath: b.ctaBgPath, scannerImagePath: b.scannerImagePath,
     backgroundPaths: b.backgroundPaths,
   });
 
-  // ── Batch-sign all storage paths in ONE round-trip ────────────────────────
   const pathsToSign: string[] = [
-    b.logoPath,
-    b.faviconPath,
-    b.ctaBgPath,
-    b.scannerImagePath,
+    b.logoPath, b.faviconPath, b.ctaBgPath, b.scannerImagePath,
     ...(b.backgroundPaths ?? []),
   ].filter(Boolean) as string[];
-
-  console.log(`[brandingWithUrls] Paths para assinar (${pathsToSign.length}):`, pathsToSign);
 
   const urlMap: Record<string, string> = {};
   if (pathsToSign.length > 0) {
     const { data: signed, error } = await sb().storage
       .from(BUCKET)
       .createSignedUrls(pathsToSign, 3600);
-    
-    console.log(`[brandingWithUrls] Signed URLs result:`, {
-      signed: signed?.length ?? 0,
-      error: error?.message,
-    });
-    
+    console.log(`[brandingWithUrls] Signed URLs: ${signed?.length ?? 0}, error: ${error?.message}`);
     for (const item of signed ?? []) {
-      if (item.signedUrl) {
-        urlMap[item.path] = item.signedUrl;
-        console.log(`[brandingWithUrls] ✓ ${item.path} → ${item.signedUrl.substring(0, 80)}...`);
-      } else {
-        console.log(`[brandingWithUrls] ✗ ${item.path} → SEM URL!`);
-      }
+      if (item.signedUrl) urlMap[item.path] = item.signedUrl;
     }
   }
 
-  const logoUrl        = b.logoPath         ? (urlMap[b.logoPath]         ?? null) : null;
-  const faviconUrl     = b.faviconPath      ? (urlMap[b.faviconPath]      ?? null) : null;
-  const ctaBgUrl       = b.ctaBgPath        ? (urlMap[b.ctaBgPath]        ?? null) : null;
-  const scannerImageUrl= b.scannerImagePath ? (urlMap[b.scannerImagePath] ?? null) : null;
-  const backgroundUrls = (b.backgroundPaths ?? [])
-    .map((p: string) => urlMap[p])
-    .filter(Boolean) as string[];
-
-  console.log(`[brandingWithUrls] URLs finais:`, {
-    logoUrl: logoUrl ? '✓' : '✗',
-    faviconUrl: faviconUrl ? '✓' : '✗',
-    ctaBgUrl: ctaBgUrl ? '✓' : '✗',
-    scannerImageUrl: scannerImageUrl ? '✓' : '✗',
-    backgroundUrls: backgroundUrls.length,
-  });
+  const logoUrl         = b.logoPath         ? (urlMap[b.logoPath]         ?? null) : null;
+  const faviconUrl      = b.faviconPath      ? (urlMap[b.faviconPath]      ?? null) : null;
+  const ctaBgUrl        = b.ctaBgPath        ? (urlMap[b.ctaBgPath]        ?? null) : null;
+  const scannerImageUrl = b.scannerImagePath ? (urlMap[b.scannerImagePath] ?? null) : null;
+  const backgroundUrls  = (b.backgroundPaths ?? []).map((p: string) => urlMap[p]).filter(Boolean) as string[];
 
   const result = {
     appName: b.appName ?? "Smart Match",
@@ -412,33 +287,24 @@ async function brandingWithUrls(bustCache = false, prefix = KV) {
     watermarkProducer: b.watermarkProducer ?? "EDU SANTANA PRODUÇÕES",
     watermarkPhotoTag: b.watermarkPhotoTag ?? "◆ FOTO PROTEGIDA ◆",
     watermarkTour: b.watermarkTour ?? "© TOUR PALMEIRAS",
-    logoUrl,
-    faviconUrl,
-    backgroundUrls,
-    ctaBgUrl,
-    scannerImageUrl,
-    hasLogo: !!b.logoPath,
-    hasFavicon: !!b.faviconPath,
+    logoUrl, faviconUrl, backgroundUrls, ctaBgUrl, scannerImageUrl,
+    hasLogo: !!b.logoPath, hasFavicon: !!b.faviconPath,
     backgroundCount: (b.backgroundPaths ?? []).length,
     updatedAt: b.updatedAt ?? null,
-    // Venue / tour identity
     venueName: b.venueName ?? "Allianz Parque",
     venueLocation: b.venueLocation ?? "São Paulo, SP",
     tourLabel: b.tourLabel ?? "Tour",
     homeExclusiveText: b.homeExclusiveText ?? "Exclusivo Allianz Parque",
-    // ── Home page content ──
     heroLine1: b.heroLine1 ?? "Você vibrou.",
     heroLine2: b.heroLine2 ?? "Você torceu.",
     heroLine3: b.heroLine3 ?? "Encontre-se.",
     heroSubtitle: b.heroSubtitle ?? "Nossa IA varre milhares de fotos do Tour do Allianz Parque e localiza você em segundos. Compre apenas o que importa — os seus momentos.",
     heroCTA: b.heroCTA ?? "Ver eventos",
     heroBadge: b.heroBadge ?? "Allianz Parque · Tour Oficial do Palmeiras",
-    // ── Home CTA banner ──
     ctaTitle1: b.ctaTitle1 ?? "Pronto para encontrar",
     ctaTitle2: b.ctaTitle2 ?? "seus momentos?",
     ctaSubtitle: b.ctaSubtitle ?? "Tire uma selfie e nossa IA encontra você em segundos entre milhares de fotos.",
     ctaButton: b.ctaButton ?? "Ver eventos",
-    // ── Events page content ──
     eventsHeroTitle: b.eventsHeroTitle ?? "Reviva seus",
     eventsHeroTitleAccent: b.eventsHeroTitleAccent ?? "Momentos no Allianz",
     eventsHeroSubtitle: b.eventsHeroSubtitle ?? "Busca com reconhecimento facial. Encontre suas fotos pelo data e horário do tour.",
@@ -446,34 +312,27 @@ async function brandingWithUrls(bustCache = false, prefix = KV) {
     eventSessionTypes: (() => {
       const OLD_DEFAULTS = ["Tour", "Partida", "Confraternização", "Show", "Corporativo"];
       const stored: string[] = Array.isArray(b.eventSessionTypes) ? b.eventSessionTypes : [];
-      // If the stored list is exactly the old hardcoded defaults, migrate to ['Tour']
-      const isOldDefault =
-        stored.length === OLD_DEFAULTS.length &&
-        OLD_DEFAULTS.every((v, i) => stored[i] === v);
+      const isOldDefault = stored.length === OLD_DEFAULTS.length && OLD_DEFAULTS.every((v, i) => stored[i] === v);
       if (stored.length === 0 || isOldDefault) return ["Tour"];
       return stored;
     })(),
     bgTransitionInterval: typeof b.bgTransitionInterval === 'number' ? b.bgTransitionInterval : 5,
   };
 
-  brandingCacheMap.set(prefix, { data: result, ts: Date.now() });
+  brandingCacheMap.set(cacheKey, { data: result, ts: Date.now() });
   return result;
 }
 
-// Public branding (no auth) — requires ?org= for multi-tenant
+// Public branding (no auth)
 app.get("/make-server-68454e9b/branding/public", async (c) => {
   try {
-    const prefix = resolvePublicPrefix(c);
-    return c.json(await brandingWithUrls(false, prefix));
+    return c.json(await brandingWithUrls(false));
   } catch (err) {
     console.log("Erro ao buscar branding público:", err);
     return c.json({
-      appName: "Smart Match",
-      pageTitle: "Smart Match – Tour Palmeiras",
-      watermarkText: "SMART MATCH",
-      watermarkProducer: "EDU SANTANA PRODUÇÕES",
-      watermarkPhotoTag: "◆ FOTO PROTEGIDA ◆",
-      watermarkTour: "© TOUR PALMEIRAS",
+      appName: "Smart Match", pageTitle: "Smart Match – Tour Palmeiras",
+      watermarkText: "SMART MATCH", watermarkProducer: "EDU SANTANA PRODUÇÕES",
+      watermarkPhotoTag: "◆ FOTO PROTEGIDA ◆", watermarkTour: "© TOUR PALMEIRAS",
       logoUrl: null, faviconUrl: null, backgroundUrls: [], ctaBgUrl: null, scannerImageUrl: null,
       hasLogo: false, hasFavicon: false, backgroundCount: 0, updatedAt: null,
       venueName: "Allianz Parque", venueLocation: "São Paulo, SP",
@@ -482,22 +341,20 @@ app.get("/make-server-68454e9b/branding/public", async (c) => {
   }
 });
 
-// Admin branding GET (tenant-scoped)
+// Admin branding GET
 app.get("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
-    return c.json(await brandingWithUrls(true, T)); // always fresh for admin
+    return c.json(await brandingWithUrls(true));
   } catch (err) {
     return c.json({ error: `Erro ao buscar branding: ${err}` }, 500);
   }
 });
 
-// Admin branding PUT (text fields only, tenant-scoped)
+// Admin branding PUT (text fields only)
 app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
     const body = await c.req.json();
-    const existing: any = (await kv.get(`${T}branding`)) ?? {};
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
     const updated = {
       ...existing,
       appName: body.appName ?? existing.appName,
@@ -506,24 +363,20 @@ app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
       watermarkProducer: body.watermarkProducer ?? existing.watermarkProducer,
       watermarkPhotoTag: body.watermarkPhotoTag ?? existing.watermarkPhotoTag,
       watermarkTour: body.watermarkTour ?? existing.watermarkTour,
-      // Venue / tour identity
       venueName: body.venueName !== undefined ? body.venueName : existing.venueName,
       venueLocation: body.venueLocation !== undefined ? body.venueLocation : existing.venueLocation,
       tourLabel: body.tourLabel !== undefined ? body.tourLabel : existing.tourLabel,
       homeExclusiveText: body.homeExclusiveText !== undefined ? body.homeExclusiveText : existing.homeExclusiveText,
-      // Home content fields
       heroLine1: body.heroLine1 !== undefined ? body.heroLine1 : existing.heroLine1,
       heroLine2: body.heroLine2 !== undefined ? body.heroLine2 : existing.heroLine2,
       heroLine3: body.heroLine3 !== undefined ? body.heroLine3 : existing.heroLine3,
       heroSubtitle: body.heroSubtitle !== undefined ? body.heroSubtitle : existing.heroSubtitle,
       heroCTA: body.heroCTA !== undefined ? body.heroCTA : existing.heroCTA,
       heroBadge: body.heroBadge !== undefined ? body.heroBadge : existing.heroBadge,
-      // Home CTA banner
       ctaTitle1: body.ctaTitle1 !== undefined ? body.ctaTitle1 : existing.ctaTitle1,
       ctaTitle2: body.ctaTitle2 !== undefined ? body.ctaTitle2 : existing.ctaTitle2,
       ctaSubtitle: body.ctaSubtitle !== undefined ? body.ctaSubtitle : existing.ctaSubtitle,
       ctaButton: body.ctaButton !== undefined ? body.ctaButton : existing.ctaButton,
-      // Events page content fields
       eventsHeroTitle: body.eventsHeroTitle !== undefined ? body.eventsHeroTitle : existing.eventsHeroTitle,
       eventsHeroTitleAccent: body.eventsHeroTitleAccent !== undefined ? body.eventsHeroTitleAccent : existing.eventsHeroTitleAccent,
       eventsHeroSubtitle: body.eventsHeroSubtitle !== undefined ? body.eventsHeroSubtitle : existing.eventsHeroSubtitle,
@@ -531,18 +384,17 @@ app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
       eventSessionTypes: body.eventSessionTypes !== undefined ? body.eventSessionTypes : existing.eventSessionTypes,
       updatedAt: new Date().toISOString(),
     };
-    await kv.set(`${T}branding`, updated);
-    bustBrandingCache(T);
+    await kv.set(`${KV}branding`, updated);
+    bustBrandingCache();
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao salvar branding: ${err}` }, 500);
   }
 });
 
-// Upload logo / favicon / background (tenant-scoped)
+// Upload logo / favicon / background
 app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
     const { type, base64, mimeType = "image/png" } = await c.req.json();
     if (!base64 || !type) return c.json({ error: "type e base64 obrigatórios" }, 400);
     if (!["logo", "favicon", "background", "cta-background", "scanner-image"].includes(type))
@@ -573,9 +425,8 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
       .from(BUCKET).upload(storagePath, bytes, { contentType: mimeType, upsert: false });
     if (uploadError) return c.json({ error: `Upload erro: ${uploadError.message}` }, 500);
 
-    const existing: any = (await kv.get(`${T}branding`)) ?? {};
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
 
-    // Delete old asset when replacing logo, favicon or cta-background
     if (type === "logo" && existing.logoPath) {
       await sb().storage.from(BUCKET).remove([existing.logoPath]);
     } else if (type === "favicon" && existing.faviconPath) {
@@ -593,8 +444,8 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
     else if (type === "scanner-image") updated.scannerImagePath = storagePath;
     else updated.backgroundPaths = [...(existing.backgroundPaths ?? []), storagePath];
 
-    await kv.set(`${T}branding`, updated);
-    bustBrandingCache(T);
+    await kv.set(`${KV}branding`, updated);
+    bustBrandingCache();
 
     const { data: signData } = await sb().storage.from(BUCKET).createSignedUrl(storagePath, 3600);
     return c.json({ url: signData?.signedUrl ?? null, path: storagePath });
@@ -603,49 +454,46 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
   }
 });
 
-// Delete logo or favicon (tenant-scoped)
+// Delete logo / favicon / etc.
 app.delete("/make-server-68454e9b/admin/branding/asset/:asset", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
     const asset = c.req.param("asset");
-    if (asset !== "logo" && asset !== "favicon" && asset !== "cta-background" && asset !== "scanner-image")
+    if (!["logo", "favicon", "cta-background", "scanner-image"].includes(asset))
       return c.json({ error: "Asset deve ser logo, favicon, cta-background ou scanner-image" }, 400);
 
-    const existing: any = (await kv.get(`${T}branding`)) ?? {};
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
     const pathKey = asset === "logo" ? "logoPath" : asset === "favicon" ? "faviconPath" : asset === "scanner-image" ? "scannerImagePath" : "ctaBgPath";
     if (existing[pathKey]) {
       await sb().storage.from(BUCKET).remove([existing[pathKey]]);
     }
-    await kv.set(`${T}branding`, { ...existing, [pathKey]: null, updatedAt: new Date().toISOString() });
-    bustBrandingCache(T);
+    await kv.set(`${KV}branding`, { ...existing, [pathKey]: null, updatedAt: new Date().toISOString() });
+    bustBrandingCache();
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao remover asset: ${err}` }, 500);
   }
 });
 
-// Delete background by index (tenant-scoped)
+// Delete background by index
 app.delete("/make-server-68454e9b/admin/branding/backgrounds/:index", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
     const idx = parseInt(c.req.param("index"));
-    const existing: any = (await kv.get(`${T}branding`)) ?? {};
+    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
     const paths: string[] = [...(existing.backgroundPaths ?? [])];
     if (idx < 0 || idx >= paths.length) return c.json({ error: "Índice inválido" }, 400);
 
     const [removed] = paths.splice(idx, 1);
     await sb().storage.from(BUCKET).remove([removed]);
-    await kv.set(`${T}branding`, { ...existing, backgroundPaths: paths, updatedAt: new Date().toISOString() });
-    bustBrandingCache(T);
+    await kv.set(`${KV}branding`, { ...existing, backgroundPaths: paths, updatedAt: new Date().toISOString() });
+    bustBrandingCache();
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao remover background: ${err}` }, 500);
   }
 });
 
-// ── Auth ──────────────────────────────────���───────────────────────────────────
+// ── Auth ──────────────────────────────────────────────────────────────────────
 
-// Register admin user
 app.post("/make-server-68454e9b/auth/register", async (c) => {
   try {
     const { email, password, name } = await c.req.json();
@@ -656,8 +504,7 @@ app.post("/make-server-68454e9b/auth/register", async (c) => {
     const { data, error } = await sb().auth.admin.createUser({
       email,
       password,
-      user_metadata: { name: name ?? "Admin", role: "owner" },
-      // Automatically confirm the user's email since an email server hasn't been configured.
+      user_metadata: { name: name ?? "Admin" },
       email_confirm: true,
     });
 
@@ -673,41 +520,27 @@ app.post("/make-server-68454e9b/auth/register", async (c) => {
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
-// List events for the authenticated admin (tenant-scoped, uses JWT — NOT query param)
+// List events for admin
 app.get("/make-server-68454e9b/admin/events", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
-    // Auto-claim orphan data (runs once per cold start)
-    await autoClaimOrphans(userId);
-
-    const T = tenantKV(userId);
-    const ids = await getList(`${T}events:index`);
+    await flattenToGlobal(c.get("userId"));
+    const ids = await getList(`${KV}events:index`);
     const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean);
-    // STRICT: only show events owned by this user
-    const owned = (events as any[]).filter((e) => e.ownerId === userId);
-    owned.sort((a: any, b: any) => a.date.localeCompare(b.date));
-    return c.json({ events: owned });
+    (events as any[]).sort((a: any, b: any) => a.date.localeCompare(b.date));
+    return c.json({ events });
   } catch (err) {
     console.log("Erro ao listar eventos (admin):", err);
     return c.json({ error: `Erro ao listar eventos: ${err}` }, 500);
   }
 });
 
-// List all events (public) — scoped by ?org= when available, fallback to legacy index
-// If tenant index is empty but ?org= was provided, also check legacy index
-// and filter by ownerId (handles pre-migration data).
+// List all events (public)
 app.get("/make-server-68454e9b/events", async (c) => {
   try {
-    const org = c.req.query("org");
-    const P = resolvePublicPrefix(c);
-    const ids = await getList(`${P}events:index`);
+    const ids = await getList(`${KV}events:index`);
     const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean);
-    // STRICT: if org was provided, only show events owned by that org
-    const filtered = org
-      ? (events as any[]).filter((e) => e.ownerId === org)
-      : events;
-    (filtered as any[]).sort((a: any, b: any) => a.date.localeCompare(b.date));
-    return c.json({ events: filtered });
+    (events as any[]).sort((a: any, b: any) => a.date.localeCompare(b.date));
+    return c.json({ events });
   } catch (err) {
     console.log("Erro ao listar eventos:", err);
     return c.json({ error: `Erro ao listar eventos: ${err}` }, 500);
@@ -727,11 +560,10 @@ app.get("/make-server-68454e9b/events/:id", async (c) => {
   }
 });
 
-// Get current photo price (public) — supports ?org= for multi-tenant
+// Get current photo price (public)
 app.get("/make-server-68454e9b/config/price", async (c) => {
   try {
-    const P = resolvePublicPrefix(c);
-    const cfg: any = (await kv.get(`${P}config`)) ?? {};
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
     return c.json({ photoPrice: cfg.photoPrice ?? 30 });
   } catch (err) {
     console.log("Erro ao buscar preço:", err);
@@ -748,7 +580,7 @@ function dateToSlug(dateStr: string): string {
   const year  = d.getFullYear().toString();
   const hours = d.getHours().toString().padStart(2, "0");
   const mins  = d.getMinutes().toString().padStart(2, "0");
-  return `${day}${month}${year}${hours}${mins}`;        // DDMMYYYYHHMM
+  return `${day}${month}${year}${hours}${mins}`;
 }
 
 function dayOfWeekPT(date: Date): string {
@@ -756,31 +588,21 @@ function dayOfWeekPT(date: Date): string {
   return names[date.getDay()] ?? "";
 }
 
-// Create event (admin, tenant-scoped) — find-or-create by slug
+// Create event (admin) — find-or-create by slug
 app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
-    const ownerId = c.get("userId");
     const body = await c.req.json();
     const now = new Date().toISOString();
 
-    // Compute slug: prefer explicit slug, otherwise derive from date
     const dateISO = body.date ?? now;
     const slug = body.slug ?? dateToSlug(dateISO);
 
-    // ── Find-or-create: if slug already exists for THIS tenant, return it ──
     let finalSlug = slug;
     const existing: any = await kv.get(`${KV}event:${slug}`);
     if (existing) {
-      // Only return if the event belongs to this tenant
-      if (existing.ownerId === ownerId) {
-        return c.json({ event: existing }, 200);
-      }
-      // Slug collision with another tenant — append a short suffix to avoid overwrite
-      finalSlug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
+      return c.json({ event: existing }, 200);
     }
 
-    // Create new event
     const d = new Date(dateISO);
     const day   = d.getDate().toString().padStart(2, "0");
     const month = (d.getMonth() + 1).toString().padStart(2, "0");
@@ -788,12 +610,10 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
     const hours = d.getHours().toString().padStart(2, "0");
     const mins  = d.getMinutes().toString().padStart(2, "0");
 
-    // Fetch current photoPrice from admin config (tenant-scoped)
-    const cfg: any = (await kv.get(`${T}config`)) ?? {};
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
     const photoPrice: number = cfg.photoPrice ?? 30;
 
-    // sessionType from body, default to first in branding list or 'Tour'
-    const branding: any = (await kv.get(`${T}branding`)) ?? {};
+    const branding: any = (await kv.get(`${KV}branding`)) ?? {};
     const defaultSessionType = Array.isArray(branding.eventSessionTypes) && branding.eventSessionTypes.length > 0
       ? branding.eventSessionTypes[0]
       : "Tour";
@@ -804,7 +624,6 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
 
     const event = {
       id: finalSlug,
-      ownerId,
       name: `${sessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
       slug: finalSlug,
       date: dateISO,
@@ -821,7 +640,7 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
     };
 
     await kv.set(`${KV}event:${finalSlug}`, event);
-    await appendToList(`${T}events:index`, finalSlug);
+    await appendToList(`${KV}events:index`, finalSlug);
     return c.json({ event }, 201);
   } catch (err) {
     console.log("Erro ao criar evento:", err);
@@ -829,16 +648,12 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
   }
 });
 
-// Update event (admin, ownership check)
+// Update event (admin)
 app.put("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
     const id = c.req.param("id");
     const existing: any = await kv.get(`${KV}event:${id}`);
     if (!existing) return c.json({ error: "Evento não encontrado" }, 404);
-    if (existing.ownerId !== userId) {
-      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
-    }
     const body = await c.req.json();
     const updated = { ...existing, ...body, id, updatedAt: new Date().toISOString() };
     await kv.set(`${KV}event:${id}`, updated);
@@ -849,18 +664,13 @@ app.put("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
   }
 });
 
-// Delete event (admin, tenant-scoped + ownership check)
+// Delete event (admin)
 app.delete("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
-    const T = tenantKV(userId);
     const id = c.req.param("id");
-    // Ownership check
     const eventToDelete: any = await kv.get(`${KV}event:${id}`);
-    if (!eventToDelete || eventToDelete.ownerId !== userId) {
-      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
-    }
-    // Delete photos from storage
+    if (!eventToDelete) return c.json({ error: "Evento não encontrado" }, 404);
+
     const photoIds = await getList(`${KV}photos:event:${id}`);
     for (const pid of photoIds) {
       const photo: any = await kv.get(`${KV}photo:${pid}`);
@@ -870,11 +680,10 @@ app.delete("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
       await kv.del(`${KV}photo:${pid}`);
     }
     await kv.del(`${KV}photos:event:${id}`);
-    await kv.del(`${KV}faces:event:${id}`); // aggregated face index
+    await kv.del(`${KV}faces:event:${id}`);
     await kv.del(`${KV}event:${id}`);
-    await removeFromList(`${T}events:index`, id);
+    await removeFromList(`${KV}events:index`, id);
 
-    // Remove face embeddings from pgvector
     faces.deleteFacesByEvent(id).catch((e) =>
       console.log(`pgvector deleteFacesByEvent error (non-blocking): ${e}`)
     );
@@ -902,25 +711,17 @@ app.get("/make-server-68454e9b/events/:id/photos", async (c) => {
     const eventId = c.req.param("id");
     const photoIds = await getList(`${KV}photos:event:${eventId}`);
 
-    // Pagination: ?page=1&limit=20 (defaults: page 1, limit 20)
     const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
-    const limit = Math.min(500, Math.max(1, parseInt(c.req.query("limit") ?? "20", 10))); // Aumentado de 100 para 500 para admin
+    const limit = Math.min(500, Math.max(1, parseInt(c.req.query("limit") ?? "20", 10)));
     const total = photoIds.length;
     const totalPages = Math.ceil(total / limit);
     const start = (page - 1) * limit;
     const pageIds = photoIds.slice(start, start + limit);
 
-    // Batch: fetch config + all photo records in parallel
-    // Resolve owner from event to get tenant-scoped config
-    const evt: any = await kv.get(`${KV}event:${eventId}`);
-    const configPrefix = evt?.ownerId ? tenantKV(evt.ownerId) : resolvePublicPrefix(c);
-    const [cfg, ...photoRecords] = await Promise.all([
-      kv.get(`${configPrefix}config`),
-      ...pageIds.map((pid) => kv.get(`${KV}photo:${pid}`)),
-    ]);
-    const currentPrice: number = (cfg as any)?.photoPrice ?? 30;
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    const currentPrice: number = cfg.photoPrice ?? 30;
 
-    // Collect storage paths for a single batch sign call
+    const photoRecords = await Promise.all(pageIds.map((pid) => kv.get(`${KV}photo:${pid}`)));
     const validPhotos = photoRecords.filter(Boolean) as any[];
     const storagePaths = validPhotos.map((p) => p.storagePath).filter(Boolean) as string[];
 
@@ -946,24 +747,15 @@ app.get("/make-server-68454e9b/events/:id/photos", async (c) => {
   }
 });
 
-// Upload photo (admin, tenant-scoped) — receives base64
+// Upload photo (admin) — receives base64
 app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
-    const ownerId = c.get("userId");
     const eventId = c.req.param("id");
     console.log(`[Base64] Recebendo upload para evento ${eventId}`);
     let event: any = await kv.get(`${KV}event:${eventId}`);
 
-    // Ownership check: if event exists, must belong to this user
-    if (event && event.ownerId !== ownerId) {
-      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
-    }
-
-    // Auto-create event if it doesn't exist (for direct slug uploads)
     if (!event) {
       console.log(`[Base64] Evento ${eventId} não encontrado, tentando auto-criar`);
-      // Try to interpret eventId as slug DDMMYYYYHHMM
       if (/^\d{12}$/.test(eventId)) {
         const now = new Date().toISOString();
         const day   = eventId.slice(0, 2);
@@ -973,30 +765,21 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
         const mins  = eventId.slice(10, 12);
         const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
         const d = new Date(dateISO);
-        const autoBranding: any = (await kv.get(`${T}branding`)) ?? {};
+        const autoBranding: any = (await kv.get(`${KV}branding`)) ?? {};
         const autoSessionType = Array.isArray(autoBranding.eventSessionTypes) && autoBranding.eventSessionTypes.length > 0
           ? autoBranding.eventSessionTypes[0]
           : "Tour";
         const autoVenue = `${autoBranding.venueName ?? "Allianz Parque"}, ${autoBranding.venueLocation ?? "São Paulo, SP"}`;
         event = {
           id: eventId,
-          ownerId,
           name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
-          slug: eventId,
-          date: dateISO,
-          endTime: "",
-          location: autoVenue,
-          sessionType: autoSessionType,
-          status: "disponivel",
-          photoCount: 0,
-          faceCount: 0,
-          price: 30,
-          dayOfWeek: dayOfWeekPT(d),
-          createdAt: now,
-          updatedAt: now,
+          slug: eventId, date: dateISO, endTime: "",
+          location: autoVenue, sessionType: autoSessionType,
+          status: "disponivel", photoCount: 0, faceCount: 0, price: 30,
+          dayOfWeek: dayOfWeekPT(d), createdAt: now, updatedAt: now,
         };
         await kv.set(`${KV}event:${eventId}`, event);
-        await appendToList(`${T}events:index`, eventId);
+        await appendToList(`${KV}events:index`, eventId);
         console.log(`[Base64] Evento ${eventId} auto-criado`);
       } else {
         console.log(`[Base64] Evento ${eventId} inválido (não é slug DDMMYYYYHHMM)`);
@@ -1016,14 +799,12 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
     const ext = mimeType === "image/png" ? "png" : "jpg";
     const storagePath = `events/${eventId}/${photoId}.${ext}`;
 
-    // Decode base64 → Uint8Array
     console.log(`[Base64] Decodificando base64...`);
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     console.log(`[Base64] Decodificado ${bytes.length} bytes`);
 
-    // Upload to Supabase Storage
     console.log(`[Base64] Enviando para storage: ${storagePath}`);
     const { error: uploadError } = await sb().storage
       .from(BUCKET)
@@ -1035,9 +816,7 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
     }
 
     const now = new Date().toISOString();
-
-    // Always use current configured price (tenant-scoped)
-    const cfg: any = (await kv.get(`${T}config`)) ?? {};
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
     const currentPrice: number = cfg.photoPrice ?? event.price ?? 30;
 
     const photo = {
@@ -1054,7 +833,6 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
     await kv.set(`${KV}photo:${photoId}`, photo);
     await appendToList(`${KV}photos:event:${eventId}`, photoId);
 
-    // Update event photo count AND sync price
     const newCount = (event.photoCount ?? 0) + 1;
     await kv.set(`${KV}event:${eventId}`, {
       ...event,
@@ -1072,23 +850,12 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
   }
 });
 
-// ── Upload foto via multipart/form-data (streaming binário — sem base64) ───────
-// POST /events/:id/photos/stream
-// Cliente envia FormData{ file: Blob, tag: string }.
-// Elimina 37% de inflate do base64 e o loop atob() char-a-char no servidor.
-// O File é passado diretamente ao SDK do Supabase Storage (zero-copy).
+// Upload foto via multipart/form-data (streaming)
 app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
-    const ownerId = c.get("userId");
     const eventId = c.req.param("id");
     console.log(`[Stream] Recebendo upload para evento ${eventId}`);
     let event: any = await kv.get(`${KV}event:${eventId}`);
-
-    // Ownership check: if event exists, must belong to this user
-    if (event && event.ownerId !== ownerId) {
-      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
-    }
 
     if (!event) {
       console.log(`[Stream] Evento ${eventId} não encontrado, tentando auto-criar`);
@@ -1098,18 +865,18 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
         const year = eventId.slice(4, 8), hours = eventId.slice(8, 10), mins = eventId.slice(10, 12);
         const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
         const d = new Date(dateISO);
-        const autoBranding: any = (await kv.get(`${T}branding`)) ?? {};
+        const autoBranding: any = (await kv.get(`${KV}branding`)) ?? {};
         const autoSessionType = Array.isArray(autoBranding.eventSessionTypes) && autoBranding.eventSessionTypes.length > 0
           ? autoBranding.eventSessionTypes[0] : "Tour";
         const autoVenue = `${autoBranding.venueName ?? "Allianz Parque"}, ${autoBranding.venueLocation ?? "São Paulo, SP"}`;
         event = {
-          id: eventId, ownerId, name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
+          id: eventId, name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
           slug: eventId, date: dateISO, endTime: "", location: autoVenue, sessionType: autoSessionType,
           status: "disponivel", photoCount: 0, faceCount: 0, price: 30,
           dayOfWeek: dayOfWeekPT(d), createdAt: now, updatedAt: now,
         };
         await kv.set(`${KV}event:${eventId}`, event);
-        await appendToList(`${T}events:index`, eventId);
+        await appendToList(`${KV}events:index`, eventId);
         console.log(`[Stream] Evento ${eventId} auto-criado`);
       } else {
         console.log(`[Stream] Evento ${eventId} inválido (não é slug DDMMYYYYHHMM)`);
@@ -1117,7 +884,6 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
       }
     }
 
-    // parseBody lê multipart — campo "file" é um Web API File (Blob + nome + tipo)
     console.log(`[Stream] Parsing multipart body...`);
     const body = await c.req.parseBody();
     const file = body["file"] as File | null;
@@ -1133,7 +899,6 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
     const storagePath = `events/${eventId}/${photoId}.jpg`;
 
     console.log(`[Stream] Enviando para storage: ${storagePath}`);
-    // Zero-copy: File passado diretamente ao SDK — sem ArrayBuffer intermediário
     const { error: uploadError } = await sb().storage
       .from(BUCKET)
       .upload(storagePath, file, { contentType: mimeType, upsert: false });
@@ -1144,7 +909,7 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
     }
 
     const now = new Date().toISOString();
-    const cfg: any = (await kv.get(`${T}config`)) ?? {};
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
     const currentPrice: number = cfg.photoPrice ?? event.price ?? 30;
     const fileName = (file.name || `${photoId}.jpg`).replace(/\.[^.]+$/, ".jpg");
 
@@ -1165,7 +930,7 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
   }
 });
 
-// Delete photo (admin, ownership check)
+// Delete photo (admin)
 app.delete(
   "/make-server-68454e9b/events/:eventId/photos/:photoId",
   adminAuth,
@@ -1173,9 +938,6 @@ app.delete(
     try {
       const eventId = c.req.param("eventId");
       const photoId = c.req.param("photoId");
-      // Ownership check on the event
-      const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
-      if (ownerErr) return c.json({ error: ownerErr }, 403);
       const photo: any = await kv.get(`${KV}photo:${photoId}`);
       if (!photo) return c.json({ error: "Foto não encontrada" }, 404);
 
@@ -1186,12 +948,10 @@ app.delete(
       await kv.del(`${KV}photo:${photoId}`);
       await removeFromList(`${KV}photos:event:${eventId}`, photoId);
 
-      // Remove face embeddings from pgvector
       faces.deleteFacesByPhoto(photoId).catch((e) =>
         console.log(`pgvector deleteFacesByPhoto error (non-blocking): ${e}`)
       );
 
-      // Remove from aggregated face index
       const facesKey = `${KV}faces:event:${eventId}`;
       const faceIndex: Record<string, number[][]> = (await kv.get(facesKey)) ?? {};
       if (faceIndex[photoId]) {
@@ -1203,7 +963,6 @@ app.delete(
         }
       }
 
-      // Decrement event photo count
       const event: any = await kv.get(`${KV}event:${eventId}`);
       if (event) {
         await kv.set(`${KV}event:${eventId}`, {
@@ -1222,7 +981,7 @@ app.delete(
 
 // ── Face Descriptors ──────────────────────────────────────────────────────────
 
-// Save face descriptors for a photo (admin, ownership check)
+// Save face descriptors for a photo (admin)
 app.post(
   "/make-server-68454e9b/events/:eventId/photos/:photoId/faces",
   adminAuth,
@@ -1230,9 +989,6 @@ app.post(
     try {
       const eventId = c.req.param("eventId");
       const photoId = c.req.param("photoId");
-      // Ownership check on the event
-      const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
-      if (ownerErr) return c.json({ error: ownerErr }, 403);
       const { descriptors } = await c.req.json();
 
       if (!Array.isArray(descriptors)) {
@@ -1248,20 +1004,17 @@ app.post(
         facesProcessedAt: new Date().toISOString(),
       });
 
-      // ── Atualiza índice agregado de faces do evento (1 KV → O(1) leitura) ──
       const facesKey = `${KV}faces:event:${eventId}`;
       const faceIndex: Record<string, number[][]> = (await kv.get(facesKey)) ?? {};
       faceIndex[photoId] = descriptors;
       await kv.set(facesKey, faceIndex);
 
-      // ── Indexa no pgvector (busca ANN em O(log n), escala para milhões) ───
       if (descriptors.length > 0) {
         faces.indexFaces(photoId, eventId, descriptors).catch((e) =>
           console.log(`pgvector indexFaces error (non-blocking): ${e}`)
         );
       }
 
-      // Atualiza contador de faces no evento
       if (descriptors.length > 0) {
         const event: any = await kv.get(`${KV}event:${eventId}`);
         if (event) {
@@ -1281,14 +1034,12 @@ app.post(
   },
 );
 
-// Get all face descriptors for an event (public — used for client-side comparison)
-// Fast path: reads ONE aggregated key. Falls back to N reads + auto-migrates legacy data.
+// Get all face descriptors for an event (public)
 app.get("/make-server-68454e9b/events/:id/faces", async (c) => {
   try {
     const eventId = c.req.param("id");
     const facesKey = `${KV}faces:event:${eventId}`;
 
-    // ── Fast path: aggregated index (1 KV call) ──────────────────────────────
     const faceIndex: Record<string, number[][]> | null = await kv.get(facesKey);
     if (faceIndex) {
       const faces = Object.entries(faceIndex)
@@ -1297,19 +1048,17 @@ app.get("/make-server-68454e9b/events/:id/faces", async (c) => {
       return c.json({ faces });
     }
 
-    // ── Legacy fallback: N KV calls + rebuild aggregated index ───────────────
-    console.log(`[faces] No aggregated index for event ${eventId}, rebuilding from photo records…`);
+    console.log(`[faces] No aggregated index for event ${eventId}, rebuilding…`);
     const photoIds = await getList(`${KV}photos:event:${eventId}`);
     const photoRecords = await Promise.all(photoIds.map((pid) => kv.get(`${KV}photo:${pid}`)));
     const faces = (photoRecords as any[])
       .filter((p) => p?.faceDescriptors?.length > 0)
       .map((p) => ({ photoId: p.id, descriptors: p.faceDescriptors }));
 
-    // Persist aggregated index so next call is O(1)
     if (faces.length > 0) {
       const newIndex: Record<string, number[][]> = {};
       for (const { photoId, descriptors } of faces) newIndex[photoId] = descriptors;
-      kv.set(facesKey, newIndex).catch(console.warn); // fire-and-forget
+      kv.set(facesKey, newIndex).catch(console.warn);
     }
 
     return c.json({ faces });
@@ -1321,9 +1070,6 @@ app.get("/make-server-68454e9b/events/:id/faces", async (c) => {
 
 // ── Face Migration (KV → pgvector) ───────────────────────────────────────────
 
-// POST /admin/migrate-faces-pgvector — admin auth
-// Varre TODOS os registros ef:photo:* no KV via getByPrefix, independente do
-// índice ef:events:index. Idempotente — pode ser rodado várias vezes.
 app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async (c) => {
   const startedAt = Date.now();
   const errors: string[] = [];
@@ -1334,8 +1080,6 @@ app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async 
   const photosWithFaces: any[] = [];
 
   try {
-    // ── Estratégia 1: getByPrefix — varre todos os registros de foto diretamente ──
-    // Não depende do ef:events:index, que pode estar desatualizado.
     const allPhotoRecords: any[] = await kv.getByPrefix(`${KV}photo:`);
     console.log(`[migrate-faces] getByPrefix encontrou ${allPhotoRecords.length} registros ef:photo:*`);
 
@@ -1346,13 +1090,11 @@ app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async 
     photosWithFaces.push(...fromPrefix);
     console.log(`[migrate-faces] ${fromPrefix.length} com descritores, ${skippedPhotos} sem`);
 
-    // ── Estratégia 2 (fallback): se prefix scan vazio, usa ef:events:index ────
     let usedFallback = false;
     if (allPhotoRecords.length === 0) {
       usedFallback = true;
-      const T = tenantKV(c.get("userId"));
-      console.log("[migrate-faces] prefix scan vazio — fallback via tenant events:index");
-      const eventIds: string[] = await getList(`${T}events:index`);
+      console.log("[migrate-faces] prefix scan vazio — fallback via events:index");
+      const eventIds: string[] = await getList(`${KV}events:index`);
       console.log(`[migrate-faces] ef:events:index tem ${eventIds.length} eventos`);
 
       for (const eventId of eventIds) {
@@ -1374,7 +1116,6 @@ app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async 
       }
     }
 
-    // ── Indexar no pgvector ───────────────────────────────────────────────────
     for (const photo of photosWithFaces) {
       const photoId: string = photo.id;
       const eventId: string = photo.eventId;
@@ -1403,15 +1144,14 @@ app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async 
 });
 
 // ── Reindex Single Event (pgvector) ───────────────────────────────────────────
-// POST /admin/reindex-event — admin auth
-// Reindexar faces de um único evento. Body: { eventId: string }
+
 app.post("/make-server-68454e9b/admin/reindex-event", adminAuth, async (c) => {
   const startedAt = Date.now();
   const errors: string[] = [];
   let totalPhotos = 0;
   let totalFaces = 0;
-  let noFacePhotos = 0;   // fotos sem descritor facial (normal — sem pessoa na foto)
-  let notFoundPhotos = 0; // fotos ausentes no KV (problema real de dados)
+  let noFacePhotos = 0;
+  let notFoundPhotos = 0;
   let processedPhotos = 0;
 
   try {
@@ -1422,13 +1162,11 @@ app.post("/make-server-68454e9b/admin/reindex-event", adminAuth, async (c) => {
       return c.json({ error: "eventId é obrigatório" }, 400);
     }
 
-    // Ownership check
-    const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
-    if (ownerErr) return c.json({ error: ownerErr }, 403);
+    const event: any = await kv.get(`${KV}event:${eventId}`);
+    if (!event) return c.json({ error: "Evento não encontrado" }, 404);
 
     console.log(`[reindex-event] Iniciando reindexação do evento ${eventId}`);
 
-    // ── 1. Buscar todas as fotos do evento ────────────────────────────────────
     const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
     console.log(`[reindex-event] Evento ${eventId} tem ${photoIds.length} fotos`);
 
@@ -1440,11 +1178,10 @@ app.post("/make-server-68454e9b/admin/reindex-event", adminAuth, async (c) => {
       });
     }
 
-    // ── 2. Processar cada foto ─────────────────────────────────────────────────
     for (const photoId of photoIds) {
       processedPhotos++;
       const photo: any = await kv.get(`${KV}photo:${photoId}`);
-      
+
       if (!photo) {
         notFoundPhotos++;
         console.log(`[reindex-event] ✗ Foto ${photoId} não encontrada no KV`);
@@ -1481,7 +1218,6 @@ app.post("/make-server-68454e9b/admin/reindex-event", adminAuth, async (c) => {
 
     return c.json({
       success: true,
-      // noFacePhotos = sem rosto na foto (esperado); notFoundPhotos = dado faltante no KV; errors = falhas reais
       stats: { totalPhotos, totalFaces, noFacePhotos, notFoundPhotos, skippedPhotos: noFacePhotos + notFoundPhotos, processedPhotos, elapsedMs, errors },
     });
   } catch (err) {
@@ -1491,39 +1227,30 @@ app.post("/make-server-68454e9b/admin/reindex-event", adminAuth, async (c) => {
 });
 
 // ── Photo IDs for an event ────────────────────────────────────────────────────
-// GET /admin/events/:id/photo-ids — admin auth
-// Retorna a lista ordenada de IDs de fotos de um evento (sem sign URLs, rápido).
+
 app.get("/make-server-68454e9b/admin/events/:id/photo-ids", adminAuth, async (c) => {
   try {
     const id = c.req.param("id");
     if (!id) return c.json({ error: "id do evento é obrigatório" }, 400);
-    const { error } = await getOwnedEvent(id, c.get("userId"));
-    if (error) return c.json({ error }, 403);
+    const event: any = await kv.get(`${KV}event:${id}`);
+    if (!event) return c.json({ error: "Evento não encontrado" }, 404);
     const photoIds: string[] = await getList(`${KV}photos:event:${id}`);
     console.log(`[photo-ids] Evento ${id}: ${photoIds.length} fotos`);
     return c.json({ photoIds, total: photoIds.length });
   } catch (err) {
     console.log("Erro ao buscar IDs de fotos:", err);
-    // Retorna lista vazia em vez de 500 para que o frontend continue com os outros eventos
     return c.json({ photoIds: [], total: 0, warning: `Erro ao buscar lista: ${err}` });
   }
 });
 
 // ── Reindex Single Photo (pgvector) ───────────────────────────────────────────
-// POST /admin/reindex-photo — admin auth
-// Indexa os descritores faciais de UMA foto. Chamado pelo frontend foto a foto
-// para permitir progresso granular (foto X/Y) em tempo real.
-// Body: { eventId: string, photoId: string }
+
 app.post("/make-server-68454e9b/admin/reindex-photo", adminAuth, async (c) => {
   try {
     const { eventId, photoId } = await c.req.json();
     if (!eventId || !photoId) {
       return c.json({ error: "eventId e photoId são obrigatórios" }, 400);
     }
-
-    // Ownership check on the event
-    const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
-    if (ownerErr) return c.json({ error: ownerErr }, 403);
 
     const photo: any = await kv.get(`${KV}photo:${photoId}`);
 
@@ -1532,9 +1259,6 @@ app.post("/make-server-68454e9b/admin/reindex-photo", adminAuth, async (c) => {
       return c.json({ success: false, notFound: true, noFace: false, faces: 0 });
     }
 
-    // faceDescriptors pode ser array de arrays, array de plain objects (Float32Array
-    // serializado via JSON) ou plain object de arrays — normalizeDescriptors() em
-    // faces.ts trata todos esses formatos automaticamente.
     const rawDesc = photo.faceDescriptors;
     const hasDescriptors =
       rawDesc != null &&
@@ -1558,14 +1282,12 @@ app.post("/make-server-68454e9b/admin/reindex-photo", adminAuth, async (c) => {
   } catch (err: any) {
     const msg = err?.message ?? String(err);
     console.log(`[reindex-photo] ✗ Erro: ${msg}`);
-    // Sem status 500 para que o frontend não receba "Failed to fetch"
     return c.json({ success: false, notFound: false, noFace: false, faces: 0, error: msg });
   }
 });
 
 // ── KV Diagnostic ─────────────────────────────────────────────────────────────
-// GET /admin/diagnose-kv — admin auth
-// Lê a tabela kv_store_68454e9b diretamente e retorna contagens por prefixo.
+
 app.get("/make-server-68454e9b/admin/diagnose-kv", adminAuth, async (c) => {
   try {
     const { count: total, error: countErr } = await sb()
@@ -1588,19 +1310,17 @@ app.get("/make-server-68454e9b/admin/diagnose-kv", adminAuth, async (c) => {
     }
     const sampleKeys = (rows ?? []).slice(0, 30).map((r: any) => r.key as string);
 
-    // ─── NOVO: Diagnóstico detalhado de eventos e fotos (tenant-scoped) ───
-    const T = tenantKV(c.get("userId"));
-    const eventIds: string[] = await getList(`${T}events:index`);
-    console.log(`[diagnose-kv] Encontrados ${eventIds.length} eventos na lista tenant events:index`);
+    const eventIds: string[] = await getList(`${KV}events:index`);
+    console.log(`[diagnose-kv] Encontrados ${eventIds.length} eventos na lista events:index`);
     const events: Array<{ id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }> = [];
-    
+
     for (const eventId of eventIds.slice(0, 20)) {
       const event: any = await kv.get(`${KV}event:${eventId}`);
       const photosKey = `${KV}photos:event:${eventId}`;
       const photoIds = await getList(photosKey);
-      
+
       console.log(`[diagnose-kv] Evento ${eventId}: ${photoIds.length} fotos na chave ${photosKey}`);
-      
+
       events.push({
         id: eventId,
         name: event?.name ?? "N/A",
@@ -1612,9 +1332,9 @@ app.get("/make-server-68454e9b/admin/diagnose-kv", adminAuth, async (c) => {
 
     console.log(`[diagnose-kv] Retornando ${events.length} eventos, ${events.filter(e => e.photoCount > 0).length} com fotos`);
 
-    return c.json({ 
-      total: total ?? 0, 
-      prefixCounts, 
+    return c.json({
+      total: total ?? 0,
+      prefixCounts,
       sampleKeys,
       events: events.sort((a, b) => b.photoCount - a.photoCount),
     });
@@ -1625,8 +1345,7 @@ app.get("/make-server-68454e9b/admin/diagnose-kv", adminAuth, async (c) => {
 });
 
 // ── List Photo Keys Diagnostic ────────────────────────────────────────────────
-// GET /admin/diagnose-photo-keys — admin auth
-// Lista TODAS as chaves que começam com ef:photos:event: para debugar
+
 app.get("/make-server-68454e9b/admin/diagnose-photo-keys", adminAuth, async (c) => {
   try {
     const { data: rows, error } = await sb()
@@ -1635,12 +1354,12 @@ app.get("/make-server-68454e9b/admin/diagnose-photo-keys", adminAuth, async (c) 
       .ilike("key", "ef:photos:event:%")
       .order("key")
       .limit(100);
-    
+
     if (error) throw new Error(`query error: ${error.message}`);
 
     const photoKeys = (rows ?? []).map((r: any) => r.key as string);
     console.log(`[diagnose-photo-keys] Encontradas ${photoKeys.length} chaves de fotos`);
-    
+
     return c.json({ photoKeys, total: photoKeys.length });
   } catch (err) {
     console.log("Erro ao listar chaves de fotos:", err);
@@ -1649,37 +1368,32 @@ app.get("/make-server-68454e9b/admin/diagnose-photo-keys", adminAuth, async (c) 
 });
 
 // ── pgvector Diagnostic ───────────────────────────────────────────────────────
-// GET /admin/diagnose-pgvector — admin auth
-// Verifica quantos embeddings estão indexados no pgvector.
+
 app.get("/make-server-68454e9b/admin/diagnose-pgvector", adminAuth, async (c) => {
   try {
-    // Total de embeddings
     const { count: totalEmbeddings, error: countErr } = await sb()
       .from("face_embeddings_68454e9b")
       .select("*", { count: "exact", head: true });
     if (countErr) throw new Error(`count error: ${countErr.message}`);
 
-    // Contar fotos únicas
     const { data: uniquePhotos, error: photosErr } = await sb()
       .from("face_embeddings_68454e9b")
       .select("photo_id")
-      .limit(10000); // Limite razoável
+      .limit(10000);
     if (photosErr) throw new Error(`photos error: ${photosErr.message}`);
-    
+
     const uniquePhotoIds = new Set((uniquePhotos ?? []).map((r: any) => r.photo_id));
     const totalPhotos = uniquePhotoIds.size;
 
-    // Contar eventos únicos
     const { data: uniqueEvents, error: eventsErr } = await sb()
       .from("face_embeddings_68454e9b")
       .select("event_id")
       .limit(10000);
     if (eventsErr) throw new Error(`events error: ${eventsErr.message}`);
-    
+
     const uniqueEventIds = new Set((uniqueEvents ?? []).map((r: any) => r.event_id));
     const totalEvents = uniqueEventIds.size;
 
-    // Amostra de fotos recentes
     const { data: samplePhotos, error: sampleErr } = await sb()
       .from("face_embeddings_68454e9b")
       .select("photo_id, event_id")
@@ -1700,16 +1414,15 @@ app.get("/make-server-68454e9b/admin/diagnose-pgvector", adminAuth, async (c) =>
   }
 });
 
-// ── Face Reindex ──────────────────────────────────────────────────────────────
-// GET /admin/events/:eventId/face-stats — admin auth
-// Retorna estatísticas de faces detectadas em fotos de um evento
+// ── Face Stats ────────────────────────────────────────────────────────────────
+
 app.get("/make-server-68454e9b/admin/events/:eventId/face-stats", adminAuth, async (c) => {
   try {
     const eventId = c.req.param("eventId");
-    const { error } = await getOwnedEvent(eventId, c.get("userId"));
-    if (error) return c.json({ error }, 403);
+    const event: any = await kv.get(`${KV}event:${eventId}`);
+    if (!event) return c.json({ error: "Evento não encontrado" }, 404);
     const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
-    
+
     const stats = {
       totalPhotos: photoIds.length,
       photosWithFaces: 0,
@@ -1728,11 +1441,7 @@ app.get("/make-server-68454e9b/admin/events/:eventId/face-stats", adminAuth, asy
         } else {
           stats.photosWithoutFaces++;
         }
-        stats.photos.push({
-          id: photo.id,
-          fileName: photo.fileName,
-          faceCount,
-        });
+        stats.photos.push({ id: photo.id, fileName: photo.fileName, faceCount });
       }
     }
 
@@ -1743,42 +1452,32 @@ app.get("/make-server-68454e9b/admin/events/:eventId/face-stats", adminAuth, asy
   }
 });
 
-// POST /admin/events/:eventId/reindex-faces — admin auth
-// Retorna lista de fotos do evento para reindexação client-side
-// O frontend baixa as fotos, detecta faces com face-api.js, e reenvia os descritores
+// ── Reindex faces for an event (client-side) ──────────────────────────────────
+
 app.post("/make-server-68454e9b/admin/events/:eventId/reindex-faces", adminAuth, async (c) => {
   try {
     const eventId = c.req.param("eventId");
-    const { error } = await getOwnedEvent(eventId, c.get("userId"));
-    if (error) return c.json({ error }, 403);
+    const event: any = await kv.get(`${KV}event:${eventId}`);
+    if (!event) return c.json({ error: "Evento não encontrado" }, 404);
     const photosKey = `${KV}photos:event:${eventId}`;
     console.log(`[reindex-faces] Buscando fotos para evento ${eventId} na chave ${photosKey}`);
-    
+
     const photoIds: string[] = await getList(photosKey);
     console.log(`[reindex-faces] Encontradas ${photoIds.length} fotos na lista`);
-    
+
     const photos: Array<{ id: string; url: string; fileName: string }> = [];
     for (const photoId of photoIds) {
       const photo: any = await kv.get(`${KV}photo:${photoId}`);
       if (photo?.url) {
-        photos.push({
-          id: photo.id,
-          url: photo.url,
-          fileName: photo.fileName,
-        });
+        photos.push({ id: photo.id, url: photo.url, fileName: photo.fileName });
       } else if (photo) {
-        // Foto existe mas sem URL — gerar signed URL do storage
         console.log(`[reindex-faces] Foto ${photoId} sem URL, gerando do storage: ${photo.storagePath}`);
         if (photo.storagePath) {
           const { data: signedData } = await sb().storage
             .from("make-68454e9b-eventface")
             .createSignedUrl(photo.storagePath, 3600);
           if (signedData?.signedUrl) {
-            photos.push({
-              id: photo.id,
-              url: signedData.signedUrl,
-              fileName: photo.fileName,
-            });
+            photos.push({ id: photo.id, url: signedData.signedUrl, fileName: photo.fileName });
           }
         }
       }
@@ -1794,9 +1493,6 @@ app.post("/make-server-68454e9b/admin/events/:eventId/reindex-faces", adminAuth,
 
 // ── Face Search (pgvector ANN) ────────────────────────────────────────────────
 
-// POST /faces/search — public, sem auth
-// Recebe um embedding 128-dim da selfie do usuário e retorna photoIds com match.
-// Usa HNSW via pgvector: O(log n), funciona com milhões de vetores, ~30ms.
 app.post("/make-server-68454e9b/faces/search", async (c) => {
   try {
     const body = await c.req.json();
@@ -1808,11 +1504,6 @@ app.post("/make-server-68454e9b/faces/search", async (c) => {
 
     console.log(`[faces/search] Buscando faces para evento ${eventId}, embedding length: ${embedding.length}, threshold: ${threshold ?? 0.78}`);
 
-    // Threshold 0.78 cosine similarity ≈ euclidean distance 0.66
-    // Equivalência: cos_sim = 1 - (d_eucl² / 2)
-    //   strict  eucl 0.55 → cos_sim 0.85
-    //   relaxed eucl 0.70 → cos_sim 0.76
-    //   default 0.78 → entre strict e relaxed, bom balanço
     const searchThreshold = typeof threshold === "number" ? threshold : 0.78;
     const matches = await faces.searchFaces(embedding, eventId, searchThreshold);
 
@@ -1826,7 +1517,7 @@ app.post("/make-server-68454e9b/faces/search", async (c) => {
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 
-// Create order (public) — resolves tenant from event ownerId
+// Create order (public)
 app.post("/make-server-68454e9b/orders", async (c) => {
   try {
     const body = await c.req.json();
@@ -1835,21 +1526,12 @@ app.post("/make-server-68454e9b/orders", async (c) => {
     if (!items?.length) return c.json({ error: "Itens do pedido são obrigatórios" }, 400);
     if (!customerEmail) return c.json({ error: "Email do cliente é obrigatório" }, 400);
 
-    // Resolve owner from the first item's event
-    let ownerId: string | null = null;
-    if (items[0]?.eventId) {
-      const evt: any = await kv.get(`${KV}event:${items[0].eventId}`);
-      ownerId = evt?.ownerId ?? null;
-    }
-    const orderPrefix = ownerId ? tenantKV(ownerId) : KV;
-
     const orderId = `order-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const total = items.reduce((sum: number, item: any) => sum + Number(item.price ?? 0), 0);
     const now = new Date().toISOString();
 
     const order = {
       id: orderId,
-      ownerId,
       customerEmail,
       customerName: customerName ?? "",
       items,
@@ -1861,14 +1543,13 @@ app.post("/make-server-68454e9b/orders", async (c) => {
     };
 
     await kv.set(`${KV}order:${orderId}`, order);
-    await appendToList(`${orderPrefix}orders:index`, orderId);
+    await appendToList(`${KV}orders:index`, orderId);
 
-    // Accumulate daily stats (tenant-scoped)
     const dateKey = now.slice(0, 10);
-    const dayRevenue = ((await kv.get(`${orderPrefix}daily:revenue:${dateKey}`)) as number) ?? 0;
-    const dayCount = ((await kv.get(`${orderPrefix}daily:count:${dateKey}`)) as number) ?? 0;
-    await kv.set(`${orderPrefix}daily:revenue:${dateKey}`, dayRevenue + total);
-    await kv.set(`${orderPrefix}daily:count:${dateKey}`, dayCount + items.length);
+    const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
+    const dayCount = ((await kv.get(`${KV}daily:count:${dateKey}`)) as number) ?? 0;
+    await kv.set(`${KV}daily:revenue:${dateKey}`, dayRevenue + total);
+    await kv.set(`${KV}daily:count:${dateKey}`, dayCount + items.length);
 
     return c.json({ order }, 201);
   } catch (err) {
@@ -1877,19 +1558,15 @@ app.post("/make-server-68454e9b/orders", async (c) => {
   }
 });
 
-// List orders (admin, tenant-scoped)
+// List orders (admin)
 app.get("/make-server-68454e9b/orders", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
-    await autoClaimOrphans(userId);
-    const T = tenantKV(userId);
-    const ids = await getList(`${T}orders:index`);
-    const orders = await Promise.all(ids.map((id) => kv.get(`${KV}order:${id}`)));
-    // STRICT: only show orders owned by this user
-    const valid = (orders as any[])
-      .filter((o) => o && o.ownerId === userId)
+    await flattenToGlobal(c.get("userId"));
+    const ids = await getList(`${KV}orders:index`);
+    const orders = (await Promise.all(ids.map((id) => kv.get(`${KV}order:${id}`))))
+      .filter(Boolean)
       .sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
-    return c.json({ orders: valid });
+    return c.json({ orders });
   } catch (err) {
     console.log("Erro ao listar pedidos:", err);
     return c.json({ error: `Erro ao listar pedidos: ${err}` }, 500);
@@ -1909,17 +1586,15 @@ app.get("/make-server-68454e9b/orders/:id", async (c) => {
   }
 });
 
-// Download a purchased photo (public — orderId + photoId act as the access token)
+// Download a purchased photo (public)
 app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/download", async (c) => {
   try {
     const orderId = c.req.param("orderId");
     const photoId = c.req.param("photoId");
 
-    // Validate order exists
     const order: any = await kv.get(`${KV}order:${orderId}`);
     if (!order) return c.json({ error: "Pedido não encontrado" }, 404);
 
-    // Validate photo belongs to this order
     const hasPhoto = order.items?.some(
       (item: any) => String(item.photoId) === String(photoId),
     );
@@ -1927,17 +1602,11 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/download", async 
       return c.json({ error: "Foto não pertence a este pedido" }, 403);
     }
 
-    // Get photo metadata from KV
     const photo: any = await kv.get(`${KV}photo:${photoId}`);
     if (!photo?.storagePath) {
       return c.json({ error: "Foto não encontrada no storage" }, 404);
     }
 
-    // ── Streaming proxy ────────────────────────────────────────────────────────
-    // Em vez de redirecionar para a signed URL do Supabase (que mobile browsers
-    // frequentemente ABREM em vez de baixar), o servidor busca o arquivo e o
-    // envia diretamente como blob — garantindo Content-Disposition: attachment
-    // funcione em todos os browsers, inclusive iOS Safari e Chrome mobile.
     const fileName = photo.fileName ?? `foto-${photoId}.jpg`;
 
     const { data: blob, error: dlErr } = await sb()
@@ -1947,7 +1616,6 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/download", async 
 
     if (dlErr || !blob) {
       console.log("[download] Erro ao buscar arquivo do storage:", dlErr?.message);
-      // Fallback: signed URL redirect (melhor que nada)
       const { data: signData } = await sb().storage
         .from(BUCKET)
         .createSignedUrl(photo.storagePath, 3600, { download: fileName });
@@ -1958,8 +1626,6 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/download", async 
     const contentType = blob.type || "image/jpeg";
     console.log(`[download] ✓ Streaming ${fileName} (${blob.size} bytes, ${contentType})`);
 
-    // c.body() do Hono garante que o middleware CORS adicione os headers corretamente.
-    // blob.stream() evita carregar o arquivo inteiro em memória no Edge Function.
     return c.body(blob.stream() as ReadableStream, 200, {
       "Content-Type": contentType,
       "Content-Disposition": `attachment; filename="${encodeURIComponent(fileName)}"`,
@@ -1971,8 +1637,7 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/download", async 
   }
 });
 
-// Return signed URL as JSON (used by MinhaFoto page to avoid CORS issues with redirects)
-// PUBLIC route — no auth required. orderId + photoId act as the access token.
+// Return signed URL as JSON (MinhaFoto page)
 app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/signed-url", async (c) => {
   try {
     const orderId = c.req.param("orderId");
@@ -1990,21 +1655,19 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/signed-url", asyn
       (item: any) => String(item.photoId) === String(photoId),
     );
     if (!hasPhoto) {
-      console.log(`[signed-url] Foto ${photoId} não pertence ao pedido ${orderId}. Items:`, order.items?.map((i: any) => i.photoId));
+      console.log(`[signed-url] Foto ${photoId} não pertence ao pedido ${orderId}.`);
       return c.json({ error: "Foto não pertence a este pedido" }, 403);
     }
 
     const photo: any = await kv.get(`${KV}photo:${photoId}`);
     if (!photo?.storagePath) return c.json({ error: "Foto não encontrada no storage" }, 404);
 
-    // View URL (no forced download) — used to display in browser
     const { data: viewData, error: viewErr } = await sb()
       .storage
       .from(BUCKET)
       .createSignedUrl(photo.storagePath, 604800);
 
-    // Download URL (with Content-Disposition: attachment)
-    const { data: dlData, error: dlErr } = await sb()
+    const { data: dlData } = await sb()
       .storage
       .from(BUCKET)
       .createSignedUrl(photo.storagePath, 604800, {
@@ -2026,21 +1689,15 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/signed-url", asyn
   }
 });
 
-// Update order status (admin, ownership check)
+// Update order status (admin)
 app.put("/make-server-68454e9b/orders/:id", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
     const id = c.req.param("id");
     const order: any = await kv.get(`${KV}order:${id}`);
     if (!order) return c.json({ error: "Pedido não encontrado" }, 404);
-    // STRICT ownership check
-    if (order.ownerId !== userId) {
-      return c.json({ error: "Acesso negado: este pedido pertence a outro tenant" }, 403);
-    }
     const body = await c.req.json();
     const updated = { ...order, ...body, id, updatedAt: new Date().toISOString() };
     await kv.set(`${KV}order:${id}`, updated);
-    // Send confirmation email if status changed to "paid" and hasn't been sent yet
     if (body.status === "paid" && order.status !== "paid") {
       sendOrderConfirmationEmail(updated).catch(console.log);
     }
@@ -2051,28 +1708,21 @@ app.put("/make-server-68454e9b/orders/:id", adminAuth, async (c) => {
   }
 });
 
-// Cancel order (admin, tenant-scoped + ownership check) — sets status to cancelled and optionally refunds via MP
+// Cancel order (admin)
 app.post("/make-server-68454e9b/orders/:id/cancel", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
-    const T = tenantKV(userId);
     const id = c.req.param("id");
     const order: any = await kv.get(`${KV}order:${id}`);
     if (!order) return c.json({ error: "Pedido não encontrado" }, 404);
-    // STRICT ownership check
-    if (order.ownerId !== userId) {
-      return c.json({ error: "Acesso negado: este pedido pertence a outro tenant" }, 403);
-    }
     if (order.status === "cancelled") return c.json({ error: "Pedido já cancelado" }, 400);
 
     const body = await c.req.json().catch(() => ({}));
     const reason = body.reason ?? "Cancelado pelo admin";
     const now = new Date().toISOString();
 
-    // Try to refund via Mercado Pago if there's a payment
     let refundResult: any = null;
     if (order.mpPaymentId && order.status === "paid") {
-      const mpToken = await getMpToken(c.get("userId"));
+      const mpToken = await getMpToken();
       if (mpToken) {
         try {
           const refundRes = await fetch(
@@ -2106,13 +1756,12 @@ app.post("/make-server-68454e9b/orders/:id/cancel", adminAuth, async (c) => {
     };
     await kv.set(`${KV}order:${id}`, updated);
 
-    // Subtract from daily stats (tenant-scoped)
     if (order.status === "paid" && order.total) {
       const dateKey = order.createdAt?.slice(0, 10) ?? now.slice(0, 10);
-      const dayRevenue = ((await kv.get(`${T}daily:revenue:${dateKey}`)) as number) ?? 0;
-      const dayCount = ((await kv.get(`${T}daily:count:${dateKey}`)) as number) ?? 0;
-      await kv.set(`${T}daily:revenue:${dateKey}`, Math.max(0, dayRevenue - order.total));
-      await kv.set(`${T}daily:count:${dateKey}`, Math.max(0, dayCount - (order.items?.length ?? 0)));
+      const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
+      const dayCount = ((await kv.get(`${KV}daily:count:${dateKey}`)) as number) ?? 0;
+      await kv.set(`${KV}daily:revenue:${dateKey}`, Math.max(0, dayRevenue - order.total));
+      await kv.set(`${KV}daily:count:${dateKey}`, Math.max(0, dayCount - (order.items?.length ?? 0)));
     }
 
     return c.json({ order: updated, refundResult });
@@ -2122,10 +1771,9 @@ app.post("/make-server-68454e9b/orders/:id/cancel", adminAuth, async (c) => {
   }
 });
 
-// Create POS order (admin, tenant-scoped — direct sale at venue)
+// Create POS order (admin — direct sale at venue)
 app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
     const body = await c.req.json();
     const { items, customerName, paymentMethod = "dinheiro", operatorId } = body;
 
@@ -2137,7 +1785,6 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
 
     const order = {
       id: orderId,
-      ownerId: c.get("userId"),
       customerEmail: "",
       customerName: customerName ?? "Cliente presencial",
       items,
@@ -2151,14 +1798,13 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
     };
 
     await kv.set(`${KV}order:${orderId}`, order);
-    await appendToList(`${T}orders:index`, orderId);
+    await appendToList(`${KV}orders:index`, orderId);
 
-    // Accumulate daily stats (tenant-scoped)
     const dateKey = now.slice(0, 10);
-    const dayRevenue = ((await kv.get(`${T}daily:revenue:${dateKey}`)) as number) ?? 0;
-    const dayCount = ((await kv.get(`${T}daily:count:${dateKey}`)) as number) ?? 0;
-    await kv.set(`${T}daily:revenue:${dateKey}`, dayRevenue + total);
-    await kv.set(`${T}daily:count:${dateKey}`, dayCount + items.length);
+    const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
+    const dayCount = ((await kv.get(`${KV}daily:count:${dateKey}`)) as number) ?? 0;
+    await kv.set(`${KV}daily:revenue:${dateKey}`, dayRevenue + total);
+    await kv.set(`${KV}daily:count:${dateKey}`, dayCount + items.length);
 
     return c.json({ order }, 201);
   } catch (err) {
@@ -2171,21 +1817,17 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
 
 app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
-    // Auto-claim runs once per cold start (idempotent)
-    await autoClaimOrphans(userId);
+    await flattenToGlobal(c.get("userId"));
 
-    const T = tenantKV(userId);
     const [orderIds, eventIds] = await Promise.all([
-      getList(`${T}orders:index`),
-      getList(`${T}events:index`),
+      getList(`${KV}orders:index`),
+      getList(`${KV}events:index`),
     ]);
 
     const orders: any[] = (
       await Promise.all(orderIds.map((id) => kv.get(`${KV}order:${id}`)))
-    ).filter((o: any) => o && o.ownerId === userId);
+    ).filter(Boolean);
 
-    // Exclude cancelled orders from financial KPIs
     const activeOrders = orders.filter((o) => o.status !== "cancelled");
     const paidOrders   = activeOrders.filter((o) => o.status === "paid" || o.status === "delivered");
 
@@ -2193,7 +1835,6 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
     const totalPhotos   = paidOrders.reduce((s, o) => s + (o.items?.length ?? 0), 0);
     const pendingOrders = activeOrders.filter((o) => o.status === "pending").length;
 
-    // Build daily chart for last 14 days — fetch all keys in parallel
     const dailyMeta = Array.from({ length: 14 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (13 - i));
@@ -2202,8 +1843,8 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
       return { dateKey, dayLabel };
     });
     const [dailyRevenues, dailyCounts] = await Promise.all([
-      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${T}daily:revenue:${dateKey}`))),
-      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${T}daily:count:${dateKey}`))),
+      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${KV}daily:revenue:${dateKey}`))),
+      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${KV}daily:count:${dateKey}`))),
     ]);
     const daily = dailyMeta.map(({ dayLabel }, i) => ({
       day: dayLabel,
@@ -2211,7 +1852,6 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
       fotos:   (dailyCounts[i]   as number) ?? 0,
     }));
 
-    // Recent orders — show all (including cancelled), UI can style accordingly
     const recentOrders = orders.slice(0, 10);
 
     return c.json({
@@ -2229,11 +1869,10 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
   }
 });
 
-// ── MP Token helper — somente KV (admin UI). Env var ignorada. ──────────────
+// ── MP Token helper ───────────────────────────────────────────────────────────
 
-async function getMpToken(userId?: string): Promise<string | null> {
-  const prefix = userId ? tenantKV(userId) : KV;
-  const cfg = (await kv.get(`${prefix}config`)) as any ?? {};
+async function getMpToken(): Promise<string | null> {
+  const cfg = (await kv.get(`${KV}config`)) as any ?? {};
   return cfg.mpToken ?? null;
 }
 
@@ -2241,11 +1880,9 @@ async function getMpToken(userId?: string): Promise<string | null> {
 
 app.get("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
-    const cfg = (await kv.get(`${T}config`)) as any ?? {};
+    const cfg = (await kv.get(`${KV}config`)) as any ?? {};
     const kvToken: string | undefined = cfg.mpToken;
 
-    // Apenas o KV é fonte de verdade — env var não é usada
     const raw = kvToken ?? "";
     const mpTokenPreview = raw.length > 12
       ? `${raw.slice(0, 10)}${"•".repeat(8)}${raw.slice(-4)}`
@@ -2265,26 +1902,21 @@ app.get("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
 
 app.put("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
   try {
-    const T = tenantKV(c.get("userId"));
     const body = await c.req.json();
-    const existing = (await kv.get(`${T}config`)) as any ?? {};
+    const existing = (await kv.get(`${KV}config`)) as any ?? {};
 
-    // Accept mpToken from body and store it in KV.
-    // Never expose it back — only the masked preview is returned.
     const updated: any = { ...existing, updatedAt: new Date().toISOString() };
     if (body.photoPrice !== undefined) updated.photoPrice = body.photoPrice;
     if (body.coupons    !== undefined) updated.coupons    = body.coupons;
     if (typeof body.mpToken === "string" && body.mpToken.trim()) {
       updated.mpToken = body.mpToken.trim();
     }
-    // Allow clearing the token
     if (body.mpToken === "") {
       delete updated.mpToken;
     }
 
-    await kv.set(`${T}config`, updated);
+    await kv.set(`${KV}config`, updated);
 
-    // Return the same shape as GET — apenas KV
     const kvToken: string | undefined = updated.mpToken;
     const raw = kvToken ?? "";
     const mpTokenPreview = raw.length > 12
@@ -2307,7 +1939,6 @@ app.put("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
 
 // ── Payments (Mercado Pago) ───────────────────────────────────────────────────
 
-// PIX payment
 app.post("/make-server-68454e9b/payments/pix", async (c) => {
   try {
     const body = await c.req.json();
@@ -2317,9 +1948,7 @@ app.post("/make-server-68454e9b/payments/pix", async (c) => {
       return c.json({ error: "amount, customerEmail e orderId são obrigatórios" }, 400);
     }
 
-    // Resolve tenant from order to get correct MP token
-    const pixOrder: any = await kv.get(`${KV}order:${orderId}`);
-    const mpToken = await getMpToken(pixOrder?.ownerId ?? undefined);
+    const mpToken = await getMpToken();
     if (!mpToken) {
       return c.json({ error: "MP_ACCESS_TOKEN não configurado. Configure-o na área Financeiro do admin." }, 500);
     }
@@ -2367,11 +1996,10 @@ app.post("/make-server-68454e9b/payments/pix", async (c) => {
     const qrCodeBase64 = data.point_of_interaction?.transaction_data?.qr_code_base64 ?? "";
     const ticketUrl = data.point_of_interaction?.transaction_data?.ticket_url ?? "";
 
-    // Store MP payment ID in the order (reuse pixOrder if available)
-    const pixOrderFresh: any = pixOrder ?? await kv.get(`${KV}order:${orderId}`);
-    if (pixOrderFresh) {
+    const pixOrder: any = await kv.get(`${KV}order:${orderId}`);
+    if (pixOrder) {
       await kv.set(`${KV}order:${orderId}`, {
-        ...pixOrderFresh,
+        ...pixOrder,
         mpPaymentId: data.id,
         updatedAt: new Date().toISOString(),
       });
@@ -2384,7 +2012,6 @@ app.post("/make-server-68454e9b/payments/pix", async (c) => {
   }
 });
 
-// Card preference (Checkout Pro)
 app.post("/make-server-68454e9b/payments/preference", async (c) => {
   try {
     const body = await c.req.json();
@@ -2394,9 +2021,7 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
       return c.json({ error: "amount, customerEmail e orderId são obrigatórios" }, 400);
     }
 
-    // Resolve tenant from order
-    const prefOrder: any = await kv.get(`${KV}order:${orderId}`);
-    const mpToken = await getMpToken(prefOrder?.ownerId ?? undefined);
+    const mpToken = await getMpToken();
     if (!mpToken) {
       return c.json({ error: "MP_ACCESS_TOKEN não configurado. Configure-o na área Financeiro do admin." }, 500);
     }
@@ -2413,9 +2038,7 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
         },
       ],
       payer: { email: customerEmail },
-      payment_methods: {
-        installments: maxInstallments,
-      },
+      payment_methods: { installments: maxInstallments },
       back_urls: {
         success: successUrl,
         failure: failureUrl,
@@ -2442,17 +2065,15 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
       return c.json({ error: `Erro MP Preference: ${data.message ?? JSON.stringify(data)}` }, 500);
     }
 
-    // Store preference ID in the order (reuse prefOrder if available)
-    const prefOrderFresh: any = prefOrder ?? await kv.get(`${KV}order:${orderId}`);
-    if (prefOrderFresh) {
+    const prefOrder: any = await kv.get(`${KV}order:${orderId}`);
+    if (prefOrder) {
       await kv.set(`${KV}order:${orderId}`, {
-        ...prefOrderFresh,
+        ...prefOrder,
         mpPreferenceId: data.id,
         updatedAt: new Date().toISOString(),
       });
     }
 
-    // Use sandbox URL for TEST tokens, production URL otherwise
     const isTest = mpToken.startsWith("TEST-") || mpToken.startsWith("APP_USR-") === false;
     const checkoutUrl = isTest
       ? (data.sandbox_init_point ?? data.init_point)
@@ -2604,14 +2225,12 @@ async function sendOrderConfirmationEmail(order: any): Promise<void> {
     console.log("sendOrderConfirmationEmail: pedido sem e-mail de cliente, ignorado.");
     return;
   }
-  // Prevent duplicate emails
   if (order.emailSentAt) {
     console.log("sendOrderConfirmationEmail: e-mail já enviado para", order.id);
     return;
   }
 
   try {
-    // Generate signed URLs (view + download) for each purchased photo
     const photos: { tag: string; eventName: string; viewUrl: string; downloadUrl: string; fileName: string }[] = [];
 
     for (const item of (order.items ?? [])) {
@@ -2650,8 +2269,6 @@ async function sendOrderConfirmationEmail(order: any): Promise<void> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        // Troque por um domínio verificado no Resend para produção:
-        // ex: "Smart Match <noreply@seudominio.com.br>"
         from: "Smart Match <onboarding@resend.dev>",
         to: [order.customerEmail],
         subject: `📸 Suas fotos do Tour Palmeiras estão prontas! (#${(order.id ?? "").slice(-8).toUpperCase()})`,
@@ -2665,7 +2282,6 @@ async function sendOrderConfirmationEmail(order: any): Promise<void> {
       return;
     }
 
-    // Mark as sent to avoid duplicates
     await kv.set(`${KV}order:${order.id}`, {
       ...order,
       emailSentAt: new Date().toISOString(),
@@ -2673,7 +2289,6 @@ async function sendOrderConfirmationEmail(order: any): Promise<void> {
     console.log("E-mail de confirmação enviado para:", order.customerEmail);
   } catch (err) {
     console.log("Erro ao enviar e-mail de confirmação:", err);
-    // Non-blocking: do not throw
   }
 }
 
@@ -2685,17 +2300,7 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
     const paymentId = body.data?.id;
 
     if ((action === "payment.updated" || action === "payment.created") && paymentId) {
-      // Webhook has no auth — we need to try all possible MP tokens
-      // First try to find the order by scanning recent orders
-      // For now, try legacy token first, then resolve from order
-      let mpToken: string | null = null;
-
-      // Try to find order first via external_reference in payment
-      const tempToken = await getMpToken(); // legacy fallback
-      if (tempToken) {
-        mpToken = tempToken;
-      }
-
+      const mpToken = await getMpToken();
       if (!mpToken) {
         console.log("Webhook: MP token não configurado");
         return c.json({ received: true });
@@ -2709,15 +2314,12 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
         const orderId = payment.external_reference;
         const order: any = await kv.get(`${KV}order:${orderId}`);
         if (order) {
-          const orderPrefix = order.ownerId ? tenantKV(order.ownerId) : KV;
           const now = new Date().toISOString();
           const updatedOrder = { ...order, status: "paid", updatedAt: now };
           await kv.set(`${KV}order:${orderId}`, updatedOrder);
-          // Update daily revenue on confirmation (tenant-scoped)
           const dateKey = now.slice(0, 10);
-          const dayRevenue = ((await kv.get(`${orderPrefix}daily:revenue:${dateKey}`)) as number) ?? 0;
-          await kv.set(`${orderPrefix}daily:revenue:${dateKey}`, dayRevenue + (order.total ?? 0));
-          // Send confirmation email (non-blocking)
+          const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
+          await kv.set(`${KV}daily:revenue:${dateKey}`, dayRevenue + (order.total ?? 0));
           sendOrderConfirmationEmail(updatedOrder).catch(console.log);
         }
       }
@@ -2730,13 +2332,8 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
 });
 
 // ── Sync Storage → KV ─────────────────────────────────────────────────────────
-// POST /admin/sync-storage — admin auth
-// Varre o bucket S3 (pasta events/) e importa eventos+fotos que existem no
-// Storage mas não estão no KV. Não duplica registros existentes.
-// Query param: ?skipComplete=true para pular eventos com 100% de sincronização
+
 app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
-  const T = tenantKV(c.get("userId"));
-  const ownerId = c.get("userId");
   const startedAt = Date.now();
   const errors: string[] = [];
   let eventsCreated = 0;
@@ -2747,9 +2344,7 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
 
   try {
     console.log(`[Sync] Iniciando sincronização do Storage... (skipComplete=${skipComplete})`);
-    
-    // 1. List all folders under events/ in the bucket
-    console.log(`[Sync] Listando pastas em events/...`);
+
     const { data: eventFolders, error: listErr } = await sb().storage
       .from(BUCKET)
       .list("events", { limit: 500 });
@@ -2768,32 +2363,29 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
       });
     }
 
-    // Filter only "folders" (items without mimetype metadata)
     const folderNames = eventFolders
       .filter((item: any) => !item.metadata?.mimetype)
       .map((item: any) => item.name);
 
     console.log(`[Sync] ✓ Encontradas ${folderNames.length} pastas de eventos: ${folderNames.join(", ")}`);
 
-    // Fetch current config for price (tenant-scoped)
-    const cfg: any = (await kv.get(`${T}config`)) ?? {};
+    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
     const currentPrice: number = cfg.photoPrice ?? 30;
-    const branding: any = (await kv.get(`${T}branding`)) ?? {};
+    const branding: any = (await kv.get(`${KV}branding`)) ?? {};
     const defaultSessionType = Array.isArray(branding.eventSessionTypes) && branding.eventSessionTypes.length > 0
       ? branding.eventSessionTypes[0] : "Tour";
     const autoVenue = `${branding.venueName ?? "Allianz Parque"}, ${branding.venueLocation ?? "São Paulo, SP"}`;
 
     for (const eventSlug of folderNames) {
       try {
-        // 2. List all files in events/<slug>/ FIRST (para calcular %)
         const { data: files, error: filesErr } = await sb().storage
           .from(BUCKET)
           .list(`events/${eventSlug}`, { limit: 1000 });
 
-        if (filesErr) { 
+        if (filesErr) {
           console.log(`[Sync] Erro listando ${eventSlug}: ${filesErr.message}`);
-          errors.push(`Erro listando eventos/${eventSlug}: ${filesErr.message}`); 
-          continue; 
+          errors.push(`Erro listando eventos/${eventSlug}: ${filesErr.message}`);
+          continue;
         }
         if (!files || files.length === 0) {
           console.log(`[Sync] Nenhuma foto em ${eventSlug}`);
@@ -2805,21 +2397,18 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
         );
         const storagePhotoCount = imageFiles.length;
 
-        // Get existing photos to calculate sync %
         const existingPhotoIds = await getList(`${KV}photos:event:${eventSlug}`);
         const kvPhotoCount = existingPhotoIds.length;
         const syncPercentage = storagePhotoCount > 0 ? Math.round((kvPhotoCount / storagePhotoCount) * 100) : 0;
 
         console.log(`[Sync] Evento ${eventSlug}: ${kvPhotoCount}/${storagePhotoCount} fotos (${syncPercentage}%)`);
 
-        // Skip if 100% synced and skipComplete=true
         if (skipComplete && syncPercentage >= 100) {
           console.log(`[Sync] ⏭ Pulando ${eventSlug} (100% sincronizado)`);
           eventsSkipped++;
           continue;
         }
 
-        // 3. Check if event already exists in KV
         let event: any = await kv.get(`${KV}event:${eventSlug}`);
         const isNewEvent = !event;
 
@@ -2831,21 +2420,21 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
             const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
             const d = new Date(dateISO);
             event = {
-              id: eventSlug, ownerId, name: `${defaultSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
+              id: eventSlug, name: `${defaultSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
               slug: eventSlug, date: dateISO, endTime: "", location: autoVenue,
               sessionType: defaultSessionType, status: "disponivel", photoCount: 0, faceCount: 0,
               price: currentPrice, dayOfWeek: dayOfWeekPT(d), createdAt: now, updatedAt: now,
             };
           } else {
             event = {
-              id: eventSlug, ownerId, name: eventSlug, slug: eventSlug, date: new Date().toISOString(),
+              id: eventSlug, name: eventSlug, slug: eventSlug, date: new Date().toISOString(),
               endTime: "", location: autoVenue, sessionType: defaultSessionType,
               status: "disponivel", photoCount: 0, faceCount: 0, price: currentPrice,
               dayOfWeek: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
             };
           }
           await kv.set(`${KV}event:${eventSlug}`, event);
-          await appendToList(`${T}events:index`, eventSlug);
+          await appendToList(`${KV}events:index`, eventSlug);
           eventsCreated++;
           console.log(`[Sync] ✓ Criado evento: ${eventSlug}`);
         } else {
@@ -2853,10 +2442,6 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
           console.log(`[Sync] → Evento ${eventSlug} já existe`);
         }
 
-        // 4. Process photos from the already-loaded files (no need to list again)
-        console.log(`[Sync] Varrendo fotos do evento ${eventSlug}...`);
-
-        // Get existing photo storagePaths to avoid duplicates (reuse existingPhotoIds from above)
         const existingPaths = new Set<string>();
         const existingIdSet = new Set(existingPhotoIds);
         if (existingPhotoIds.length > 0) {
@@ -2864,15 +2449,14 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
           for (const rec of recs) { if ((rec as any)?.storagePath) existingPaths.add((rec as any).storagePath); }
         }
 
-        // Import photos that don't exist yet
         let newPhotosForEvent = 0;
         console.log(`[Sync] Processando ${storagePhotoCount} imagens em ${eventSlug}...`);
         for (const file of imageFiles) {
           const storagePath = `events/${eventSlug}/${file.name}`;
           const photoId = file.name.replace(/\.[^.]+$/, "");
-          if (existingPaths.has(storagePath) || existingIdSet.has(photoId)) { 
-            photosSkipped++; 
-            continue; 
+          if (existingPaths.has(storagePath) || existingIdSet.has(photoId)) {
+            photosSkipped++;
+            continue;
           }
 
           const now = new Date().toISOString();
@@ -2886,7 +2470,6 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
           console.log(`[Sync] ✓ Importadas ${newPhotosForEvent} fotos novas para ${eventSlug}`);
         }
 
-        // Update event photoCount
         if (newPhotosForEvent > 0 || isNewEvent) {
           const allPhotoIds = await getList(`${KV}photos:event:${eventSlug}`);
           await kv.set(`${KV}event:${eventSlug}`, { ...event, photoCount: allPhotoIds.length, updatedAt: new Date().toISOString() });
@@ -2909,6 +2492,7 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
 });
 
 // ── List Storage Contents (diagnostic) ────────────────────────────────────────
+
 app.get("/make-server-68454e9b/admin/storage-list", adminAuth, async (c) => {
   try {
     const { data: eventFolders, error: err1 } = await sb().storage.from(BUCKET).list("events", { limit: 200 });
@@ -2928,95 +2512,106 @@ app.get("/make-server-68454e9b/admin/storage-list", adminAuth, async (c) => {
   }
 });
 
-// ── Migrate legacy data to tenant prefix ──────────────────────────────────────
-// POST /admin/migrate-tenant — admin auth
-// Moves legacy ef: indexes/config/branding to ef:{userId}: tenant prefix.
-// Idempotente — seguro de rodar múltiplas vezes.
-app.post("/make-server-68454e9b/admin/migrate-tenant", adminAuth, async (c) => {
+// ── Flatten tenant data → global (manual trigger) ─────────────────────────────
+// POST /admin/flatten-to-global
+// Use this once to migrate data from any tenant-prefixed KV keys to global ef: keys.
+// Scans the kv_store table directly to find all tenant indexes.
+app.post("/make-server-68454e9b/admin/flatten-to-global", adminAuth, async (c) => {
   try {
-    const userId = c.get("userId");
-    const T = tenantKV(userId);
+    const body = await c.req.json().catch(() => ({}));
+    const fromUserId: string | undefined = body.fromUserId?.trim();
+
     const migrated: string[] = [];
 
-    // 1. Migrate events:index
-    const legacyEvents = await getList(`${KV}events:index`);
-    const tenantEvents = await getList(`${T}events:index`);
-    if (legacyEvents.length > 0 && tenantEvents.length === 0) {
-      await kv.set(`${T}events:index`, legacyEvents);
-      // Also stamp ownerId on each event
-      for (const eid of legacyEvents) {
-        const evt: any = await kv.get(`${KV}event:${eid}`);
-        if (evt && !evt.ownerId) {
-          await kv.set(`${KV}event:${eid}`, { ...evt, ownerId: userId });
-        }
-      }
-      migrated.push(`events:index (${legacyEvents.length} events)`);
-    }
+    // Find all keys matching tenant event/order indexes
+    const { data: rows, error: rowsErr } = await sb()
+      .from("kv_store_68454e9b")
+      .select("key")
+      .or("key.ilike.ef:%:events:index,key.ilike.ef:%:orders:index,key.ilike.ef:%:config,key.ilike.ef:%:branding")
+      .limit(200);
 
-    // 2. Migrate branding
-    const legacyBranding = await kv.get(`${KV}branding`);
-    const tenantBranding = await kv.get(`${T}branding`);
-    if (legacyBranding && !tenantBranding) {
-      await kv.set(`${T}branding`, legacyBranding);
-      migrated.push("branding");
-    }
+    if (rowsErr) throw new Error(`query error: ${rowsErr.message}`);
 
-    // 3. Migrate config
-    const legacyConfig = await kv.get(`${KV}config`);
-    const tenantConfig = await kv.get(`${T}config`);
-    if (legacyConfig && !tenantConfig) {
-      await kv.set(`${T}config`, legacyConfig);
-      migrated.push("config");
-    }
-
-    // 4. Migrate orders:index
-    const legacyOrders = await getList(`${KV}orders:index`);
-    const tenantOrders = await getList(`${T}orders:index`);
-    if (legacyOrders.length > 0 && tenantOrders.length === 0) {
-      await kv.set(`${T}orders:index`, legacyOrders);
-      // Also stamp ownerId on each order
-      for (const oid of legacyOrders) {
-        const ord: any = await kv.get(`${KV}order:${oid}`);
-        if (ord && !ord.ownerId) {
-          await kv.set(`${KV}order:${oid}`, { ...ord, ownerId: userId });
-        }
-      }
-      migrated.push(`orders:index (${legacyOrders.length} orders)`);
-    }
-
-    // 5. Migrate daily stats (last 30 days)
-    for (let i = 0; i < 30; i++) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dateKey = d.toISOString().slice(0, 10);
-      const legacyRev = await kv.get(`${KV}daily:revenue:${dateKey}`);
-      const legacyCnt = await kv.get(`${KV}daily:count:${dateKey}`);
-      if (legacyRev != null && !(await kv.get(`${T}daily:revenue:${dateKey}`))) {
-        await kv.set(`${T}daily:revenue:${dateKey}`, legacyRev);
-      }
-      if (legacyCnt != null && !(await kv.get(`${T}daily:count:${dateKey}`))) {
-        await kv.set(`${T}daily:count:${dateKey}`, legacyCnt);
-      }
-    }
-    if (migrated.length === 0 && legacyEvents.length === 0) {
-      migrated.push("daily stats (last 30 days)");
-    }
-
-    bustBrandingCache();
-
-    console.log(`[migrate-tenant] userId=${userId} migrated: ${migrated.join(", ") || "nothing to migrate"}`);
-    return c.json({
-      success: true,
-      userId,
-      tenantPrefix: T,
-      migrated,
-      message: migrated.length > 0
-        ? `Migração concluída: ${migrated.join(", ")}`
-        : "Nada para migrar — dados já estão no prefixo do tenant ou não há dados legados.",
+    const tenantKeys = (rows ?? []).map((r: any) => r.key as string).filter((k: string) => {
+      // Only include real tenant keys (not global ef:events:index, ef:config, etc.)
+      const parts = k.split(":");
+      return parts.length >= 3; // ef:{userId}:... has at least 3 parts
     });
+
+    console.log(`[flatten-to-global] Chaves tenant encontradas: ${tenantKeys.join(", ")}`);
+
+    // If fromUserId specified, only process that user's data
+    const keysToProcess = fromUserId
+      ? tenantKeys.filter(k => k.startsWith(`ef:${fromUserId}:`))
+      : tenantKeys;
+
+    // Process events:index
+    const globalEvents = await getList(`${KV}events:index`);
+    const eventSet = new Set(globalEvents);
+    let newEvents = 0;
+    for (const key of keysToProcess.filter(k => k.endsWith(":events:index"))) {
+      const list = await getList(key);
+      for (const id of list) {
+        if (!eventSet.has(id)) { eventSet.add(id); newEvents++; }
+      }
+    }
+    if (newEvents > 0) {
+      await kv.set(`${KV}events:index`, Array.from(eventSet));
+      migrated.push(`events:index (+${newEvents} eventos)`);
+    }
+
+    // Process orders:index
+    const globalOrders = await getList(`${KV}orders:index`);
+    const orderSet = new Set(globalOrders);
+    let newOrders = 0;
+    for (const key of keysToProcess.filter(k => k.endsWith(":orders:index"))) {
+      const list = await getList(key);
+      for (const id of list) {
+        if (!orderSet.has(id)) { orderSet.add(id); newOrders++; }
+      }
+    }
+    if (newOrders > 0) {
+      await kv.set(`${KV}orders:index`, Array.from(orderSet));
+      migrated.push(`orders:index (+${newOrders} pedidos)`);
+    }
+
+    // Process config (first one found wins if global is empty)
+    if (!await kv.get(`${KV}config`)) {
+      for (const key of keysToProcess.filter(k => k.endsWith(":config"))) {
+        const cfg = await kv.get(key);
+        if (cfg) {
+          await kv.set(`${KV}config`, cfg);
+          migrated.push("config");
+          break;
+        }
+      }
+    }
+
+    // Process branding (first one found wins if global is empty)
+    if (!await kv.get(`${KV}branding`)) {
+      for (const key of keysToProcess.filter(k => k.endsWith(":branding"))) {
+        const brand = await kv.get(key);
+        if (brand) {
+          await kv.set(`${KV}branding`, brand);
+          bustBrandingCache();
+          migrated.push("branding");
+          break;
+        }
+      }
+    }
+
+    // Reset flatten cache so auto-flatten runs again cleanly
+    _flattenRan.clear();
+
+    const msg = migrated.length > 0
+      ? `Migração concluída: ${migrated.join(", ")}`
+      : "Nada para migrar — dados globais já estão corretos.";
+
+    console.log(`[flatten-to-global] ${msg}`);
+    return c.json({ success: true, migrated, tenantKeysFound: tenantKeys, message: msg });
   } catch (err) {
-    console.log("Erro na migração de tenant:", err);
-    return c.json({ error: `Erro na migração: ${err}` }, 500);
+    console.log("Erro no flatten-to-global:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
   }
 });
 

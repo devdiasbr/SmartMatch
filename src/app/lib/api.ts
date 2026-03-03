@@ -440,6 +440,16 @@ export const api = {
       token,
     ),
 
+  // ── Reclaim Ownership ────────────────────────────────────────────────────
+  // ── Flatten to Global ────────────────────────────────────────────────────
+  // Copies tenant-prefixed KV indexes to global ef: prefix (one-time repair).
+  flattenToGlobal: (fromUserId: string | undefined, token: string) =>
+    aPost<{ success: boolean; migrated: string[]; tenantKeysFound: string[]; message: string; error?: string }>(
+      '/admin/flatten-to-global',
+      { fromUserId },
+      token,
+    ),
+
   // ── KV Diagnostic ──────────────────────────────────────────────────────
   diagnoseKv: (token: string) =>
     aGet<{ total: number; events: { id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }[] }>(
