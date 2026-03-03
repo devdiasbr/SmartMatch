@@ -252,13 +252,13 @@ function Lightbox({ photos, index, eventId, eventName, onClose, onNext, onPrev, 
 }
 
 /* ─── Face Search Tab ─── */
-function FaceSearchTab({ photos, eventId, eventName }: { photos: Photo[]; eventId: string; eventName: string }) {
-  return <FaceSearchPanel photos={photos} eventId={eventId} eventName={eventName} />;
+function FaceSearchTab({ photos, eventId, eventName, org }: { photos: Photo[]; eventId: string; eventName: string; org?: string }) {
+  return <FaceSearchPanel photos={photos} eventId={eventId} eventName={eventName} org={org} />;
 }
 
 /* ─── Face Grouping Tab ─── */
-function FaceGroupingTab({ photos, eventId, eventName }: { photos: Photo[]; eventId: string; eventName: string }) {
-  return <FaceGroupingPanel photos={photos} eventId={eventId} eventName={eventName} />;
+function FaceGroupingTab({ photos, eventId, eventName, org }: { photos: Photo[]; eventId: string; eventName: string; org?: string }) {
+  return <FaceGroupingPanel photos={photos} eventId={eventId} eventName={eventName} org={org} />;
 }
 
 /* ─── Packages Tab ─── */
@@ -315,6 +315,9 @@ export function EventDetail() {
   const isDark = theme === 'dark';
   const { branding } = useBranding();
 
+  // Multi-tenant: read ?org= from URL for tenant-scoped API calls (LGPD)
+  const orgId = new URLSearchParams(window.location.search).get('org') ?? undefined;
+
   /* theme-aware palette */
   const bg          = isDark ? '#08080E'                  : '#F2F8F4';
   const heroGrad    = isDark
@@ -355,7 +358,7 @@ export function EventDetail() {
     }
     const load = async () => {
       try {
-        const [evRes, phRes] = await Promise.all([api.getEvent(id), api.getEventPhotos(id, 1, PHOTOS_PER_PAGE)]);
+        const [evRes, phRes] = await Promise.all([api.getEvent(id, orgId), api.getEventPhotos(id, 1, PHOTOS_PER_PAGE, orgId)]);
         const ev = evRes.event;
         const d = new Date(ev.date);
         setApiEvent({
@@ -375,7 +378,6 @@ export function EventDetail() {
         setPhotos(mapped.length > 0 ? mapped : []);
         setTotalPhotos(phRes.total ?? mapped.length);
         setTotalPages(phRes.totalPages ?? 1);
-        setCurrentPage(1);
       } catch (err) {
         console.log('Erro ao carregar evento, usando fallback:', err);
         setApiEvent(null);
@@ -394,7 +396,7 @@ export function EventDetail() {
     if (!id || loadingPage || page < 1 || page > totalPages || page === currentPage) return false;
     setLoadingPage(true);
     try {
-      const phRes = await api.getEventPhotos(id, page, PHOTOS_PER_PAGE);
+      const phRes = await api.getEventPhotos(id, page, PHOTOS_PER_PAGE, orgId);
       const mapped: Photo[] = phRes.photos.map((p: PhotoRecord) => ({
         id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
       }));
@@ -428,7 +430,7 @@ export function EventDetail() {
     if (!id || lightboxNavBusy.current || page < 1 || page > totalPages) return false;
     lightboxNavBusy.current = true;
     try {
-      const phRes = await api.getEventPhotos(id, page, PHOTOS_PER_PAGE);
+      const phRes = await api.getEventPhotos(id, page, PHOTOS_PER_PAGE, orgId);
       const mapped: Photo[] = phRes.photos.map((p: PhotoRecord) => ({
         id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
       }));
@@ -483,7 +485,7 @@ export function EventDetail() {
   const loadAllPhotosIfNeeded = async () => {
     if (allPhotosLoaded || !id || EVENT_DATA[id]) return;
     try {
-      const phRes = await api.getEventPhotos(id, 1, 500);
+      const phRes = await api.getEventPhotos(id, 1, 500, orgId);
       const mapped: Photo[] = phRes.photos.map((p: PhotoRecord) => ({
         id: p.id, src: p.url ?? IMG_STADIUM, price: p.price, tag: p.tag, liked: false,
       }));
@@ -730,10 +732,10 @@ export function EventDetail() {
               )}
             </motion.div>
           )}
-          {activeTab === 'minhas'      && <FaceSearchTab    photos={facePhotos} eventId={eventId} eventName={event.title} />}
+          {activeTab === 'minhas'      && <FaceSearchTab    photos={facePhotos} eventId={eventId} eventName={event.title} org={orgId} />}
           {activeTab === 'agrupamento' && (
             <motion.div key="agrupamento" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
-              <FaceGroupingTab photos={facePhotos} eventId={eventId} eventName={event.title} />
+              <FaceGroupingTab photos={facePhotos} eventId={eventId} eventName={event.title} org={orgId} />
             </motion.div>
           )}
           {activeTab === 'pacotes' && (

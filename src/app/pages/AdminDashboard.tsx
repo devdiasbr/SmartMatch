@@ -175,7 +175,7 @@ export function AdminDashboard() {
   const isDark = theme === 'dark';
   const location = useLocation();
   const navigate = useNavigate();
-  const { token, isAdmin, loading: authLoading, getToken } = useAuth();
+  const { user, token, isAdmin, loading: authLoading, getToken } = useAuth();
   const isOnDashboard = location.pathname === '/admin' || location.pathname === '/admin/';
 
   const [chartView, setChartView] = useState<'receita' | 'fotos'>('receita');
@@ -202,7 +202,8 @@ export function AdminDashboard() {
   }, [token, getToken]);
 
   useEffect(() => {
-    api.getEvents()
+    if (!token) return;
+    api.getAdminEvents(token)
       .then((res) => {
         const upcoming = res.events
           .filter((e) => e.status === 'em_breve')
@@ -210,7 +211,7 @@ export function AdminDashboard() {
         setUpcomingEvents(upcoming);
       })
       .catch((err) => console.log('Erro ao buscar próximas sessões:', err));
-  }, []);
+  }, [token]);
 
   /* Colors */
   const bg = isDark ? '#08080E' : '#F2F8F4';

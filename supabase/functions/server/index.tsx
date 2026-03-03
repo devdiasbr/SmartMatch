@@ -6,7 +6,30 @@ import * as kv from "./kv_store.tsx";
 import * as faces from "./faces.ts";
 
 const BUCKET = "make-68454e9b-eventface";
-const KV = "ef:";
+const KV = "ef:"; // Global entity prefix (photo, event, order by ID)
+
+// ── Multi-tenant KV prefix — isolates indexes/config per admin user ──────────
+function tenantKV(userId: string): string {
+  return `ef:${userId}:`;
+}
+
+// Resolve org for public routes: ?org= param → tenant prefix, fallback to legacy "ef:"
+// Real isolation lives in ADMIN routes (JWT + getOwnedEvent ownership check).
+// Public routes use ?org= for scoping when available, fallback = legacy index.
+function resolvePublicPrefix(c: any): string {
+  const org = c.req.query("org");
+  if (org) return tenantKV(org);
+  return KV;
+}
+
+// ── Ownership check helper ──────────────────────────────────────────────────
+// STRICT: returns event only if ownerId === userId. No ownerId = orphan = denied.
+async function getOwnedEvent(eventId: string, userId: string): Promise<{ event: any; error?: undefined } | { event?: undefined; error: string }> {
+  const event: any = await kv.get(`${KV}event:${eventId}`);
+  if (!event) return { error: "Evento não encontrado" };
+  if (event.ownerId !== userId) return { error: "Acesso negado: este evento pertence a outro tenant" };
+  return { event };
+}
 
 const app = new Hono();
 
@@ -35,13 +58,16 @@ function sb() {
   return _sb;
 }
 
-// ── In-memory branding cache ──────────────────────────────────────────────────
+// ── In-memory branding cache (per-tenant) ─────────────────────────────────────
 
 interface BrandingCacheEntry { data: any; ts: number; }
-let brandingCache: BrandingCacheEntry | null = null;
+const brandingCacheMap = new Map<string, BrandingCacheEntry>();
 const BRANDING_TTL = 30_000; // 30 s
 
-function bustBrandingCache() { brandingCache = null; }
+function bustBrandingCache(prefix?: string) {
+  if (prefix) brandingCacheMap.delete(prefix);
+  else brandingCacheMap.clear();
+}
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
@@ -62,6 +88,15 @@ async function adminAuth(c: any, next: () => Promise<void>) {
     console.log("adminAuth falhou:", error?.message ?? "token inválido");
     return c.json({ error: `Não autorizado: ${error?.message ?? "token inválido"}` }, 401);
   }
+
+  // Check role: only 'owner' users can access admin routes.
+  // Legacy users (created before role was added) are allowed through.
+  const role = user.user_metadata?.role;
+  if (role && role !== "owner") {
+    console.log(`adminAuth: user ${user.id} has role '${role}', expected 'owner'`);
+    return c.json({ error: "Não autorizado: permissão insuficiente" }, 403);
+  }
+
   c.set("userId", user.id);
   await next();
 }
@@ -84,6 +119,95 @@ async function appendToList(key: string, id: string) {
 async function removeFromList(key: string, id: string) {
   const list = await getList(key);
   await kv.set(key, list.filter((i) => i !== id));
+}
+
+// ── Auto-claim orphan data ──────────────────────────────────────────────────
+// Stamps ownerId on ALL records that don't have one yet, and indexes them
+// under the tenant prefix. Idempotent — safe to run on every admin request.
+// Uses an in-memory set so it only runs once per user per cold start.
+const _claimRanFor = new Set<string>();
+
+async function autoClaimOrphans(userId: string): Promise<void> {
+  if (_claimRanFor.has(userId)) return;
+  _claimRanFor.add(userId);
+
+  const T = tenantKV(userId);
+  const claimed: string[] = [];
+
+  try {
+    // ── Events ──
+    const legacyEventIds = await getList(`${KV}events:index`);
+    for (const eid of legacyEventIds) {
+      const ev: any = await kv.get(`${KV}event:${eid}`);
+      if (!ev) continue;
+      if (!ev.ownerId) {
+        ev.ownerId = userId;
+        ev.updatedAt = new Date().toISOString();
+        await kv.set(`${KV}event:${eid}`, ev);
+        claimed.push(`event:${eid}`);
+      }
+      if (ev.ownerId === userId) {
+        await appendToList(`${T}events:index`, eid);
+      }
+    }
+
+    // ── Orders ──
+    const legacyOrderIds = await getList(`${KV}orders:index`);
+    for (const oid of legacyOrderIds) {
+      const order: any = await kv.get(`${KV}order:${oid}`);
+      if (!order) continue;
+      if (!order.ownerId) {
+        order.ownerId = userId;
+        order.updatedAt = new Date().toISOString();
+        await kv.set(`${KV}order:${oid}`, order);
+        claimed.push(`order:${oid}`);
+      }
+      if (order.ownerId === userId) {
+        await appendToList(`${T}orders:index`, oid);
+      }
+    }
+
+    // ── Photos ──
+    const allEventIds = [...new Set([...legacyEventIds, ...(await getList(`${T}events:index`))])];
+    for (const eid of allEventIds) {
+      const photoIds = await getList(`${KV}photos:event:${eid}`);
+      for (const pid of photoIds) {
+        const photo: any = await kv.get(`${KV}photo:${pid}`);
+        if (!photo) continue;
+        if (!photo.ownerId) {
+          photo.ownerId = userId;
+          await kv.set(`${KV}photo:${pid}`, photo);
+          claimed.push(`photo:${pid}`);
+        }
+      }
+    }
+
+    // ── Config & Branding → copy to tenant prefix ──
+    const tenantCfg: any = await kv.get(`${T}config`);
+    if (!tenantCfg) {
+      const legacyCfg: any = await kv.get(`${KV}config`);
+      if (legacyCfg) {
+        await kv.set(`${T}config`, { ...legacyCfg });
+        claimed.push("config");
+      }
+    }
+    const tenantBrand: any = await kv.get(`${T}branding`);
+    if (!tenantBrand) {
+      const legacyBrand: any = await kv.get(`${KV}branding`);
+      if (legacyBrand) {
+        await kv.set(`${T}branding`, { ...legacyBrand });
+        claimed.push("branding");
+      }
+    }
+
+    if (claimed.length > 0) {
+      console.log(`[autoClaimOrphans] userId=${userId} claimed ${claimed.length} records: ${claimed.join(", ")}`);
+    }
+  } catch (err) {
+    console.log(`[autoClaimOrphans] Erro:`, err);
+    // Don't block the request — just log
+    _claimRanFor.delete(userId); // allow retry on next request
+  }
 }
 
 // ── Storage init ──────────────────────────────────────────────────────────────
@@ -113,7 +237,8 @@ app.get("/make-server-68454e9b/health", (c) => c.json({ status: "ok" }));
 
 app.get("/make-server-68454e9b/stats/public", async (c) => {
   try {
-    const eventIds = await getList(`${KV}events:index`);
+    const P = resolvePublicPrefix(c);
+    const eventIds = await getList(`${P}events:index`);
     const events: any[] = (
       await Promise.all(eventIds.map((id) => kv.get(`${KV}event:${id}`)))
     ).filter(Boolean);
@@ -130,14 +255,15 @@ app.get("/make-server-68454e9b/stats/public", async (c) => {
 
 // ── Branding ──────────────────────────────────────────────────────────────────
 
-async function brandingWithUrls(bustCache = false) {
-  // Serve from in-memory cache when fresh
+async function brandingWithUrls(bustCache = false, prefix = KV) {
+  // Serve from in-memory cache when fresh (per-tenant)
   const now = Date.now();
-  if (!bustCache && brandingCache && now - brandingCache.ts < BRANDING_TTL) {
-    return brandingCache.data;
+  const cached = brandingCacheMap.get(prefix);
+  if (!bustCache && cached && now - cached.ts < BRANDING_TTL) {
+    return cached.data;
   }
 
-  const b: any = (await kv.get(`${KV}branding`)) ?? {};
+  const b: any = (await kv.get(`${prefix}branding`)) ?? {};
   console.log(`[brandingWithUrls] Branding KV:`, {
     logoPath: b.logoPath,
     faviconPath: b.faviconPath,
@@ -245,14 +371,15 @@ async function brandingWithUrls(bustCache = false) {
     bgTransitionInterval: typeof b.bgTransitionInterval === 'number' ? b.bgTransitionInterval : 5,
   };
 
-  brandingCache = { data: result, ts: Date.now() };
+  brandingCacheMap.set(prefix, { data: result, ts: Date.now() });
   return result;
 }
 
-// Public branding (no auth)
+// Public branding (no auth) — requires ?org= for multi-tenant
 app.get("/make-server-68454e9b/branding/public", async (c) => {
   try {
-    return c.json(await brandingWithUrls());
+    const prefix = resolvePublicPrefix(c);
+    return c.json(await brandingWithUrls(false, prefix));
   } catch (err) {
     console.log("Erro ao buscar branding público:", err);
     return c.json({
@@ -270,20 +397,22 @@ app.get("/make-server-68454e9b/branding/public", async (c) => {
   }
 });
 
-// Admin branding GET
+// Admin branding GET (tenant-scoped)
 app.get("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
   try {
-    return c.json(await brandingWithUrls(true)); // always fresh for admin
+    const T = tenantKV(c.get("userId"));
+    return c.json(await brandingWithUrls(true, T)); // always fresh for admin
   } catch (err) {
     return c.json({ error: `Erro ao buscar branding: ${err}` }, 500);
   }
 });
 
-// Admin branding PUT (text fields only)
+// Admin branding PUT (text fields only, tenant-scoped)
 app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
     const body = await c.req.json();
-    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+    const existing: any = (await kv.get(`${T}branding`)) ?? {};
     const updated = {
       ...existing,
       appName: body.appName ?? existing.appName,
@@ -317,17 +446,18 @@ app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
       eventSessionTypes: body.eventSessionTypes !== undefined ? body.eventSessionTypes : existing.eventSessionTypes,
       updatedAt: new Date().toISOString(),
     };
-    await kv.set(`${KV}branding`, updated);
-    bustBrandingCache();
+    await kv.set(`${T}branding`, updated);
+    bustBrandingCache(T);
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao salvar branding: ${err}` }, 500);
   }
 });
 
-// Upload logo / favicon / background
+// Upload logo / favicon / background (tenant-scoped)
 app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
     const { type, base64, mimeType = "image/png" } = await c.req.json();
     if (!base64 || !type) return c.json({ error: "type e base64 obrigatórios" }, 400);
     if (!["logo", "favicon", "background", "cta-background", "scanner-image"].includes(type))
@@ -358,7 +488,7 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
       .from(BUCKET).upload(storagePath, bytes, { contentType: mimeType, upsert: false });
     if (uploadError) return c.json({ error: `Upload erro: ${uploadError.message}` }, 500);
 
-    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+    const existing: any = (await kv.get(`${T}branding`)) ?? {};
 
     // Delete old asset when replacing logo, favicon or cta-background
     if (type === "logo" && existing.logoPath) {
@@ -378,8 +508,8 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
     else if (type === "scanner-image") updated.scannerImagePath = storagePath;
     else updated.backgroundPaths = [...(existing.backgroundPaths ?? []), storagePath];
 
-    await kv.set(`${KV}branding`, updated);
-    bustBrandingCache();
+    await kv.set(`${T}branding`, updated);
+    bustBrandingCache(T);
 
     const { data: signData } = await sb().storage.from(BUCKET).createSignedUrl(storagePath, 3600);
     return c.json({ url: signData?.signedUrl ?? null, path: storagePath });
@@ -388,38 +518,40 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
   }
 });
 
-// Delete logo or favicon
+// Delete logo or favicon (tenant-scoped)
 app.delete("/make-server-68454e9b/admin/branding/asset/:asset", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
     const asset = c.req.param("asset");
     if (asset !== "logo" && asset !== "favicon" && asset !== "cta-background" && asset !== "scanner-image")
       return c.json({ error: "Asset deve ser logo, favicon, cta-background ou scanner-image" }, 400);
 
-    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+    const existing: any = (await kv.get(`${T}branding`)) ?? {};
     const pathKey = asset === "logo" ? "logoPath" : asset === "favicon" ? "faviconPath" : asset === "scanner-image" ? "scannerImagePath" : "ctaBgPath";
     if (existing[pathKey]) {
       await sb().storage.from(BUCKET).remove([existing[pathKey]]);
     }
-    await kv.set(`${KV}branding`, { ...existing, [pathKey]: null, updatedAt: new Date().toISOString() });
-    bustBrandingCache();
+    await kv.set(`${T}branding`, { ...existing, [pathKey]: null, updatedAt: new Date().toISOString() });
+    bustBrandingCache(T);
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao remover asset: ${err}` }, 500);
   }
 });
 
-// Delete background by index
+// Delete background by index (tenant-scoped)
 app.delete("/make-server-68454e9b/admin/branding/backgrounds/:index", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
     const idx = parseInt(c.req.param("index"));
-    const existing: any = (await kv.get(`${KV}branding`)) ?? {};
+    const existing: any = (await kv.get(`${T}branding`)) ?? {};
     const paths: string[] = [...(existing.backgroundPaths ?? [])];
     if (idx < 0 || idx >= paths.length) return c.json({ error: "Índice inválido" }, 400);
 
     const [removed] = paths.splice(idx, 1);
     await sb().storage.from(BUCKET).remove([removed]);
-    await kv.set(`${KV}branding`, { ...existing, backgroundPaths: paths, updatedAt: new Date().toISOString() });
-    bustBrandingCache();
+    await kv.set(`${T}branding`, { ...existing, backgroundPaths: paths, updatedAt: new Date().toISOString() });
+    bustBrandingCache(T);
     return c.json({ success: true });
   } catch (err) {
     return c.json({ error: `Erro ao remover background: ${err}` }, 500);
@@ -439,7 +571,7 @@ app.post("/make-server-68454e9b/auth/register", async (c) => {
     const { data, error } = await sb().auth.admin.createUser({
       email,
       password,
-      user_metadata: { name: name ?? "Admin" },
+      user_metadata: { name: name ?? "Admin", role: "owner" },
       // Automatically confirm the user's email since an email server hasn't been configured.
       email_confirm: true,
     });
@@ -456,15 +588,41 @@ app.post("/make-server-68454e9b/auth/register", async (c) => {
 
 // ── Events ────────────────────────────────────────────────────────────────────
 
-// List all events (public)
+// List events for the authenticated admin (tenant-scoped, uses JWT — NOT query param)
+app.get("/make-server-68454e9b/admin/events", adminAuth, async (c) => {
+  try {
+    const userId = c.get("userId");
+    // Auto-claim orphan data (runs once per cold start)
+    await autoClaimOrphans(userId);
+
+    const T = tenantKV(userId);
+    const ids = await getList(`${T}events:index`);
+    const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean);
+    // STRICT: only show events owned by this user
+    const owned = (events as any[]).filter((e) => e.ownerId === userId);
+    owned.sort((a: any, b: any) => a.date.localeCompare(b.date));
+    return c.json({ events: owned });
+  } catch (err) {
+    console.log("Erro ao listar eventos (admin):", err);
+    return c.json({ error: `Erro ao listar eventos: ${err}` }, 500);
+  }
+});
+
+// List all events (public) — scoped by ?org= when available, fallback to legacy index
+// If tenant index is empty but ?org= was provided, also check legacy index
+// and filter by ownerId (handles pre-migration data).
 app.get("/make-server-68454e9b/events", async (c) => {
   try {
-    const ids = await getList(`${KV}events:index`);
-    const events = await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)));
-    const valid = events.filter(Boolean).sort((a: any, b: any) =>
-      a.date.localeCompare(b.date)
-    );
-    return c.json({ events: valid });
+    const org = c.req.query("org");
+    const P = resolvePublicPrefix(c);
+    const ids = await getList(`${P}events:index`);
+    const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean);
+    // STRICT: if org was provided, only show events owned by that org
+    const filtered = org
+      ? (events as any[]).filter((e) => e.ownerId === org)
+      : events;
+    (filtered as any[]).sort((a: any, b: any) => a.date.localeCompare(b.date));
+    return c.json({ events: filtered });
   } catch (err) {
     console.log("Erro ao listar eventos:", err);
     return c.json({ error: `Erro ao listar eventos: ${err}` }, 500);
@@ -484,10 +642,11 @@ app.get("/make-server-68454e9b/events/:id", async (c) => {
   }
 });
 
-// Get current photo price (public — no auth required)
+// Get current photo price (public) — supports ?org= for multi-tenant
 app.get("/make-server-68454e9b/config/price", async (c) => {
   try {
-    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    const P = resolvePublicPrefix(c);
+    const cfg: any = (await kv.get(`${P}config`)) ?? {};
     return c.json({ photoPrice: cfg.photoPrice ?? 30 });
   } catch (err) {
     console.log("Erro ao buscar preço:", err);
@@ -512,9 +671,11 @@ function dayOfWeekPT(date: Date): string {
   return names[date.getDay()] ?? "";
 }
 
-// Create event (admin) — find-or-create by slug
+// Create event (admin, tenant-scoped) — find-or-create by slug
 app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
+    const ownerId = c.get("userId");
     const body = await c.req.json();
     const now = new Date().toISOString();
 
@@ -522,10 +683,16 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
     const dateISO = body.date ?? now;
     const slug = body.slug ?? dateToSlug(dateISO);
 
-    // ── Find-or-create: if slug already exists, return the existing event ──
-    const existing = await kv.get(`${KV}event:${slug}`);
+    // ── Find-or-create: if slug already exists for THIS tenant, return it ──
+    let finalSlug = slug;
+    const existing: any = await kv.get(`${KV}event:${slug}`);
     if (existing) {
-      return c.json({ event: existing }, 200);
+      // Only return if the event belongs to this tenant
+      if (existing.ownerId === ownerId) {
+        return c.json({ event: existing }, 200);
+      }
+      // Slug collision with another tenant — append a short suffix to avoid overwrite
+      finalSlug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     }
 
     // Create new event
@@ -536,12 +703,12 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
     const hours = d.getHours().toString().padStart(2, "0");
     const mins  = d.getMinutes().toString().padStart(2, "0");
 
-    // Fetch current photoPrice from admin config
-    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    // Fetch current photoPrice from admin config (tenant-scoped)
+    const cfg: any = (await kv.get(`${T}config`)) ?? {};
     const photoPrice: number = cfg.photoPrice ?? 30;
 
     // sessionType from body, default to first in branding list or 'Tour'
-    const branding: any = (await kv.get(`${KV}branding`)) ?? {};
+    const branding: any = (await kv.get(`${T}branding`)) ?? {};
     const defaultSessionType = Array.isArray(branding.eventSessionTypes) && branding.eventSessionTypes.length > 0
       ? branding.eventSessionTypes[0]
       : "Tour";
@@ -551,9 +718,10 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
     const location = `${venueName}, ${venueLocation}`;
 
     const event = {
-      id: slug,
+      id: finalSlug,
+      ownerId,
       name: `${sessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
-      slug,
+      slug: finalSlug,
       date: dateISO,
       endTime: body.endTime ?? "",
       location,
@@ -567,8 +735,8 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
       updatedAt: now,
     };
 
-    await kv.set(`${KV}event:${slug}`, event);
-    await appendToList(`${KV}events:index`, slug);
+    await kv.set(`${KV}event:${finalSlug}`, event);
+    await appendToList(`${T}events:index`, finalSlug);
     return c.json({ event }, 201);
   } catch (err) {
     console.log("Erro ao criar evento:", err);
@@ -576,12 +744,16 @@ app.post("/make-server-68454e9b/events", adminAuth, async (c) => {
   }
 });
 
-// Update event (admin)
+// Update event (admin, ownership check)
 app.put("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
   try {
+    const userId = c.get("userId");
     const id = c.req.param("id");
     const existing: any = await kv.get(`${KV}event:${id}`);
     if (!existing) return c.json({ error: "Evento não encontrado" }, 404);
+    if (existing.ownerId !== userId) {
+      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
+    }
     const body = await c.req.json();
     const updated = { ...existing, ...body, id, updatedAt: new Date().toISOString() };
     await kv.set(`${KV}event:${id}`, updated);
@@ -592,10 +764,17 @@ app.put("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
   }
 });
 
-// Delete event (admin)
+// Delete event (admin, tenant-scoped + ownership check)
 app.delete("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
   try {
+    const userId = c.get("userId");
+    const T = tenantKV(userId);
     const id = c.req.param("id");
+    // Ownership check
+    const eventToDelete: any = await kv.get(`${KV}event:${id}`);
+    if (!eventToDelete || eventToDelete.ownerId !== userId) {
+      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
+    }
     // Delete photos from storage
     const photoIds = await getList(`${KV}photos:event:${id}`);
     for (const pid of photoIds) {
@@ -608,7 +787,7 @@ app.delete("/make-server-68454e9b/events/:id", adminAuth, async (c) => {
     await kv.del(`${KV}photos:event:${id}`);
     await kv.del(`${KV}faces:event:${id}`); // aggregated face index
     await kv.del(`${KV}event:${id}`);
-    await removeFromList(`${KV}events:index`, id);
+    await removeFromList(`${T}events:index`, id);
 
     // Remove face embeddings from pgvector
     faces.deleteFacesByEvent(id).catch((e) =>
@@ -647,8 +826,11 @@ app.get("/make-server-68454e9b/events/:id/photos", async (c) => {
     const pageIds = photoIds.slice(start, start + limit);
 
     // Batch: fetch config + all photo records in parallel
+    // Resolve owner from event to get tenant-scoped config
+    const evt: any = await kv.get(`${KV}event:${eventId}`);
+    const configPrefix = evt?.ownerId ? tenantKV(evt.ownerId) : resolvePublicPrefix(c);
     const [cfg, ...photoRecords] = await Promise.all([
-      kv.get(`${KV}config`),
+      kv.get(`${configPrefix}config`),
       ...pageIds.map((pid) => kv.get(`${KV}photo:${pid}`)),
     ]);
     const currentPrice: number = (cfg as any)?.photoPrice ?? 30;
@@ -679,12 +861,19 @@ app.get("/make-server-68454e9b/events/:id/photos", async (c) => {
   }
 });
 
-// Upload photo (admin) — receives base64
+// Upload photo (admin, tenant-scoped) — receives base64
 app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
+    const ownerId = c.get("userId");
     const eventId = c.req.param("id");
     console.log(`[Base64] Recebendo upload para evento ${eventId}`);
     let event: any = await kv.get(`${KV}event:${eventId}`);
+
+    // Ownership check: if event exists, must belong to this user
+    if (event && event.ownerId !== ownerId) {
+      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
+    }
 
     // Auto-create event if it doesn't exist (for direct slug uploads)
     if (!event) {
@@ -699,13 +888,14 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
         const mins  = eventId.slice(10, 12);
         const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
         const d = new Date(dateISO);
-        const autoBranding: any = (await kv.get(`${KV}branding`)) ?? {};
+        const autoBranding: any = (await kv.get(`${T}branding`)) ?? {};
         const autoSessionType = Array.isArray(autoBranding.eventSessionTypes) && autoBranding.eventSessionTypes.length > 0
           ? autoBranding.eventSessionTypes[0]
           : "Tour";
         const autoVenue = `${autoBranding.venueName ?? "Allianz Parque"}, ${autoBranding.venueLocation ?? "São Paulo, SP"}`;
         event = {
           id: eventId,
+          ownerId,
           name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
           slug: eventId,
           date: dateISO,
@@ -721,7 +911,7 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
           updatedAt: now,
         };
         await kv.set(`${KV}event:${eventId}`, event);
-        await appendToList(`${KV}events:index`, eventId);
+        await appendToList(`${T}events:index`, eventId);
         console.log(`[Base64] Evento ${eventId} auto-criado`);
       } else {
         console.log(`[Base64] Evento ${eventId} inválido (não é slug DDMMYYYYHHMM)`);
@@ -761,8 +951,8 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
 
     const now = new Date().toISOString();
 
-    // Always use current configured price (not stale event price)
-    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    // Always use current configured price (tenant-scoped)
+    const cfg: any = (await kv.get(`${T}config`)) ?? {};
     const currentPrice: number = cfg.photoPrice ?? event.price ?? 30;
 
     const photo = {
@@ -804,9 +994,16 @@ app.post("/make-server-68454e9b/events/:id/photos", adminAuth, async (c) => {
 // O File é passado diretamente ao SDK do Supabase Storage (zero-copy).
 app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
+    const ownerId = c.get("userId");
     const eventId = c.req.param("id");
     console.log(`[Stream] Recebendo upload para evento ${eventId}`);
     let event: any = await kv.get(`${KV}event:${eventId}`);
+
+    // Ownership check: if event exists, must belong to this user
+    if (event && event.ownerId !== ownerId) {
+      return c.json({ error: "Acesso negado: este evento pertence a outro tenant" }, 403);
+    }
 
     if (!event) {
       console.log(`[Stream] Evento ${eventId} não encontrado, tentando auto-criar`);
@@ -816,18 +1013,18 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
         const year = eventId.slice(4, 8), hours = eventId.slice(8, 10), mins = eventId.slice(10, 12);
         const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
         const d = new Date(dateISO);
-        const autoBranding: any = (await kv.get(`${KV}branding`)) ?? {};
+        const autoBranding: any = (await kv.get(`${T}branding`)) ?? {};
         const autoSessionType = Array.isArray(autoBranding.eventSessionTypes) && autoBranding.eventSessionTypes.length > 0
           ? autoBranding.eventSessionTypes[0] : "Tour";
         const autoVenue = `${autoBranding.venueName ?? "Allianz Parque"}, ${autoBranding.venueLocation ?? "São Paulo, SP"}`;
         event = {
-          id: eventId, name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
+          id: eventId, ownerId, name: `${autoSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
           slug: eventId, date: dateISO, endTime: "", location: autoVenue, sessionType: autoSessionType,
           status: "disponivel", photoCount: 0, faceCount: 0, price: 30,
           dayOfWeek: dayOfWeekPT(d), createdAt: now, updatedAt: now,
         };
         await kv.set(`${KV}event:${eventId}`, event);
-        await appendToList(`${KV}events:index`, eventId);
+        await appendToList(`${T}events:index`, eventId);
         console.log(`[Stream] Evento ${eventId} auto-criado`);
       } else {
         console.log(`[Stream] Evento ${eventId} inválido (não é slug DDMMYYYYHHMM)`);
@@ -862,7 +1059,7 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
     }
 
     const now = new Date().toISOString();
-    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    const cfg: any = (await kv.get(`${T}config`)) ?? {};
     const currentPrice: number = cfg.photoPrice ?? event.price ?? 30;
     const fileName = (file.name || `${photoId}.jpg`).replace(/\.[^.]+$/, ".jpg");
 
@@ -883,7 +1080,7 @@ app.post("/make-server-68454e9b/events/:id/photos/stream", adminAuth, async (c) 
   }
 });
 
-// Delete photo (admin)
+// Delete photo (admin, ownership check)
 app.delete(
   "/make-server-68454e9b/events/:eventId/photos/:photoId",
   adminAuth,
@@ -891,6 +1088,9 @@ app.delete(
     try {
       const eventId = c.req.param("eventId");
       const photoId = c.req.param("photoId");
+      // Ownership check on the event
+      const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
+      if (ownerErr) return c.json({ error: ownerErr }, 403);
       const photo: any = await kv.get(`${KV}photo:${photoId}`);
       if (!photo) return c.json({ error: "Foto não encontrada" }, 404);
 
@@ -937,7 +1137,7 @@ app.delete(
 
 // ── Face Descriptors ──────────────────────────────────────────────────────────
 
-// Save face descriptors for a photo (admin — called client-side after upload)
+// Save face descriptors for a photo (admin, ownership check)
 app.post(
   "/make-server-68454e9b/events/:eventId/photos/:photoId/faces",
   adminAuth,
@@ -945,6 +1145,9 @@ app.post(
     try {
       const eventId = c.req.param("eventId");
       const photoId = c.req.param("photoId");
+      // Ownership check on the event
+      const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
+      if (ownerErr) return c.json({ error: ownerErr }, 403);
       const { descriptors } = await c.req.json();
 
       if (!Array.isArray(descriptors)) {
@@ -1062,8 +1265,9 @@ app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async 
     let usedFallback = false;
     if (allPhotoRecords.length === 0) {
       usedFallback = true;
-      console.log("[migrate-faces] prefix scan vazio — fallback via ef:events:index");
-      const eventIds: string[] = await getList(`${KV}events:index`);
+      const T = tenantKV(c.get("userId"));
+      console.log("[migrate-faces] prefix scan vazio — fallback via tenant events:index");
+      const eventIds: string[] = await getList(`${T}events:index`);
       console.log(`[migrate-faces] ef:events:index tem ${eventIds.length} eventos`);
 
       for (const eventId of eventIds) {
@@ -1132,6 +1336,10 @@ app.post("/make-server-68454e9b/admin/reindex-event", adminAuth, async (c) => {
     if (!eventId) {
       return c.json({ error: "eventId é obrigatório" }, 400);
     }
+
+    // Ownership check
+    const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
+    if (ownerErr) return c.json({ error: ownerErr }, 403);
 
     console.log(`[reindex-event] Iniciando reindexação do evento ${eventId}`);
 
@@ -1204,6 +1412,8 @@ app.get("/make-server-68454e9b/admin/events/:id/photo-ids", adminAuth, async (c)
   try {
     const id = c.req.param("id");
     if (!id) return c.json({ error: "id do evento é obrigatório" }, 400);
+    const { error } = await getOwnedEvent(id, c.get("userId"));
+    if (error) return c.json({ error }, 403);
     const photoIds: string[] = await getList(`${KV}photos:event:${id}`);
     console.log(`[photo-ids] Evento ${id}: ${photoIds.length} fotos`);
     return c.json({ photoIds, total: photoIds.length });
@@ -1225,6 +1435,10 @@ app.post("/make-server-68454e9b/admin/reindex-photo", adminAuth, async (c) => {
     if (!eventId || !photoId) {
       return c.json({ error: "eventId e photoId são obrigatórios" }, 400);
     }
+
+    // Ownership check on the event
+    const { error: ownerErr } = await getOwnedEvent(eventId, c.get("userId"));
+    if (ownerErr) return c.json({ error: ownerErr }, 403);
 
     const photo: any = await kv.get(`${KV}photo:${photoId}`);
 
@@ -1289,9 +1503,10 @@ app.get("/make-server-68454e9b/admin/diagnose-kv", adminAuth, async (c) => {
     }
     const sampleKeys = (rows ?? []).slice(0, 30).map((r: any) => r.key as string);
 
-    // ─── NOVO: Diagnóstico detalhado de eventos e fotos ───
-    const eventIds: string[] = await getList(`${KV}events:index`);
-    console.log(`[diagnose-kv] Encontrados ${eventIds.length} eventos na lista ef:events:index`);
+    // ─── NOVO: Diagnóstico detalhado de eventos e fotos (tenant-scoped) ───
+    const T = tenantKV(c.get("userId"));
+    const eventIds: string[] = await getList(`${T}events:index`);
+    console.log(`[diagnose-kv] Encontrados ${eventIds.length} eventos na lista tenant events:index`);
     const events: Array<{ id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }> = [];
     
     for (const eventId of eventIds.slice(0, 20)) {
@@ -1406,6 +1621,8 @@ app.get("/make-server-68454e9b/admin/diagnose-pgvector", adminAuth, async (c) =>
 app.get("/make-server-68454e9b/admin/events/:eventId/face-stats", adminAuth, async (c) => {
   try {
     const eventId = c.req.param("eventId");
+    const { error } = await getOwnedEvent(eventId, c.get("userId"));
+    if (error) return c.json({ error }, 403);
     const photoIds: string[] = await getList(`${KV}photos:event:${eventId}`);
     
     const stats = {
@@ -1447,6 +1664,8 @@ app.get("/make-server-68454e9b/admin/events/:eventId/face-stats", adminAuth, asy
 app.post("/make-server-68454e9b/admin/events/:eventId/reindex-faces", adminAuth, async (c) => {
   try {
     const eventId = c.req.param("eventId");
+    const { error } = await getOwnedEvent(eventId, c.get("userId"));
+    if (error) return c.json({ error }, 403);
     const photosKey = `${KV}photos:event:${eventId}`;
     console.log(`[reindex-faces] Buscando fotos para evento ${eventId} na chave ${photosKey}`);
     
@@ -1522,7 +1741,7 @@ app.post("/make-server-68454e9b/faces/search", async (c) => {
 
 // ── Orders ────────────────────────────────────────────────────────────────────
 
-// Create order (public)
+// Create order (public) — resolves tenant from event ownerId
 app.post("/make-server-68454e9b/orders", async (c) => {
   try {
     const body = await c.req.json();
@@ -1531,12 +1750,21 @@ app.post("/make-server-68454e9b/orders", async (c) => {
     if (!items?.length) return c.json({ error: "Itens do pedido são obrigatórios" }, 400);
     if (!customerEmail) return c.json({ error: "Email do cliente é obrigatório" }, 400);
 
+    // Resolve owner from the first item's event
+    let ownerId: string | null = null;
+    if (items[0]?.eventId) {
+      const evt: any = await kv.get(`${KV}event:${items[0].eventId}`);
+      ownerId = evt?.ownerId ?? null;
+    }
+    const orderPrefix = ownerId ? tenantKV(ownerId) : KV;
+
     const orderId = `order-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const total = items.reduce((sum: number, item: any) => sum + Number(item.price ?? 0), 0);
     const now = new Date().toISOString();
 
     const order = {
       id: orderId,
+      ownerId,
       customerEmail,
       customerName: customerName ?? "",
       items,
@@ -1548,14 +1776,14 @@ app.post("/make-server-68454e9b/orders", async (c) => {
     };
 
     await kv.set(`${KV}order:${orderId}`, order);
-    await appendToList(`${KV}orders:index`, orderId);
+    await appendToList(`${orderPrefix}orders:index`, orderId);
 
-    // Accumulate daily stats
+    // Accumulate daily stats (tenant-scoped)
     const dateKey = now.slice(0, 10);
-    const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
-    const dayCount = ((await kv.get(`${KV}daily:count:${dateKey}`)) as number) ?? 0;
-    await kv.set(`${KV}daily:revenue:${dateKey}`, dayRevenue + total);
-    await kv.set(`${KV}daily:count:${dateKey}`, dayCount + items.length);
+    const dayRevenue = ((await kv.get(`${orderPrefix}daily:revenue:${dateKey}`)) as number) ?? 0;
+    const dayCount = ((await kv.get(`${orderPrefix}daily:count:${dateKey}`)) as number) ?? 0;
+    await kv.set(`${orderPrefix}daily:revenue:${dateKey}`, dayRevenue + total);
+    await kv.set(`${orderPrefix}daily:count:${dateKey}`, dayCount + items.length);
 
     return c.json({ order }, 201);
   } catch (err) {
@@ -1564,13 +1792,17 @@ app.post("/make-server-68454e9b/orders", async (c) => {
   }
 });
 
-// List orders (admin)
+// List orders (admin, tenant-scoped)
 app.get("/make-server-68454e9b/orders", adminAuth, async (c) => {
   try {
-    const ids = await getList(`${KV}orders:index`);
+    const userId = c.get("userId");
+    await autoClaimOrphans(userId);
+    const T = tenantKV(userId);
+    const ids = await getList(`${T}orders:index`);
     const orders = await Promise.all(ids.map((id) => kv.get(`${KV}order:${id}`)));
-    const valid = orders
-      .filter(Boolean)
+    // STRICT: only show orders owned by this user
+    const valid = (orders as any[])
+      .filter((o) => o && o.ownerId === userId)
       .sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt));
     return c.json({ orders: valid });
   } catch (err) {
@@ -1700,12 +1932,17 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/signed-url", asyn
   }
 });
 
-// Update order status (admin)
+// Update order status (admin, ownership check)
 app.put("/make-server-68454e9b/orders/:id", adminAuth, async (c) => {
   try {
+    const userId = c.get("userId");
     const id = c.req.param("id");
     const order: any = await kv.get(`${KV}order:${id}`);
     if (!order) return c.json({ error: "Pedido não encontrado" }, 404);
+    // STRICT ownership check
+    if (order.ownerId !== userId) {
+      return c.json({ error: "Acesso negado: este pedido pertence a outro tenant" }, 403);
+    }
     const body = await c.req.json();
     const updated = { ...order, ...body, id, updatedAt: new Date().toISOString() };
     await kv.set(`${KV}order:${id}`, updated);
@@ -1720,12 +1957,18 @@ app.put("/make-server-68454e9b/orders/:id", adminAuth, async (c) => {
   }
 });
 
-// Cancel order (admin) — sets status to cancelled and optionally refunds via MP
+// Cancel order (admin, tenant-scoped + ownership check) — sets status to cancelled and optionally refunds via MP
 app.post("/make-server-68454e9b/orders/:id/cancel", adminAuth, async (c) => {
   try {
+    const userId = c.get("userId");
+    const T = tenantKV(userId);
     const id = c.req.param("id");
     const order: any = await kv.get(`${KV}order:${id}`);
     if (!order) return c.json({ error: "Pedido não encontrado" }, 404);
+    // STRICT ownership check
+    if (order.ownerId !== userId) {
+      return c.json({ error: "Acesso negado: este pedido pertence a outro tenant" }, 403);
+    }
     if (order.status === "cancelled") return c.json({ error: "Pedido já cancelado" }, 400);
 
     const body = await c.req.json().catch(() => ({}));
@@ -1735,7 +1978,7 @@ app.post("/make-server-68454e9b/orders/:id/cancel", adminAuth, async (c) => {
     // Try to refund via Mercado Pago if there's a payment
     let refundResult: any = null;
     if (order.mpPaymentId && order.status === "paid") {
-      const mpToken = await getMpToken();
+      const mpToken = await getMpToken(c.get("userId"));
       if (mpToken) {
         try {
           const refundRes = await fetch(
@@ -1769,13 +2012,13 @@ app.post("/make-server-68454e9b/orders/:id/cancel", adminAuth, async (c) => {
     };
     await kv.set(`${KV}order:${id}`, updated);
 
-    // Subtract from daily stats
+    // Subtract from daily stats (tenant-scoped)
     if (order.status === "paid" && order.total) {
       const dateKey = order.createdAt?.slice(0, 10) ?? now.slice(0, 10);
-      const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
-      const dayCount = ((await kv.get(`${KV}daily:count:${dateKey}`)) as number) ?? 0;
-      await kv.set(`${KV}daily:revenue:${dateKey}`, Math.max(0, dayRevenue - order.total));
-      await kv.set(`${KV}daily:count:${dateKey}`, Math.max(0, dayCount - (order.items?.length ?? 0)));
+      const dayRevenue = ((await kv.get(`${T}daily:revenue:${dateKey}`)) as number) ?? 0;
+      const dayCount = ((await kv.get(`${T}daily:count:${dateKey}`)) as number) ?? 0;
+      await kv.set(`${T}daily:revenue:${dateKey}`, Math.max(0, dayRevenue - order.total));
+      await kv.set(`${T}daily:count:${dateKey}`, Math.max(0, dayCount - (order.items?.length ?? 0)));
     }
 
     return c.json({ order: updated, refundResult });
@@ -1785,9 +2028,10 @@ app.post("/make-server-68454e9b/orders/:id/cancel", adminAuth, async (c) => {
   }
 });
 
-// Create POS order (admin — direct sale at venue)
+// Create POS order (admin, tenant-scoped — direct sale at venue)
 app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
     const body = await c.req.json();
     const { items, customerName, paymentMethod = "dinheiro", operatorId } = body;
 
@@ -1799,6 +2043,7 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
 
     const order = {
       id: orderId,
+      ownerId: c.get("userId"),
       customerEmail: "",
       customerName: customerName ?? "Cliente presencial",
       items,
@@ -1812,14 +2057,14 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
     };
 
     await kv.set(`${KV}order:${orderId}`, order);
-    await appendToList(`${KV}orders:index`, orderId);
+    await appendToList(`${T}orders:index`, orderId);
 
-    // Accumulate daily stats
+    // Accumulate daily stats (tenant-scoped)
     const dateKey = now.slice(0, 10);
-    const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
-    const dayCount = ((await kv.get(`${KV}daily:count:${dateKey}`)) as number) ?? 0;
-    await kv.set(`${KV}daily:revenue:${dateKey}`, dayRevenue + total);
-    await kv.set(`${KV}daily:count:${dateKey}`, dayCount + items.length);
+    const dayRevenue = ((await kv.get(`${T}daily:revenue:${dateKey}`)) as number) ?? 0;
+    const dayCount = ((await kv.get(`${T}daily:count:${dateKey}`)) as number) ?? 0;
+    await kv.set(`${T}daily:revenue:${dateKey}`, dayRevenue + total);
+    await kv.set(`${T}daily:count:${dateKey}`, dayCount + items.length);
 
     return c.json({ order }, 201);
   } catch (err) {
@@ -1832,13 +2077,19 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
 
 app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
   try {
+    const userId = c.get("userId");
+    // Auto-claim runs once per cold start (idempotent)
+    await autoClaimOrphans(userId);
+
+    const T = tenantKV(userId);
     const [orderIds, eventIds] = await Promise.all([
-      getList(`${KV}orders:index`),
-      getList(`${KV}events:index`),
+      getList(`${T}orders:index`),
+      getList(`${T}events:index`),
     ]);
+
     const orders: any[] = (
       await Promise.all(orderIds.map((id) => kv.get(`${KV}order:${id}`)))
-    ).filter(Boolean);
+    ).filter((o: any) => o && o.ownerId === userId);
 
     // Exclude cancelled orders from financial KPIs
     const activeOrders = orders.filter((o) => o.status !== "cancelled");
@@ -1857,8 +2108,8 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
       return { dateKey, dayLabel };
     });
     const [dailyRevenues, dailyCounts] = await Promise.all([
-      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${KV}daily:revenue:${dateKey}`))),
-      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${KV}daily:count:${dateKey}`))),
+      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${T}daily:revenue:${dateKey}`))),
+      Promise.all(dailyMeta.map(({ dateKey }) => kv.get(`${T}daily:count:${dateKey}`))),
     ]);
     const daily = dailyMeta.map(({ dayLabel }, i) => ({
       day: dayLabel,
@@ -1886,8 +2137,9 @@ app.get("/make-server-68454e9b/admin/stats", adminAuth, async (c) => {
 
 // ── MP Token helper — somente KV (admin UI). Env var ignorada. ──────────────
 
-async function getMpToken(): Promise<string | null> {
-  const cfg = (await kv.get(`${KV}config`)) as any ?? {};
+async function getMpToken(userId?: string): Promise<string | null> {
+  const prefix = userId ? tenantKV(userId) : KV;
+  const cfg = (await kv.get(`${prefix}config`)) as any ?? {};
   return cfg.mpToken ?? null;
 }
 
@@ -1895,7 +2147,8 @@ async function getMpToken(): Promise<string | null> {
 
 app.get("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
   try {
-    const cfg = (await kv.get(`${KV}config`)) as any ?? {};
+    const T = tenantKV(c.get("userId"));
+    const cfg = (await kv.get(`${T}config`)) as any ?? {};
     const kvToken: string | undefined = cfg.mpToken;
 
     // Apenas o KV é fonte de verdade — env var não é usada
@@ -1918,8 +2171,9 @@ app.get("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
 
 app.put("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
   try {
+    const T = tenantKV(c.get("userId"));
     const body = await c.req.json();
-    const existing = (await kv.get(`${KV}config`)) as any ?? {};
+    const existing = (await kv.get(`${T}config`)) as any ?? {};
 
     // Accept mpToken from body and store it in KV.
     // Never expose it back — only the masked preview is returned.
@@ -1934,7 +2188,7 @@ app.put("/make-server-68454e9b/admin/config", adminAuth, async (c) => {
       delete updated.mpToken;
     }
 
-    await kv.set(`${KV}config`, updated);
+    await kv.set(`${T}config`, updated);
 
     // Return the same shape as GET — apenas KV
     const kvToken: string | undefined = updated.mpToken;
@@ -1969,7 +2223,9 @@ app.post("/make-server-68454e9b/payments/pix", async (c) => {
       return c.json({ error: "amount, customerEmail e orderId são obrigatórios" }, 400);
     }
 
-    const mpToken = await getMpToken();
+    // Resolve tenant from order to get correct MP token
+    const pixOrder: any = await kv.get(`${KV}order:${orderId}`);
+    const mpToken = await getMpToken(pixOrder?.ownerId ?? undefined);
     if (!mpToken) {
       return c.json({ error: "MP_ACCESS_TOKEN não configurado. Configure-o na área Financeiro do admin." }, 500);
     }
@@ -2017,11 +2273,11 @@ app.post("/make-server-68454e9b/payments/pix", async (c) => {
     const qrCodeBase64 = data.point_of_interaction?.transaction_data?.qr_code_base64 ?? "";
     const ticketUrl = data.point_of_interaction?.transaction_data?.ticket_url ?? "";
 
-    // Store MP payment ID in the order
-    const order: any = await kv.get(`${KV}order:${orderId}`);
-    if (order) {
+    // Store MP payment ID in the order (reuse pixOrder if available)
+    const pixOrderFresh: any = pixOrder ?? await kv.get(`${KV}order:${orderId}`);
+    if (pixOrderFresh) {
       await kv.set(`${KV}order:${orderId}`, {
-        ...order,
+        ...pixOrderFresh,
         mpPaymentId: data.id,
         updatedAt: new Date().toISOString(),
       });
@@ -2044,7 +2300,9 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
       return c.json({ error: "amount, customerEmail e orderId são obrigatórios" }, 400);
     }
 
-    const mpToken = await getMpToken();
+    // Resolve tenant from order
+    const prefOrder: any = await kv.get(`${KV}order:${orderId}`);
+    const mpToken = await getMpToken(prefOrder?.ownerId ?? undefined);
     if (!mpToken) {
       return c.json({ error: "MP_ACCESS_TOKEN não configurado. Configure-o na área Financeiro do admin." }, 500);
     }
@@ -2090,11 +2348,11 @@ app.post("/make-server-68454e9b/payments/preference", async (c) => {
       return c.json({ error: `Erro MP Preference: ${data.message ?? JSON.stringify(data)}` }, 500);
     }
 
-    // Store preference ID in the order
-    const order: any = await kv.get(`${KV}order:${orderId}`);
-    if (order) {
+    // Store preference ID in the order (reuse prefOrder if available)
+    const prefOrderFresh: any = prefOrder ?? await kv.get(`${KV}order:${orderId}`);
+    if (prefOrderFresh) {
       await kv.set(`${KV}order:${orderId}`, {
-        ...order,
+        ...prefOrderFresh,
         mpPreferenceId: data.id,
         updatedAt: new Date().toISOString(),
       });
@@ -2333,7 +2591,17 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
     const paymentId = body.data?.id;
 
     if ((action === "payment.updated" || action === "payment.created") && paymentId) {
-      const mpToken = await getMpToken();
+      // Webhook has no auth — we need to try all possible MP tokens
+      // First try to find the order by scanning recent orders
+      // For now, try legacy token first, then resolve from order
+      let mpToken: string | null = null;
+
+      // Try to find order first via external_reference in payment
+      const tempToken = await getMpToken(); // legacy fallback
+      if (tempToken) {
+        mpToken = tempToken;
+      }
+
       if (!mpToken) {
         console.log("Webhook: MP token não configurado");
         return c.json({ received: true });
@@ -2347,13 +2615,14 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
         const orderId = payment.external_reference;
         const order: any = await kv.get(`${KV}order:${orderId}`);
         if (order) {
+          const orderPrefix = order.ownerId ? tenantKV(order.ownerId) : KV;
           const now = new Date().toISOString();
           const updatedOrder = { ...order, status: "paid", updatedAt: now };
           await kv.set(`${KV}order:${orderId}`, updatedOrder);
-          // Update daily revenue on confirmation
+          // Update daily revenue on confirmation (tenant-scoped)
           const dateKey = now.slice(0, 10);
-          const dayRevenue = ((await kv.get(`${KV}daily:revenue:${dateKey}`)) as number) ?? 0;
-          await kv.set(`${KV}daily:revenue:${dateKey}`, dayRevenue + (order.total ?? 0));
+          const dayRevenue = ((await kv.get(`${orderPrefix}daily:revenue:${dateKey}`)) as number) ?? 0;
+          await kv.set(`${orderPrefix}daily:revenue:${dateKey}`, dayRevenue + (order.total ?? 0));
           // Send confirmation email (non-blocking)
           sendOrderConfirmationEmail(updatedOrder).catch(console.log);
         }
@@ -2372,6 +2641,8 @@ app.post("/make-server-68454e9b/payments/webhook", async (c) => {
 // Storage mas não estão no KV. Não duplica registros existentes.
 // Query param: ?skipComplete=true para pular eventos com 100% de sincronização
 app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
+  const T = tenantKV(c.get("userId"));
+  const ownerId = c.get("userId");
   const startedAt = Date.now();
   const errors: string[] = [];
   let eventsCreated = 0;
@@ -2410,10 +2681,10 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
 
     console.log(`[Sync] ✓ Encontradas ${folderNames.length} pastas de eventos: ${folderNames.join(", ")}`);
 
-    // Fetch current config for price
-    const cfg: any = (await kv.get(`${KV}config`)) ?? {};
+    // Fetch current config for price (tenant-scoped)
+    const cfg: any = (await kv.get(`${T}config`)) ?? {};
     const currentPrice: number = cfg.photoPrice ?? 30;
-    const branding: any = (await kv.get(`${KV}branding`)) ?? {};
+    const branding: any = (await kv.get(`${T}branding`)) ?? {};
     const defaultSessionType = Array.isArray(branding.eventSessionTypes) && branding.eventSessionTypes.length > 0
       ? branding.eventSessionTypes[0] : "Tour";
     const autoVenue = `${branding.venueName ?? "Allianz Parque"}, ${branding.venueLocation ?? "São Paulo, SP"}`;
@@ -2466,21 +2737,21 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
             const dateISO = `${year}-${month}-${day}T${hours}:${mins}:00`;
             const d = new Date(dateISO);
             event = {
-              id: eventSlug, name: `${defaultSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
+              id: eventSlug, ownerId, name: `${defaultSessionType} ${day}/${month}/${year}, ${hours}:${mins}`,
               slug: eventSlug, date: dateISO, endTime: "", location: autoVenue,
               sessionType: defaultSessionType, status: "disponivel", photoCount: 0, faceCount: 0,
               price: currentPrice, dayOfWeek: dayOfWeekPT(d), createdAt: now, updatedAt: now,
             };
           } else {
             event = {
-              id: eventSlug, name: eventSlug, slug: eventSlug, date: new Date().toISOString(),
+              id: eventSlug, ownerId, name: eventSlug, slug: eventSlug, date: new Date().toISOString(),
               endTime: "", location: autoVenue, sessionType: defaultSessionType,
               status: "disponivel", photoCount: 0, faceCount: 0, price: currentPrice,
               dayOfWeek: "", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
             };
           }
           await kv.set(`${KV}event:${eventSlug}`, event);
-          await appendToList(`${KV}events:index`, eventSlug);
+          await appendToList(`${T}events:index`, eventSlug);
           eventsCreated++;
           console.log(`[Sync] ✓ Criado evento: ${eventSlug}`);
         } else {
@@ -2560,6 +2831,98 @@ app.get("/make-server-68454e9b/admin/storage-list", adminAuth, async (c) => {
   } catch (err) {
     console.log("Erro no storage-list:", err);
     return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+// ── Migrate legacy data to tenant prefix ──────────────────────────────────────
+// POST /admin/migrate-tenant — admin auth
+// Moves legacy ef: indexes/config/branding to ef:{userId}: tenant prefix.
+// Idempotente — seguro de rodar múltiplas vezes.
+app.post("/make-server-68454e9b/admin/migrate-tenant", adminAuth, async (c) => {
+  try {
+    const userId = c.get("userId");
+    const T = tenantKV(userId);
+    const migrated: string[] = [];
+
+    // 1. Migrate events:index
+    const legacyEvents = await getList(`${KV}events:index`);
+    const tenantEvents = await getList(`${T}events:index`);
+    if (legacyEvents.length > 0 && tenantEvents.length === 0) {
+      await kv.set(`${T}events:index`, legacyEvents);
+      // Also stamp ownerId on each event
+      for (const eid of legacyEvents) {
+        const evt: any = await kv.get(`${KV}event:${eid}`);
+        if (evt && !evt.ownerId) {
+          await kv.set(`${KV}event:${eid}`, { ...evt, ownerId: userId });
+        }
+      }
+      migrated.push(`events:index (${legacyEvents.length} events)`);
+    }
+
+    // 2. Migrate branding
+    const legacyBranding = await kv.get(`${KV}branding`);
+    const tenantBranding = await kv.get(`${T}branding`);
+    if (legacyBranding && !tenantBranding) {
+      await kv.set(`${T}branding`, legacyBranding);
+      migrated.push("branding");
+    }
+
+    // 3. Migrate config
+    const legacyConfig = await kv.get(`${KV}config`);
+    const tenantConfig = await kv.get(`${T}config`);
+    if (legacyConfig && !tenantConfig) {
+      await kv.set(`${T}config`, legacyConfig);
+      migrated.push("config");
+    }
+
+    // 4. Migrate orders:index
+    const legacyOrders = await getList(`${KV}orders:index`);
+    const tenantOrders = await getList(`${T}orders:index`);
+    if (legacyOrders.length > 0 && tenantOrders.length === 0) {
+      await kv.set(`${T}orders:index`, legacyOrders);
+      // Also stamp ownerId on each order
+      for (const oid of legacyOrders) {
+        const ord: any = await kv.get(`${KV}order:${oid}`);
+        if (ord && !ord.ownerId) {
+          await kv.set(`${KV}order:${oid}`, { ...ord, ownerId: userId });
+        }
+      }
+      migrated.push(`orders:index (${legacyOrders.length} orders)`);
+    }
+
+    // 5. Migrate daily stats (last 30 days)
+    for (let i = 0; i < 30; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateKey = d.toISOString().slice(0, 10);
+      const legacyRev = await kv.get(`${KV}daily:revenue:${dateKey}`);
+      const legacyCnt = await kv.get(`${KV}daily:count:${dateKey}`);
+      if (legacyRev != null && !(await kv.get(`${T}daily:revenue:${dateKey}`))) {
+        await kv.set(`${T}daily:revenue:${dateKey}`, legacyRev);
+      }
+      if (legacyCnt != null && !(await kv.get(`${T}daily:count:${dateKey}`))) {
+        await kv.set(`${T}daily:count:${dateKey}`, legacyCnt);
+      }
+    }
+    if (migrated.length === 0 && legacyEvents.length === 0) {
+      migrated.push("daily stats (last 30 days)");
+    }
+
+    bustBrandingCache();
+
+    console.log(`[migrate-tenant] userId=${userId} migrated: ${migrated.join(", ") || "nothing to migrate"}`);
+    return c.json({
+      success: true,
+      userId,
+      tenantPrefix: T,
+      migrated,
+      message: migrated.length > 0
+        ? `Migração concluída: ${migrated.join(", ")}`
+        : "Nada para migrar — dados já estão no prefixo do tenant ou não há dados legados.",
+    });
+  } catch (err) {
+    console.log("Erro na migração de tenant:", err);
+    return c.json({ error: `Erro na migração: ${err}` }, 500);
   }
 });
 

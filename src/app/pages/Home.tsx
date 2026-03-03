@@ -214,13 +214,16 @@ function HeroSection() {
   const opacity = useTransform(scrollYProgress, [0, 0.6], [1, 0]);
   const { branding } = useBranding();
 
+  // Multi-tenant: resolve org from URL param
+  const orgId = new URLSearchParams(window.location.search).get('org') ?? undefined;
+
   const [stats, setStats] = useState<{ totalEvents: number; totalPhotos: number } | null>(null);
 
   useEffect(() => {
-    api.getPublicStats()
+    api.getPublicStats(orgId)
       .then((data) => setStats(data))
       .catch(() => {/* fail silently */});
-  }, []);
+  }, [orgId]);
 
   // Use branding background if available, else fallback to default stadium photo
   const heroBg = branding.backgroundUrls.length > 0 ? branding.backgroundUrls[0] : IMG_STADIUM;

@@ -18,17 +18,15 @@ import { projectId, publicAnonKey } from '/utils/supabase/info';
 const fmt = (n: number) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-// URL da página pública (fallback — exibe foto + botão download)
+// URL da página pública — exibe foto + auto-download ao carregar.
+// Usada nos QR codes porque o gateway do Supabase Edge Functions exige
+// Authorization header (não aceita ?apikey= como query param), e o celular
+// do visitante abre URLs no browser sem headers customizados.
 const getPublicPhotoUrl = (orderId: string, photoId: string) =>
   `${window.location.origin}/minha-foto/${orderId}/${photoId}`;
 
-// URL de download DIRETO — endpoint público do servidor que faz streaming com
-// Content-Disposition: attachment. Quando o celular escaneia o QR e abre esta URL,
-// o browser inicia o download automaticamente (sem precisar clicar em botão).
-// Inclui ?apikey= para que o gateway do Supabase Edge Functions aceite
-// a request sem header Authorization (ex: QR code aberto no celular).
-const getDirectDownloadUrl = (orderId: string, photoId: string) =>
-  `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b/orders/${orderId}/photos/${photoId}/download?apikey=${publicAnonKey}`;
+// Alias para clareza — QR codes sempre apontam para a página pública
+const getDirectDownloadUrl = getPublicPhotoUrl;
 
 // Busca URL pública fresca para exibição/impressão (evita URLs assinadas expiradas)
 const BASE_SERVER = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
@@ -103,7 +101,7 @@ export function AdminPDV() {
   const { theme }  = useTheme();
   const isDark     = theme === 'dark';
   const navigate   = useNavigate();
-  const { isAdmin, loading: authLoading, getToken } = useAuth();
+  const { user, isAdmin, loading: authLoading, getToken, token } = useAuth();
 
   /* design tokens */
   const bg      = isDark ? '#08080E' : '#F2F8F4';
@@ -176,16 +174,17 @@ export function AdminPDV() {
     if (!authLoading && !isAdmin) navigate('/admin/login', { replace: true });
   }, [isAdmin, authLoading, navigate]);
 
-  /* ── Carregar eventos ── */
+  /* ── Carregar eventos (tenant-scoped via admin route) ── */
   useEffect(() => {
-    api.getEvents().then(r => {
+    if (!token) return;
+    api.getAdminEvents(token).then(r => {
       const sorted = r.events
         .filter((e: any) => e.photoCount > 0)
         .sort((a: any, b: any) => b.date.localeCompare(a.date));
       setEvents(sorted);
       if (sorted.length > 0) setSelectedEvent(sorted[0]);
     }).catch(console.error);
-  }, []);
+  }, [token]);
 
   /* ── Carregar fotos ao trocar evento ── */
   useEffect(() => {

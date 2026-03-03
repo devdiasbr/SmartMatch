@@ -323,7 +323,7 @@ export function AdminEvents() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const navigate = useNavigate();
-  const { isAdmin, loading: authLoading, getToken } = useAuth();
+  const { user, isAdmin, loading: authLoading, getToken } = useAuth();
   const { branding, refreshBranding } = useBranding();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const viewerFileInputRef = useRef<HTMLInputElement>(null);
@@ -438,14 +438,15 @@ export function AdminEvents() {
   const loadEvents = useCallback(async () => {
     setEventsLoading(true);
     try {
-      const res = await api.getEvents();
+      const t = await getToken(); if (!t) return;
+      const res = await api.getAdminEvents(t);
       setEvents(res.events.sort((a, b) => b.date.localeCompare(a.date)));
     } catch (err: any) {
       setEventsError(err.message);
     } finally {
       setEventsLoading(false);
     }
-  }, []);
+  }, [getToken]);
 
   useEffect(() => {
     loadEvents();

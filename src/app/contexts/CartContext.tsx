@@ -70,7 +70,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const syncPrices = useCallback(async () => {
     try {
-      const { photoPrice } = await api.getPhotoPrice();
+      // Multi-tenant: resolve org from URL param
+      const orgId = new URLSearchParams(window.location.search).get('org') ?? undefined;
+      const { photoPrice } = await api.getPhotoPrice(orgId);
       setItems((prev) => {
         const needsUpdate = prev.some((i) => i.price !== photoPrice);
         if (!needsUpdate) return prev;

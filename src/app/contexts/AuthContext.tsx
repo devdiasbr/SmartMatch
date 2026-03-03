@@ -36,10 +36,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const supabase = getSupabase();
 
-    // Load existing session (Supabase auto-refreshes expired tokens here)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    // Validate user actually exists on the server (not just cached JWT).
+    // getSession() only reads local storage; getUser() hits the auth server
+    // and catches "user from sub claim does not exist" before any API call.
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        // Validate the user still exists in auth.users
+        const { data: { user }, error } = await supabase.auth.getUser(session.access_token);
+        if (error || !user) {
+          console.warn('[Auth] Session JWT references a deleted user — signing out. Error:', error?.message);
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        setSession(session);
+        setUser(user);
+      } else {
+        setSession(null);
+        setUser(null);
+      }
       setLoading(false);
     });
 
@@ -63,6 +80,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const supabase = getSupabase();
     const { data, error } = await supabase.auth.getSession();
     if (error || !data.session) return null;
+
+    // Validate user still exists — if deleted, sign out immediately
+    const { error: userErr } = await supabase.auth.getUser(data.session.access_token);
+    if (userErr) {
+      console.warn('[Auth] getToken: user no longer exists — signing out. Error:', userErr.message);
+      await supabase.auth.signOut();
+      setSession(null);
+      setUser(null);
+      return null;
+    }
+
     return data.session.access_token;
   }, []);
 

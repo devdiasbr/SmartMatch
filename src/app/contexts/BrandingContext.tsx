@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
+import { useAuth } from './AuthContext';
 
 export interface BrandingConfig {
   appName: string;
@@ -111,10 +112,14 @@ function applyFavicon(url: string | null) {
 export function BrandingProvider({ children }: { children: React.ReactNode }) {
   const [branding, setBranding] = useState<BrandingConfig>(DEFAULT_BRANDING);
   const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+
+  // Use authenticated user's ID as org for multi-tenant, or URL param ?org=
+  const orgId = user?.id ?? new URLSearchParams(window.location.search).get('org') ?? undefined;
 
   const refreshBranding = useCallback(async () => {
     try {
-      const data = await api.getPublicBranding();
+      const data = await api.getPublicBranding(orgId);
       setBranding(data);
       document.title = data.pageTitle || DEFAULT_BRANDING.pageTitle;
       applyFavicon(data.faviconUrl);
@@ -123,7 +128,7 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [orgId]);
 
   useEffect(() => {
     refreshBranding();

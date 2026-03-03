@@ -4,6 +4,7 @@ import { Image, MapPin, Calendar, ChevronRight, Search, X, Loader2 } from 'lucid
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
 import { useBranding } from '../contexts/BrandingContext';
+import { useAuth } from '../contexts/AuthContext';
 import { api, type EventRecord } from '../lib/api';
 import { AnimatedBackground } from '../components/AnimatedBackground';
 
@@ -44,7 +45,7 @@ function transformEvent(e: EventRecord): TourSession {
   };
 }
 
-function SessionCard({ session, index }: { session: TourSession; index: number }) {
+function SessionCard({ session, index, orgId }: { session: TourSession; index: number; orgId?: string }) {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const { branding } = useBranding();
@@ -74,7 +75,7 @@ function SessionCard({ session, index }: { session: TourSession; index: number }
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay: index * 0.07 }}
     >
-      <Link to={`/eventos/${session.id}`}>
+      <Link to={`/eventos/${session.id}${orgId ? `?org=${orgId}` : ''}`}>
         <motion.div
           whileHover={{ y: -4, scale: 1.012 }}
           transition={{ duration: 0.22 }}
@@ -167,6 +168,10 @@ export function Events() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const { branding } = useBranding();
+  const { user } = useAuth();
+
+  // Multi-tenant: use auth userId or URL ?org= param
+  const orgId = user?.id ?? new URLSearchParams(window.location.search).get('org') ?? undefined;
 
   const [search, setSearch] = useState('');
   const [sessions, setSessions] = useState<TourSession[]>([]);
@@ -184,11 +189,11 @@ export function Events() {
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
-    api.getEvents()
+    api.getEvents(orgId)
       .then(({ events }) => setSessions(events.map(transformEvent)))
       .catch((err) => console.error('Failed to fetch events:', err))
       .finally(() => setLoading(false));
-  }, []);
+  }, [orgId]);
 
   // Filter: session type + date + search text
   const filtered = sessions.filter((s) => {
@@ -555,7 +560,7 @@ export function Events() {
               >
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {paginated.map((session, i) => (
-                    <SessionCard key={session.id} session={session} index={i} />
+                    <SessionCard key={session.id} session={session} index={i} orgId={orgId} />
                   ))}
                 </div>
                 {/* Load more */}

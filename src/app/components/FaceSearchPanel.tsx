@@ -28,6 +28,7 @@ interface Props {
   photos: FacePhoto[];
   eventId: string;
   eventName: string;
+  org?: string;
 }
 
 /* ── helpers ────────────────────────────────────────────────────────────── */
@@ -91,7 +92,7 @@ function ScanRect() {
 
 /* ── componente ─────────────────────────────────────────────────────────── */
 
-export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
+export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
   const { addItem, isInCart, openDrawer } = useCart();
 
   const [stage,        setStage]        = useState<Stage>('idle');
@@ -155,7 +156,7 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
       let conf = 0;
 
       try {
-        const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor, 0.78);
+        const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor, 0.78, org);
         matched = matches.map((m) => m.photoId);
         // Confiança baseada na melhor similaridade coseno (0..1 → 0..100%)
         const best = matches.length > 0 ? matches[0].similarity : 0;
@@ -164,7 +165,7 @@ export function FaceSearchPanel({ photos, eventId, eventName }: Props) {
         // ── Fallback: busca local caso o servidor falhe ───────────────────
         console.warn('[FaceSearch] pgvector falhou, usando fallback local:', _pgErr);
         setProcessStep('Comparando rostos (modo offline)…');
-        const { faces: allFaces } = await api.getEventFaces(eventId);
+        const { faces: allFaces } = await api.getEventFaces(eventId, org);
         const ranked = faceService.findRankedMatches(queryDescriptor, allFaces);
         matched = ranked.map((m) => m.photoId);
         const bestDist = ranked.length > 0 ? ranked[0].minDistance : 1;

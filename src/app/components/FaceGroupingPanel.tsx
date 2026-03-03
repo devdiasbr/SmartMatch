@@ -33,6 +33,7 @@ interface Props {
   photos: GroupPhoto[];
   eventId: string;
   eventName: string;
+  org?: string;
 }
 
 interface FaceCluster {
@@ -43,7 +44,7 @@ interface FaceCluster {
   coverSrc: string;
 }
 
-/* ── tema helper ───────────────��────────────────────────────────────────── */
+/* ── tema helper ───────────────────────────────────────────────────────── */
 
 function useColors() {
   const { theme } = useTheme();
@@ -434,7 +435,7 @@ function UnidentifiedCard({ photos, eventId, eventName }: { photos: GroupPhoto[]
 
 type Stage = 'loading' | 'ready' | 'error' | 'empty';
 
-export function FaceGroupingPanel({ photos, eventId, eventName }: Props) {
+export function FaceGroupingPanel({ photos, eventId, eventName, org }: Props) {
   const c = useColors();
   const [stage, setStage] = useState<Stage>('loading');
   const [clusters, setClusters] = useState<FaceCluster[]>([]);
@@ -449,7 +450,7 @@ export function FaceGroupingPanel({ photos, eventId, eventName }: Props) {
   const load = async () => {
     setStage('loading'); setError('');
     try {
-      const { faces } = await api.getEventFaces(eventId);
+      const { faces } = await api.getEventFaces(eventId, org);
       if (faces.length === 0) { setStage('empty'); return; }
 
       const result = clusterFaces(faces, photoMap);
@@ -465,7 +466,7 @@ export function FaceGroupingPanel({ photos, eventId, eventName }: Props) {
     }
   };
 
-  useEffect(() => { load(); }, [eventId]);
+  useEffect(() => { load(); }, [eventId, org]);
 
   return (
     <div className="py-6">

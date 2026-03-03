@@ -230,27 +230,31 @@ export interface BrandingConfig {
 // ── API ───────────────────────────────────────────────────────────────────────
 
 export const api = {
-  // ── Events (public) ──────────────────────────────────────────────────────
+  // ── Events (public) — pass org for multi-tenant ──────────────────────────
 
-  getEvents: () =>
-    get<{ events: EventRecord[] }>('/events'),
+  getEvents: (org?: string) =>
+    get<{ events: EventRecord[] }>(`/events${org ? `?org=${org}` : ''}`),
 
-  getEvent: (id: string) =>
-    get<{ event: EventRecord }>(`/events/${id}`),
+  getEvent: (id: string, org?: string) =>
+    get<{ event: EventRecord }>(`/events/${id}${org ? `?org=${org}` : ''}`),
 
   // ── Public Branding ─────────────────────────────────────────────────────
-  getPublicBranding: () =>
-    get<BrandingConfig>('/branding/public'),
+  getPublicBranding: (org?: string) =>
+    get<BrandingConfig>(`/branding/public${org ? `?org=${org}` : ''}`),
 
   // ── Public Config ────────────────────────────────────────────────────────
 
-  getPhotoPrice: () =>
-    get<{ photoPrice: number }>('/config/price'),
+  getPhotoPrice: (org?: string) =>
+    get<{ photoPrice: number }>(`/config/price${org ? `?org=${org}` : ''}`),
 
-  getPublicStats: () =>
-    get<{ totalEvents: number; totalPhotos: number }>('/stats/public'),
+  getPublicStats: (org?: string) =>
+    get<{ totalEvents: number; totalPhotos: number }>(`/stats/public${org ? `?org=${org}` : ''}`),
 
   // ── Events (admin) ───────────────────────────────────────────────────────
+
+  /** List events scoped to the authenticated admin (uses JWT, no query param needed) */
+  getAdminEvents: (token: string) =>
+    aGet<{ events: EventRecord[] }>('/admin/events', token),
 
   /** find-or-create by date slug */
   createEvent: (data: Partial<EventRecord> & { sessionType?: string }, token: string) =>
@@ -264,9 +268,9 @@ export const api = {
 
   // ── Photos (public) ──────────────────────────────────────────────────────
 
-  getEventPhotos: (eventId: string, page = 1, limit = 20) =>
+  getEventPhotos: (eventId: string, page = 1, limit = 20, org?: string) =>
     get<{ photos: PhotoRecord[]; total: number; page: number; totalPages: number; limit: number }>(
-      `/events/${eventId}/photos?page=${page}&limit=${limit}`,
+      `/events/${eventId}/photos?page=${page}&limit=${limit}${org ? `&org=${org}` : ''}`,
     ),
 
   // ── Photos (admin) ───────────────────────────────────────────────────────
@@ -407,9 +411,9 @@ export const api = {
     ),
 
   /** Busca todos os descritores do evento para comparação client-side (legado) */
-  getEventFaces: (eventId: string) =>
+  getEventFaces: (eventId: string, org?: string) =>
     get<{ faces: { photoId: string; descriptors: number[][] }[] }>(
-      `/events/${eventId}/faces`,
+      `/events/${eventId}/faces${org ? `?org=${org}` : ''}`,
     ),
 
   /**
@@ -421,130 +425,25 @@ export const api = {
     eventId: string,
     embedding: number[],
     threshold?: number,
+    org?: string,
   ) =>
     post<{ matches: { photoId: string; similarity: number }[] }>(
       '/faces/search',
-      { eventId, embedding, ...(threshold !== undefined ? { threshold } : {}) },
+      { eventId, embedding, ...(threshold !== undefined ? { threshold } : {}), ...(org ? { org } : {}) },
     ),
 
-  /**
-   * Migração batch KV → pgvector (admin).
-   * Lê todos os descritores do KV e re-indexa no pgvector.
-   * Idempotente — seguro de rodar múltiplas vezes.
-   */
-  migrateFacesToPgvector: (token: string) =>
-    aPost<{
-      success: boolean;
-      stats: {
-        totalEvents: number;
-        totalPhotos: number;
-        totalFaces: number;
-        skippedPhotos: number;
-        elapsedMs: number;
-        errors: string[];
-        usedFallback?: boolean;
-      };
-    }>('/admin/migrate-faces-pgvector', {}, token),
-
-  /** Retorna a lista de IDs de fotos de um evento (admin, sem URLs assinadas — rápido) */
-  getEventPhotoIds: (eventId: string, token: string) =>
-    aGet<{ photoIds: string[]; total: number }>(`/admin/events/${eventId}/photo-ids`, token),
-
-  /**
-   * Reindexar UMA foto no pgvector.
-   * Chamado foto a foto para progresso granular (X/Y) em tempo real.
-   */
-  reindexPhoto: (eventId: string, photoId: string, token: string) =>
-    aPost<{
-      success: boolean;
-      notFound?: boolean;
-      noFace?: boolean;
-      faces: number;
-      fileName?: string;
-      error?: string;
-    }>('/admin/reindex-photo', { eventId, photoId }, token),
-
-  /** Reindexar faces de um único evento no pgvector */
-  reindexEvent: (eventId: string, token: string) =>
-    aPost<{
-      success: boolean;
-      error?: string;
-      stats: {
-        totalPhotos: number;      // fotos com face indexada com sucesso
-        totalFaces: number;       // embeddings inseridos no pgvector
-        noFacePhotos: number;     // fotos sem nenhum rosto (normal)
-        notFoundPhotos: number;   // fotos ausentes no KV (dado corrompido)
-        skippedPhotos: number;    // noFacePhotos + notFoundPhotos (legado)
-        processedPhotos: number;  // total iterado
-        elapsedMs: number;
-        errors: string[];         // falhas reais ao indexar
-      };
-    }>('/admin/reindex-event', { eventId }, token),
-
-  /** Diagnóstico: lê a tabela kv_store_68454e9b diretamente e agrupa por prefixo */
-  diagnoseKv: (token: string) =>
-    aGet<{
-      total: number;
-      prefixCounts: Record<string, number>;
-      sampleKeys: string[];
-      events: Array<{ id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }>;
-      error?: string;
-    }>('/admin/diagnose-kv', token),
-
-  /** Diagnóstico pgvector: verifica quantos embeddings estão indexados */
-  diagnosePgvector: (token: string) =>
-    aGet<{
-      totalEmbeddings: number;
-      totalPhotos: number;
-      totalEvents: number;
-      eventIds: string[];
-      samplePhotos: Array<{ photo_id: string; event_id: string }>;
-      error?: string;
-    }>('/admin/diagnose-pgvector', token),
-
-  /** Estatísticas de faces de um evento específico */
-  getEventFaceStats: (eventId: string, token: string) =>
-    aGet<{
-      totalPhotos: number;
-      photosWithFaces: number;
-      photosWithoutFaces: number;
-      totalFaces: number;
-      photos: Array<{ id: string; fileName: string; faceCount: number }>;
-    }>(`/admin/events/${eventId}/face-stats`, token),
-
-  /** Inicia reindexação de faces de um evento — retorna lista de fotos para processar */
-  startFaceReindex: (eventId: string, token: string) =>
-    aPost<{
-      eventId: string;
-      photos: Array<{ id: string; url: string; fileName: string }>;
-      totalPhotos: number;
-    }>(`/admin/events/${eventId}/reindex-faces`, {}, token),
-
-  /** Lista pastas de evento no bucket S3 para diagnóstico */
-  storageList: (token: string) =>
-    aGet<{
-      bucket: string;
-      folders: { name: string; fileCount: number; files: string[] }[];
-      totalFolders: number;
-    }>('/admin/storage-list', token),
-
-  /** Sincroniza Storage → KV: importa eventos+fotos que existem no S3 mas não no KV */
+  // ── Sync Storage → KV ───────────────────────────────────────────────────
   syncStorage: (token: string, skipComplete = false) =>
-    aPost<{
-      success: boolean;
-      message?: string;
-      stats: {
-        eventsCreated: number;
-        photosImported: number;
-        eventsSkipped: number;
-        photosSkipped: number;
-        elapsedMs: number;
-        errors: string[];
-      };
-    }>(`/admin/sync-storage${skipComplete ? '?skipComplete=true' : ''}`, {}, token),
+    aPost<{ stats: { eventsCreated: number; photosImported: number; errors: string[] } }>(
+      `/admin/sync-storage${skipComplete ? '?skipComplete=true' : ''}`,
+      {},
+      token,
+    ),
 
-  // ── Auth ─────────────────────────────────────────────────────────────────
-
-  registerAdmin: (data: { email: string; password: string; name: string }) =>
-    post<{ user: any }>('/auth/register', data),
+  // ── KV Diagnostic ──────────────────────────────────────────────────────
+  diagnoseKv: (token: string) =>
+    aGet<{ total: number; events: { id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }[] }>(
+      '/admin/diagnose-kv',
+      token,
+    ),
 };

@@ -317,7 +317,7 @@ export function AdminConfig() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
   const navigate = useNavigate();
-  const { token, isAdmin, loading: authLoading, getToken } = useAuth();
+  const { user, token, isAdmin, loading: authLoading, getToken } = useAuth();
   const { refreshBranding } = useBranding();
 
   const [activeTab, setActiveTab] = useState<ConfigTab>('marca');
@@ -761,7 +761,7 @@ export function AdminConfig() {
   const loadEventsForReindex = async () => {
     const t = await getToken(); if (!t) return;
     try {
-      const { events } = await api.getEvents();
+      const { events } = await api.getAdminEvents(t);
       // Mostra todos os eventos, mesmo sem fotos (para permitir reindexação)
       setAvailableEvents(events.map(e => ({
         id: e.id,
@@ -1007,7 +1007,8 @@ export function AdminConfig() {
       setReindexStatus('processing');
       
       // Pega eventos atualizados
-      const eventsRes = await api.getEvents();
+      const t = await getToken(); if (!t) return;
+      const eventsRes = await api.getAdminEvents(t);
       const events = eventsRes.events;
       
       let totalProcessed = 0;
