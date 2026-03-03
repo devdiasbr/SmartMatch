@@ -933,13 +933,14 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                           onChange={e => syncQrRight(Number(e.target.value))}
                           className="w-full h-2 rounded-full appearance-none cursor-pointer"
                           style={{
-                            background: `linear-gradient(to right, ${green} 0%, ${green} ${qrRight}%, ${inputBg} ${qrRight}%, ${inputBg} 100%)`,
+                            direction: 'rtl',
+                            background: `linear-gradient(to left, ${green} 0%, ${green} ${qrRight}%, ${inputBg} ${qrRight}%, ${inputBg} 100%)`,
                             accentColor: green,
                           }}
                         />
                         <div className="flex justify-between text-[9px] mt-1" style={{ color:muted }}>
-                          <span>← mais para a direita</span>
-                          <span>mais para a esquerda →</span>
+                          <span>← mais para a esquerda</span>
+                          <span>mais para a direita →</span>
                         </div>
                       </div>
 
