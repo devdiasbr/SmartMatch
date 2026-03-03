@@ -57,7 +57,7 @@ function PhotoPreviewWithFooter({
   footerSrc,
   downloadUrl,
   compact = false,
-  qrRight = 16,
+  qrRight = 2,
 }: {
   src: string;
   footerSrc?: string;
@@ -79,7 +79,7 @@ function PhotoPreviewWithFooter({
           {downloadUrl && (
             <div
               className="absolute"
-              style={{ right: `${qrRight}%`, top: '6%', height: '88%', aspectRatio: '1/1' }}
+              style={{ left: `${qrRight}%`, top: '6%', height: '88%', aspectRatio: '1/1' }}
             >
               <img
                 src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(downloadUrl)}&color=ffffff&bgcolor=006B2B`}
@@ -371,7 +371,7 @@ body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
           <img src="${it.src}" class="photo"/>
           <div class="footer-wrap">
             <img src="${footerDataUrl}" class="footer-img"/>
-            <img src="${qrUrl}" class="footer-qr" style="right:${qrRightPct}%"/>
+            <img src="${qrUrl}" class="footer-qr" style="left:${qrRightPct}%"/>
           </div>
         </div>`;
     }).join('');
@@ -1203,7 +1203,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                 {footerSrc && (
                   <div className="relative w-full">
                     <img src={footerSrc} alt="Rodapé" className="w-full block" />
-                    <div className="absolute" style={{ right: `${qrRight}%`, top: '6%', height: '88%', aspectRatio: '1/1' }}>
+                    <div className="absolute" style={{ left: `${qrRight}%`, top: '6%', height: '88%', aspectRatio: '1/1' }}>
                       <img
                         src={`https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(getPublicPhotoUrl('preview', previewPhoto.photoId))}&color=ffffff&bgcolor=006B2B`}
                         alt="QR"
