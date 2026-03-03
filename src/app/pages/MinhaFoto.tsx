@@ -130,11 +130,12 @@ async function composePhotoWithFooter(
     }
 
     // ── 3. QR code sobreposto ao rodapé na posição configurada ───────────────
-    const qrSize = Math.round(FH * 0.88);   // ~88% da altura do rodapé
-    const qrY    = H + Math.round((FH - qrSize) / 2);
-    // right: qrRight% → x = W - W*(qrRight/100) - qrSize/2 (centro)
-    const qrCenterX = W - Math.round(W * (qrRight / 100));
-    const qrX       = qrCenterX - Math.round(qrSize / 2);
+    // Replica EXATAMENTE o CSS do print: right:qrRight%, top:6%, height:88%, aspect-ratio:1/1
+    // CSS right:X% → borda direita do elemento fica X% da largura a partir da direita
+    //   → left = containerWidth * (1 - X/100) - elementWidth
+    const qrSize = Math.round(FH * 0.88);
+    const qrY    = H + Math.round(FH * 0.06);
+    const qrX    = Math.round(W * (1 - qrRight / 100)) - qrSize;
 
     try {
       const qrDataUrl = await QRCode.toDataURL(qrContent, {
