@@ -1,23 +1,61 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router';
-import { Download, Loader2, AlertCircle, CheckCircle2, Camera } from 'lucide-react';
+import { Download, Loader2, AlertCircle, CheckCircle2, Camera, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
 import { projectId, publicAnonKey } from '/utils/supabase/info';
 
 const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
 
-// Supabase Edge Function gateway aceita auth via header OU query param ?apikey=
-// Enviamos os dois para garantir que o gateway aceite mesmo em browsers mobile
-// que possam stripppar o Authorization header em requests cross-origin.
-function buildUrl(path: string): string {
-  return `${BASE}${path}?apikey=${encodeURIComponent(publicAnonKey)}`;
+/**
+ * Chama o endpoint público de signed-url no servidor.
+ * Tenta primeiro com Authorization header + ?apikey= (padrão Supabase).
+ * Se retornar 401/403, tenta só com ?apikey= (caso raro de gateway strip).
+ */
+async function fetchSignedUrl(orderId: string, photoId: string): Promise<{
+  viewUrl: string;
+  downloadUrl: string;
+  fileName: string;
+}> {
+  const url = `${BASE}/orders/${orderId}/photos/${photoId}/signed-url?apikey=${encodeURIComponent(publicAnonKey)}`;
+
+  // Tentativa 1: com Authorization header (padrão)
+  let res = await fetch(url, {
+    headers: { Authorization: `Bearer ${publicAnonKey}` },
+  });
+
+  // Se falhou com 401/403, tenta sem Authorization (só apikey= na URL)
+  if (res.status === 401 || res.status === 403) {
+    console.warn(`[MinhaFoto] Tentativa 1 retornou ${res.status}, tentando sem Authorization header...`);
+    res = await fetch(url);
+  }
+
+  // Lê o body como texto para debug seguro
+  const rawText = await res.text();
+  console.log(`[MinhaFoto] signed-url status=${res.status} body=${rawText.slice(0, 300)}`);
+
+  let data: any = {};
+  try { data = JSON.parse(rawText); } catch { /* body não era JSON */ }
+
+  if (!res.ok) {
+    const msg = data.error ?? data.message ?? `Erro HTTP ${res.status}`;
+    throw new Error(`[${res.status}] ${msg}`);
+  }
+
+  if (!data.viewUrl) {
+    throw new Error('Servidor retornou resposta sem viewUrl');
+  }
+
+  return {
+    viewUrl: data.viewUrl,
+    downloadUrl: data.downloadUrl ?? data.viewUrl,
+    fileName: data.fileName ?? 'minha-foto.jpg',
+  };
 }
 
 export function MinhaFoto() {
   const { orderId, photoId } = useParams<{ orderId: string; photoId: string }>();
 
   const [viewUrl,     setViewUrl]     = useState<string | null>(null);
-  // downloadUrl = signed URL do Supabase Storage com ?download=... (CORS aberto)
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [fileName,    setFileName]    = useState('minha-foto.jpg');
   const [loading,     setLoading]     = useState(true);
@@ -27,73 +65,47 @@ export function MinhaFoto() {
   const [dlError,     setDlError]     = useState('');
   const hasAutoTriggered = useRef(false);
 
-  useEffect(() => {
+  const load = () => {
     if (!orderId || !photoId) {
-      setError('Link inválido.');
+      setError('Link inválido — orderId ou photoId ausente.');
       setLoading(false);
       return;
     }
 
-    // Usa buildUrl() para incluir ?apikey= como query param —
-    // garante que o Supabase gateway aceite mesmo sem o Authorization header.
-    fetch(buildUrl(`/orders/${orderId}/photos/${photoId}/signed-url`), {
-      headers: { Authorization: `Bearer ${publicAnonKey}` },
-    })
-      .then(async res => {
-        // Parseia JSON independente do status HTTP
-        const data = await res.json().catch(() => ({}));
-        // Agora verifica se houve erro HTTP (401, 403, 404, 500…)
-        if (!res.ok) {
-          const msg = data.error ?? data.message ?? `Erro HTTP ${res.status}`;
-          throw new Error(msg);
-        }
-        if (data.error) throw new Error(data.error);
-        setViewUrl(data.viewUrl);
-        setDownloadUrl(data.downloadUrl ?? data.viewUrl);
-        if (data.fileName) setFileName(data.fileName);
+    setLoading(true);
+    setError('');
+
+    fetchSignedUrl(orderId, photoId)
+      .then(({ viewUrl, downloadUrl, fileName }) => {
+        setViewUrl(viewUrl);
+        setDownloadUrl(downloadUrl);
+        setFileName(fileName);
       })
       .catch(err => {
         console.error('[MinhaFoto] Erro ao carregar foto:', err);
         setError(err.message ?? 'Não foi possível carregar a foto.');
       })
       .finally(() => setLoading(false));
-  }, [orderId, photoId]);
+  };
 
-  // Auto-trigger download quando a foto é carregada (ex: escaneou QR code)
+  useEffect(load, [orderId, photoId]);
+
+  // Auto-trigger download quando foto carrega (QR code scan)
   useEffect(() => {
     if (downloadUrl && !hasAutoTriggered.current && !loading && !error) {
       hasAutoTriggered.current = true;
-      // Pequeno delay para garantir que a UI renderizou
       const t = setTimeout(() => handleDownload(), 600);
       return () => clearTimeout(t);
     }
   }, [downloadUrl, loading, error]);
 
   /**
-   * Download confiável para todos os browsers (desktop e mobile, incluindo iOS Safari).
+   * Download confiável em todos os browsers (incluindo iOS Safari e Chrome mobile).
    *
-   * FLUXO:
-   *   1. fetch(downloadUrl)  → downloadUrl é uma signed URL do Supabase Storage.
-   *      O Supabase Storage retorna Access-Control-Allow-Origin: * em todas as
-   *      respostas de signed URLs, então o fetch cross-origin funciona de qualquer
-   *      domínio (figma.site, localhost, produção, etc.).
-   *
-   *   2. response.blob()  → o arquivo vira um Blob local no browser.
-   *
-   *   3. URL.createObjectURL(blob)  → gera uma URL blob:// que é SEMPRE same-origin
-   *      com a página atual, independente de onde a foto veio.
-   *
-   *   4. <a href={blobUrl} download={fileName}>.click()  → como é same-origin,
-   *      o atributo `download` É respeitado em TODOS os browsers, inclusive iOS
-   *      Safari 11.3+ e Chrome mobile.
-   *
-   * POR QUE NÃO window.location.href = signedUrl?
-   *   → iOS Safari abre imagens (.jpg/.png) no próprio browser em vez de baixar,
-   *     ignorando Content-Disposition: attachment para tipos de imagem.
-   *
-   * POR QUE NÃO <a href={signedUrl} download>?
-   *   → O atributo `download` é ignorado em URLs cross-origin (specs do HTML5).
-   *     blob:// resolve isso por ser same-origin por definição.
+   * Fluxo:
+   *  1. fetch(downloadUrl) → a signed URL do Storage tem CORS aberto (Access-Control-Allow-Origin: *)
+   *  2. response.blob() → arquivo vira Blob local
+   *  3. URL.createObjectURL(blob) → URL blob:// é sempre same-origin → atributo `download` funciona
    */
   const handleDownload = async () => {
     if (!downloadUrl || downloading) return;
@@ -101,14 +113,17 @@ export function MinhaFoto() {
     setDlError('');
 
     try {
-      // Busca o arquivo diretamente do Supabase Storage (CORS * configurado)
+      console.log('[MinhaFoto] Iniciando download de:', downloadUrl.slice(0, 100) + '...');
       const res = await fetch(downloadUrl);
-      if (!res.ok) throw new Error(`Erro ao buscar foto: HTTP ${res.status}`);
+      console.log('[MinhaFoto] Download response status:', res.status);
+
+      if (!res.ok) {
+        throw new Error(`Erro ao buscar foto no storage: HTTP ${res.status}`);
+      }
 
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
 
-      // Disparo do download via anchor same-origin — funciona em todos os browsers
       const a = document.createElement('a');
       a.href = blobUrl;
       a.download = fileName;
@@ -117,23 +132,19 @@ export function MinhaFoto() {
       a.click();
       document.body.removeChild(a);
 
-      // Libera a memória após 30s (garante que o download iniciou)
       setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
-
       setDownloaded(true);
     } catch (err: any) {
       console.error('[MinhaFoto] Erro no download:', err);
-      // Fallback: abre a URL em nova aba; no Android costuma iniciar o download
-      if (downloadUrl) {
-        window.open(downloadUrl, '_blank');
-        setDownloaded(true);
-      } else {
-        setDlError('Não foi possível baixar. Tente novamente.');
-      }
+      setDlError(`Falha no download: ${err.message ?? 'erro desconhecido'}. Tente o botão abaixo.`);
+      // Fallback: abre em nova aba (funciona em Android)
+      window.open(downloadUrl, '_blank');
     } finally {
       setDownloading(false);
     }
   };
+
+  // ── UI ────────────────────────────────────────────────────────────────────
 
   return (
     <div
@@ -208,11 +219,26 @@ export function MinhaFoto() {
               >
                 Ops, algo deu errado
               </p>
-              <p style={{ color: 'rgba(255,255,255,0.45)', fontSize: '0.8rem', lineHeight: 1.5 }}>
+              <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: '0.82rem', lineHeight: 1.6, wordBreak: 'break-word' }}>
                 {error}
               </p>
             </div>
-            <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: '0.7rem' }}>
+
+            {/* Botão Tentar Novamente */}
+            <button
+              onClick={() => { hasAutoTriggered.current = false; load(); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: 'rgba(255,255,255,0.7)',
+              }}
+            >
+              <RefreshCw className="w-4 h-4" />
+              Tentar novamente
+            </button>
+
+            <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.7rem', lineHeight: 1.6 }}>
               Procure o fotógrafo do evento ou acesse smartmatch.com.br
             </p>
           </div>
@@ -275,12 +301,22 @@ export function MinhaFoto() {
 
               {/* Erro de download */}
               {dlError && (
-                <p className="text-center text-xs" style={{ color: '#f87171', lineHeight: 1.5 }}>
+                <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', lineHeight: 1.6 }}>
                   {dlError}
-                </p>
+                  {/* Fallback direto para o Storage */}
+                  <a
+                    href={downloadUrl ?? '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block mt-2 text-center font-bold underline"
+                    style={{ color: '#fbbf24' }}
+                  >
+                    Abrir foto em nova aba →
+                  </a>
+                </div>
               )}
 
-              {/* Dica pós-download (especialmente útil para iOS) */}
+              {/* Dica pós-download */}
               {downloaded && !dlError && (
                 <p
                   className="text-center text-xs"
