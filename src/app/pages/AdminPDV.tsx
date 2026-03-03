@@ -135,10 +135,22 @@ export function AdminPDV() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => {
-      const url = ev.target?.result as string;
-      setFooterSrc(url);
-      try { localStorage.setItem('pdv_footer_img', url); } catch {}
+    reader.onload = async ev => {
+      const dataUrl = ev.target?.result as string;
+      setFooterSrc(dataUrl);
+      try { localStorage.setItem('pdv_footer_img', dataUrl); } catch {}
+
+      // Sincroniza com o servidor para que MinhaFoto possa usar
+      if (token) {
+        try {
+          const base64 = dataUrl.split(',')[1];
+          const mimeType = dataUrl.split(';')[0].split(':')[1];
+          await api.uploadBrandingAsset({ type: 'footer-image', base64, mimeType }, token);
+          console.log('[AdminPDV] Footer image sincronizada com servidor');
+        } catch (err) {
+          console.warn('[AdminPDV] Falha ao sincronizar footer com servidor:', err);
+        }
+      }
     };
     reader.readAsDataURL(file);
     if (footerFileRef.current) footerFileRef.current.value = '';
@@ -147,6 +159,21 @@ export function AdminPDV() {
   const removeFooter = () => {
     setFooterSrc('');
     try { localStorage.removeItem('pdv_footer_img'); } catch {}
+  };
+
+  // Salva qrRight no servidor com debounce
+  const saveQrRightToServer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncQrRight = (v: number) => {
+    saveQrRight(v);
+    if (saveQrRightToServer.current) clearTimeout(saveQrRightToServer.current);
+    saveQrRightToServer.current = setTimeout(async () => {
+      if (!token) return;
+      try {
+        await api.updateBranding({ footerQrRight: v } as any, token);
+      } catch (err) {
+        console.warn('[AdminPDV] Falha ao sincronizar qrRight com servidor:', err);
+      }
+    }, 800);
   };
 
   /* ── State geral ── */
@@ -903,7 +930,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                           max={50}
                           step={0.5}
                           value={qrRight}
-                          onChange={e => saveQrRight(Number(e.target.value))}
+                          onChange={e => syncQrRight(Number(e.target.value))}
                           className="w-full h-2 rounded-full appearance-none cursor-pointer"
                           style={{
                             background: `linear-gradient(to right, ${green} 0%, ${green} ${(qrRight / 50) * 100}%, ${inputBg} ${(qrRight / 50) * 100}%, ${inputBg} 100%)`,

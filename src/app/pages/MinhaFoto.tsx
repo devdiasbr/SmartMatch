@@ -3,54 +3,164 @@ import { useParams } from 'react-router';
 import { Download, Loader2, AlertCircle, CheckCircle2, Camera, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
 import { projectId, publicAnonKey } from '/utils/supabase/info';
+import QRCode from 'qrcode';
 
 const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
 
-/**
- * Chama o endpoint público de signed-url no servidor.
- * Tenta primeiro com Authorization header + ?apikey= (padrão Supabase).
- * Se retornar 401/403, tenta só com ?apikey= (caso raro de gateway strip).
- */
-async function fetchSignedUrl(orderId: string, photoId: string): Promise<{
-  viewUrl: string;
-  downloadUrl: string;
-  fileName: string;
-}> {
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+
+async function fetchSignedUrl(orderId: string, photoId: string) {
   const url = `${BASE}/orders/${orderId}/photos/${photoId}/signed-url?apikey=${encodeURIComponent(publicAnonKey)}`;
 
-  // Tentativa 1: com Authorization header (padrão)
-  let res = await fetch(url, {
-    headers: { Authorization: `Bearer ${publicAnonKey}` },
-  });
-
-  // Se falhou com 401/403, tenta sem Authorization (só apikey= na URL)
+  let res = await fetch(url, { headers: { Authorization: `Bearer ${publicAnonKey}` } });
   if (res.status === 401 || res.status === 403) {
-    console.warn(`[MinhaFoto] Tentativa 1 retornou ${res.status}, tentando sem Authorization header...`);
+    console.warn(`[MinhaFoto] retry sem Authorization (status ${res.status})`);
     res = await fetch(url);
   }
 
-  // Lê o body como texto para debug seguro
   const rawText = await res.text();
   console.log(`[MinhaFoto] signed-url status=${res.status} body=${rawText.slice(0, 300)}`);
 
   let data: any = {};
-  try { data = JSON.parse(rawText); } catch { /* body não era JSON */ }
+  try { data = JSON.parse(rawText); } catch {}
 
-  if (!res.ok) {
-    const msg = data.error ?? data.message ?? `Erro HTTP ${res.status}`;
-    throw new Error(`[${res.status}] ${msg}`);
-  }
-
-  if (!data.viewUrl) {
-    throw new Error('Servidor retornou resposta sem viewUrl');
-  }
+  if (!res.ok) throw new Error(`[${res.status}] ${data.error ?? data.message ?? `Erro HTTP ${res.status}`}`);
+  if (!data.viewUrl) throw new Error('Servidor retornou resposta sem viewUrl');
 
   return {
-    viewUrl: data.viewUrl,
+    viewUrl:     data.viewUrl,
     downloadUrl: data.downloadUrl ?? data.viewUrl,
-    fileName: data.fileName ?? 'minha-foto.jpg',
+    fileName:    data.fileName ?? 'minha-foto.jpg',
   };
 }
+
+/** Busca footerImageUrl e qrRight do branding público (sem auth) */
+async function fetchFooterConfig(): Promise<{ footerImageUrl: string | null; footerQrRight: number }> {
+  try {
+    const res = await fetch(`${BASE}/branding/public?apikey=${encodeURIComponent(publicAnonKey)}`);
+    if (!res.ok) throw new Error(`branding/public retornou ${res.status}`);
+    const data = await res.json();
+    return {
+      footerImageUrl: data.footerImageUrl ?? null,
+      footerQrRight:  typeof data.footerQrRight === 'number' ? data.footerQrRight : 16,
+    };
+  } catch (err) {
+    console.warn('[MinhaFoto] Não foi possível carregar config do rodapé:', err);
+    return { footerImageUrl: null, footerQrRight: 16 };
+  }
+}
+
+// ── Canvas utilities ──────────────────────────────────────────────────────────
+
+/** Carrega uma imagem de URL com crossOrigin; retorna null se falhar em 5s */
+function loadImg(src: string): Promise<HTMLImageElement | null> {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const timer = setTimeout(() => resolve(null), 5000);
+    img.onload  = () => { clearTimeout(timer); resolve(img); };
+    img.onerror = () => { clearTimeout(timer); resolve(null); };
+    img.src = src;
+  });
+}
+
+/**
+ * Compõe a foto com o rodapé oficial (imagem carregada do servidor)
+ * e o QR code posicionado conforme o slider configurado no admin.
+ *
+ * Layout:
+ *   ┌──────────────────── foto ─────────────────────┐
+ *   ├── [   imagem do rodapé   ] [  QR code  ]  ────┤  ← footerQrRight %
+ *   └───────────────────────────────────────────────┘
+ *
+ * Se o rodapé não estiver configurado no servidor, cai no fallback de texto.
+ */
+async function composePhotoWithFooter(
+  photoBlobOrUrl: Blob | string,
+  qrContent:      string,
+  footerImgUrl:   string | null,
+  qrRight:        number,   // % a partir da direita (ex: 16)
+): Promise<Blob> {
+  return new Promise(async (resolve, reject) => {
+    // Carrega a foto
+    let photoImg: HTMLImageElement | null;
+    if (typeof photoBlobOrUrl === 'string') {
+      photoImg = await loadImg(photoBlobOrUrl);
+    } else {
+      const objUrl = URL.createObjectURL(photoBlobOrUrl);
+      photoImg = await loadImg(objUrl);
+      URL.revokeObjectURL(objUrl);
+    }
+
+    if (!photoImg) return reject(new Error('Falha ao carregar foto no canvas'));
+
+    const W = photoImg.naturalWidth;
+    const H = photoImg.naturalHeight;
+
+    // Altura do rodapé é proporcional à largura (10%), min 80, max 240px
+    const FH  = Math.max(80, Math.min(240, Math.round(W * 0.10)));
+    const canvas = document.createElement('canvas');
+    canvas.width  = W;
+    canvas.height = H + FH;
+    const ctx = canvas.getContext('2d')!;
+
+    // ── 1. Foto original ────────────────────────────────────────────────────
+    ctx.drawImage(photoImg, 0, 0, W, H);
+
+    // ── 2. Rodapé: imagem do servidor OU fallback texto ──────────────────────
+    const footerImg = footerImgUrl ? await loadImg(footerImgUrl) : null;
+
+    if (footerImg) {
+      // Desenha a imagem do rodapé estendida ao longo de toda a largura
+      ctx.drawImage(footerImg, 0, H, W, FH);
+    } else {
+      // Fallback: barra verde escura simples
+      const grad = ctx.createLinearGradient(0, H, 0, H + FH);
+      grad.addColorStop(0, '#003D17');
+      grad.addColorStop(1, '#006B2B');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, H, W, FH);
+
+      const fSize = Math.round(FH * 0.4);
+      ctx.font      = `900 italic ${fSize}px Montserrat, 'Arial Black', Arial, sans-serif`;
+      ctx.fillStyle = '#00E05A';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign    = 'left';
+      ctx.fillText('TOUR Palmeiras · Allianz Parque', Math.round(FH * 0.2), H + FH / 2);
+    }
+
+    // ── 3. QR code sobreposto ao rodapé na posição configurada ───────────────
+    const qrSize = Math.round(FH * 0.88);   // ~88% da altura do rodapé
+    const qrY    = H + Math.round((FH - qrSize) / 2);
+    // right: qrRight% → x = W - W*(qrRight/100) - qrSize/2 (centro)
+    const qrCenterX = W - Math.round(W * (qrRight / 100));
+    const qrX       = qrCenterX - Math.round(qrSize / 2);
+
+    try {
+      const qrDataUrl = await QRCode.toDataURL(qrContent, {
+        width:  qrSize * 2,
+        margin: 1,
+        color: { dark: '#ffffff', light: '#006B2B' },  // branco sobre verde (padrão da impressão)
+      });
+      const qrImg = await loadImg(qrDataUrl);
+      if (qrImg) ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
+    } catch (err) {
+      console.warn('[MinhaFoto] QR code geração falhou:', err);
+    }
+
+    // ── 4. Exporta como JPEG ─────────────────────────────────────────────────
+    canvas.toBlob(
+      blob => {
+        if (blob) resolve(blob);
+        else reject(new Error('canvas.toBlob retornou null'));
+      },
+      'image/jpeg',
+      0.93,
+    );
+  });
+}
+
+// ── Componente ────────────────────────────────────────────────────────────────
 
 export function MinhaFoto() {
   const { orderId, photoId } = useParams<{ orderId: string; photoId: string }>();
@@ -63,6 +173,10 @@ export function MinhaFoto() {
   const [downloading, setDownloading] = useState(false);
   const [downloaded,  setDownloaded]  = useState(false);
   const [dlError,     setDlError]     = useState('');
+
+  // Config do rodapé (carregada do servidor)
+  const [footerImgUrl, setFooterImgUrl] = useState<string | null>(null);
+  const [qrRight,      setQrRight]      = useState(16);
   const hasAutoTriggered = useRef(false);
 
   const load = () => {
@@ -71,18 +185,23 @@ export function MinhaFoto() {
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setError('');
 
-    fetchSignedUrl(orderId, photoId)
-      .then(({ viewUrl, downloadUrl, fileName }) => {
+    // Carrega foto + config do rodapé em paralelo
+    Promise.all([
+      fetchSignedUrl(orderId, photoId),
+      fetchFooterConfig(),
+    ])
+      .then(([{ viewUrl, downloadUrl, fileName }, { footerImageUrl, footerQrRight }]) => {
         setViewUrl(viewUrl);
         setDownloadUrl(downloadUrl);
         setFileName(fileName);
+        setFooterImgUrl(footerImageUrl);
+        setQrRight(footerQrRight);
       })
       .catch(err => {
-        console.error('[MinhaFoto] Erro ao carregar foto:', err);
+        console.error('[MinhaFoto] Erro ao carregar:', err);
         setError(err.message ?? 'Não foi possível carregar a foto.');
       })
       .finally(() => setLoading(false));
@@ -90,147 +209,54 @@ export function MinhaFoto() {
 
   useEffect(load, [orderId, photoId]);
 
-  // Auto-trigger download quando foto carrega (QR code scan)
+  // Auto-download ao escanear QR code
   useEffect(() => {
     if (downloadUrl && !hasAutoTriggered.current && !loading && !error) {
       hasAutoTriggered.current = true;
-      const t = setTimeout(() => handleDownload(), 600);
+      const t = setTimeout(() => handleDownload(), 700);
       return () => clearTimeout(t);
     }
   }, [downloadUrl, loading, error]);
 
-  /**
-   * Adiciona rodapé de branding à foto via Canvas e retorna um novo Blob.
-   * Funciona com qualquer imagem CORS-aberta (signed URLs do Supabase Storage).
-   */
-  async function addFooterToBlob(originalBlob: Blob): Promise<Blob> {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      const objUrl = URL.createObjectURL(originalBlob);
-
-      img.onload = () => {
-        const W = img.naturalWidth;
-        const H = img.naturalHeight;
-
-        // Altura do rodapé proporcional à largura (mínimo 80px, máximo 160px)
-        const footerH = Math.max(80, Math.min(160, Math.round(W * 0.13)));
-        const padding = Math.round(footerH * 0.22);
-
-        const canvas = document.createElement('canvas');
-        canvas.width  = W;
-        canvas.height = H + footerH;
-        const ctx = canvas.getContext('2d')!;
-
-        // Foto original
-        ctx.drawImage(img, 0, 0, W, H);
-
-        // Fundo do rodapé — gradiente escuro igual ao da página
-        const grad = ctx.createLinearGradient(0, H, 0, H + footerH);
-        grad.addColorStop(0, '#06120A');
-        grad.addColorStop(1, '#08080E');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, H, W, footerH);
-
-        // Linha separadora verde
-        ctx.fillStyle = '#00FF7F';
-        ctx.fillRect(0, H, W, Math.max(2, Math.round(footerH * 0.025)));
-
-        // Tamanhos de fonte
-        const fontBig   = Math.round(footerH * 0.36);
-        const fontSmall = Math.round(footerH * 0.22);
-        const cy        = H + footerH / 2;
-
-        // "Smart" (branco)
-        ctx.font = `900 ${fontBig}px Montserrat, Arial Black, Arial, sans-serif`;
-        ctx.textBaseline = 'middle';
-        ctx.textAlign    = 'left';
-        ctx.fillStyle    = '#ffffff';
-        const smartW = ctx.measureText('Smart').width;
-
-        // "Match" (verde)
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Smart', padding, cy - fontSmall * 0.3);
-        ctx.fillStyle = '#00FF7F';
-        ctx.fillText('Match', padding + smartW, cy - fontSmall * 0.3);
-
-        // Subtítulo
-        ctx.font = `400 ${fontSmall}px Montserrat, Arial, sans-serif`;
-        ctx.fillStyle = 'rgba(255,255,255,0.45)';
-        ctx.fillText('Tour Palmeiras · Allianz Parque', padding, cy + fontBig * 0.42);
-
-        // Site (direita)
-        ctx.textAlign = 'right';
-        ctx.font = `700 ${fontSmall}px Montserrat, Arial, sans-serif`;
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        ctx.fillText('smartmatch.com.br', W - padding, cy);
-
-        URL.revokeObjectURL(objUrl);
-
-        canvas.toBlob(blob => {
-          if (blob) resolve(blob);
-          else reject(new Error('Canvas toBlob retornou null'));
-        }, 'image/jpeg', 0.92);
-      };
-
-      img.onerror = () => {
-        URL.revokeObjectURL(objUrl);
-        reject(new Error('Falha ao carregar imagem no canvas'));
-      };
-
-      img.src = objUrl;
-    });
-  }
-
-  /**
-   * Download confiável em todos os browsers (incluindo iOS Safari e Chrome mobile).
-   *
-   * Fluxo:
-   *  1. fetch(downloadUrl) → signed URL do Storage (CORS *)
-   *  2. addFooterToBlob()  → compõe rodapé via Canvas
-   *  3. URL.createObjectURL(blob) → blob:// é same-origin → atributo `download` funciona
-   */
   const handleDownload = async () => {
     if (!downloadUrl || downloading) return;
     setDownloading(true);
     setDlError('');
 
     try {
-      console.log('[MinhaFoto] Iniciando download de:', downloadUrl.slice(0, 100) + '...');
+      // 1. Busca a foto original do Supabase Storage
+      console.log('[MinhaFoto] Buscando foto original…');
       const res = await fetch(downloadUrl);
-      console.log('[MinhaFoto] Download response status:', res.status);
-
-      if (!res.ok) {
-        throw new Error(`Erro ao buscar foto no storage: HTTP ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`Storage retornou HTTP ${res.status}`);
       const originalBlob = await res.blob();
 
-      // Compõe o rodapé e gera blob final
+      // 2. Compõe foto + rodapé da config + QR na posição configurada
+      const photoPageUrl = `${window.location.origin}/minha-foto/${orderId}/${photoId}`;
+      console.log('[MinhaFoto] Compondo rodapé. footerImgUrl=', footerImgUrl ? '✓' : 'null', 'qrRight=', qrRight);
+
       let finalBlob: Blob;
       try {
-        finalBlob = await addFooterToBlob(originalBlob);
+        finalBlob = await composePhotoWithFooter(originalBlob, photoPageUrl, footerImgUrl, qrRight);
       } catch (canvasErr) {
-        console.warn('[MinhaFoto] Canvas footer falhou, usando blob original:', canvasErr);
+        console.warn('[MinhaFoto] Canvas falhou, usando blob original:', canvasErr);
         finalBlob = originalBlob;
       }
 
+      // 3. Download via blob:// (same-origin → `download` funciona em todos os browsers)
       const blobUrl = URL.createObjectURL(finalBlob);
-
       const a = document.createElement('a');
       a.href = blobUrl;
-      // Sempre .jpg porque exportamos do canvas como JPEG
       a.download = fileName.replace(/\.[^.]+$/, '') + '_smartmatch.jpg';
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-
       setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
+
       setDownloaded(true);
     } catch (err: any) {
       console.error('[MinhaFoto] Erro no download:', err);
-      setDlError(`Falha no download: ${err.message ?? 'erro desconhecido'}. Tente o botão abaixo.`);
+      setDlError(`Falha: ${err.message ?? 'erro desconhecido'}`);
       window.open(downloadUrl, '_blank');
     } finally {
       setDownloading(false);
@@ -269,7 +295,7 @@ export function MinhaFoto() {
         </p>
       </motion.div>
 
-      {/* Card principal */}
+      {/* Card */}
       <motion.div
         initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -291,7 +317,7 @@ export function MinhaFoto() {
           </div>
         )}
 
-        {/* Erro ao carregar */}
+        {/* Erro */}
         {!loading && error && (
           <div className="flex flex-col items-center justify-center py-16 px-6 gap-4 text-center">
             <div
@@ -301,46 +327,30 @@ export function MinhaFoto() {
               <AlertCircle className="w-7 h-7" style={{ color: '#f87171' }} />
             </div>
             <div>
-              <p
-                style={{
-                  fontFamily: "'Montserrat', sans-serif",
-                  fontWeight: 800,
-                  color: '#fff',
-                  fontSize: '1rem',
-                  marginBottom: 6,
-                }}
-              >
+              <p style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, color: '#fff', fontSize: '1rem', marginBottom: 6 }}>
                 Ops, algo deu errado
               </p>
               <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: '0.82rem', lineHeight: 1.6, wordBreak: 'break-word' }}>
                 {error}
               </p>
             </div>
-
-            {/* Botão Tentar Novamente */}
             <button
               onClick={() => { hasAutoTriggered.current = false; load(); }}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all"
-              style={{
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.12)',
-                color: 'rgba(255,255,255,0.7)',
-              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
+              style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.7)' }}
             >
               <RefreshCw className="w-4 h-4" />
               Tentar novamente
             </button>
-
-            <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.7rem', lineHeight: 1.6 }}>
+            <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.7rem' }}>
               Procure o fotógrafo do evento ou acesse smartmatch.com.br
             </p>
           </div>
         )}
 
-        {/* Foto carregada com sucesso */}
+        {/* Foto carregada */}
         {!loading && viewUrl && (
           <>
-            {/* Imagem */}
             <div className="relative bg-black" style={{ lineHeight: 0 }}>
               <img
                 src={viewUrl}
@@ -361,7 +371,6 @@ export function MinhaFoto() {
               </div>
             </div>
 
-            {/* Ações */}
             <div className="p-5 flex flex-col gap-3">
               <motion.button
                 whileHover={{ scale: 1.02 }}
@@ -370,9 +379,7 @@ export function MinhaFoto() {
                 disabled={downloading}
                 className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl"
                 style={{
-                  background: downloaded
-                    ? 'rgba(0,255,127,0.12)'
-                    : 'linear-gradient(135deg, #00843D, #00FF7F)',
+                  background: downloaded ? 'rgba(0,255,127,0.12)' : 'linear-gradient(135deg, #00843D, #00FF7F)',
                   color: downloaded ? '#00FF7F' : '#001A0A',
                   border: downloaded ? '1px solid rgba(0,255,127,0.3)' : 'none',
                   fontFamily: "'Montserrat', sans-serif",
@@ -392,11 +399,12 @@ export function MinhaFoto() {
                 )}
               </motion.button>
 
-              {/* Erro de download */}
               {dlError && (
-                <div className="rounded-xl p-3 text-xs" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', lineHeight: 1.6 }}>
+                <div
+                  className="rounded-xl p-3 text-xs"
+                  style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171', lineHeight: 1.6 }}
+                >
                   {dlError}
-                  {/* Fallback direto para o Storage */}
                   <a
                     href={downloadUrl ?? '#'}
                     target="_blank"
@@ -409,21 +417,14 @@ export function MinhaFoto() {
                 </div>
               )}
 
-              {/* Dica pós-download */}
               {downloaded && !dlError && (
-                <p
-                  className="text-center text-xs"
-                  style={{ color: 'rgba(255,255,255,0.35)', lineHeight: 1.6 }}
-                >
-                  📱 No iPhone: acesse o app <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Arquivos</strong> → Downloads<br />
-                  📱 No Android: verifique a pasta <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Downloads</strong> ou Galeria
+                <p className="text-center text-xs" style={{ color: 'rgba(255,255,255,0.35)', lineHeight: 1.6 }}>
+                  📱 No iPhone: <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Arquivos</strong> → Downloads<br />
+                  📱 No Android: pasta <strong style={{ color: 'rgba(255,255,255,0.55)' }}>Downloads</strong> ou Galeria
                 </p>
               )}
 
-              <p
-                className="text-center"
-                style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.68rem', lineHeight: 1.5 }}
-              >
+              <p className="text-center" style={{ color: 'rgba(255,255,255,0.25)', fontSize: '0.68rem' }}>
                 Foto exclusiva do Tour Palmeiras · Smart<span style={{ color: '#00FF7F' }}>Match</span>
               </p>
             </div>
@@ -431,10 +432,7 @@ export function MinhaFoto() {
         )}
       </motion.div>
 
-      <p
-        className="mt-8 text-center"
-        style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.65rem' }}
-      >
+      <p className="mt-8 text-center" style={{ color: 'rgba(255,255,255,0.2)', fontSize: '0.65rem' }}>
         smartmatch.com.br · Todos os direitos reservados
       </p>
     </div>

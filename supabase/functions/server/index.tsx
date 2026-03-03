@@ -259,7 +259,7 @@ async function brandingWithUrls(bustCache = false) {
   });
 
   const pathsToSign: string[] = [
-    b.logoPath, b.faviconPath, b.ctaBgPath, b.scannerImagePath,
+    b.logoPath, b.faviconPath, b.ctaBgPath, b.scannerImagePath, b.footerImagePath,
     ...(b.backgroundPaths ?? []),
   ].filter(Boolean) as string[];
 
@@ -278,6 +278,7 @@ async function brandingWithUrls(bustCache = false) {
   const faviconUrl      = b.faviconPath      ? (urlMap[b.faviconPath]      ?? null) : null;
   const ctaBgUrl        = b.ctaBgPath        ? (urlMap[b.ctaBgPath]        ?? null) : null;
   const scannerImageUrl = b.scannerImagePath ? (urlMap[b.scannerImagePath] ?? null) : null;
+  const footerImageUrl  = b.footerImagePath  ? (urlMap[b.footerImagePath]  ?? null) : null;
   const backgroundUrls  = (b.backgroundPaths ?? []).map((p: string) => urlMap[p]).filter(Boolean) as string[];
 
   const result = {
@@ -287,7 +288,8 @@ async function brandingWithUrls(bustCache = false) {
     watermarkProducer: b.watermarkProducer ?? "EDU SANTANA PRODUÇÕES",
     watermarkPhotoTag: b.watermarkPhotoTag ?? "◆ FOTO PROTEGIDA ◆",
     watermarkTour: b.watermarkTour ?? "© TOUR PALMEIRAS",
-    logoUrl, faviconUrl, backgroundUrls, ctaBgUrl, scannerImageUrl,
+    logoUrl, faviconUrl, backgroundUrls, ctaBgUrl, scannerImageUrl, footerImageUrl,
+    footerQrRight: typeof b.footerQrRight === 'number' ? b.footerQrRight : 16,
     hasLogo: !!b.logoPath, hasFavicon: !!b.faviconPath,
     backgroundCount: (b.backgroundPaths ?? []).length,
     updatedAt: b.updatedAt ?? null,
@@ -382,6 +384,7 @@ app.put("/make-server-68454e9b/admin/branding", adminAuth, async (c) => {
       eventsHeroSubtitle: body.eventsHeroSubtitle !== undefined ? body.eventsHeroSubtitle : existing.eventsHeroSubtitle,
       eventsListTitle: body.eventsListTitle !== undefined ? body.eventsListTitle : existing.eventsListTitle,
       eventSessionTypes: body.eventSessionTypes !== undefined ? body.eventSessionTypes : existing.eventSessionTypes,
+      footerQrRight: body.footerQrRight !== undefined ? Number(body.footerQrRight) : existing.footerQrRight,
       updatedAt: new Date().toISOString(),
     };
     await kv.set(`${KV}branding`, updated);
@@ -397,8 +400,8 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
   try {
     const { type, base64, mimeType = "image/png" } = await c.req.json();
     if (!base64 || !type) return c.json({ error: "type e base64 obrigatórios" }, 400);
-    if (!["logo", "favicon", "background", "cta-background", "scanner-image"].includes(type))
-      return c.json({ error: "type deve ser logo, favicon, background, cta-background ou scanner-image" }, 400);
+    if (!["logo", "favicon", "background", "cta-background", "scanner-image", "footer-image"].includes(type))
+      return c.json({ error: "type deve ser logo, favicon, background, cta-background, scanner-image ou footer-image" }, 400);
 
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
@@ -419,7 +422,9 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
           ? `branding/cta-bg/cta-${ts}.${ext}`
           : type === "scanner-image"
             ? `branding/scanner/scanner-${ts}.${ext}`
-            : `branding/bg/bg-${ts}.${ext}`;
+            : type === "footer-image"
+              ? `branding/footer/footer-${ts}.${ext}`
+              : `branding/bg/bg-${ts}.${ext}`;
 
     const { error: uploadError } = await sb().storage
       .from(BUCKET).upload(storagePath, bytes, { contentType: mimeType, upsert: false });
@@ -435,6 +440,8 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
       await sb().storage.from(BUCKET).remove([existing.ctaBgPath]);
     } else if (type === "scanner-image" && existing.scannerImagePath) {
       await sb().storage.from(BUCKET).remove([existing.scannerImagePath]);
+    } else if (type === "footer-image" && existing.footerImagePath) {
+      await sb().storage.from(BUCKET).remove([existing.footerImagePath]);
     }
 
     const updated: any = { ...existing, updatedAt: new Date().toISOString() };
@@ -442,6 +449,7 @@ app.post("/make-server-68454e9b/admin/branding/upload", adminAuth, async (c) => 
     else if (type === "favicon") updated.faviconPath = storagePath;
     else if (type === "cta-background") updated.ctaBgPath = storagePath;
     else if (type === "scanner-image") updated.scannerImagePath = storagePath;
+    else if (type === "footer-image") updated.footerImagePath = storagePath;
     else updated.backgroundPaths = [...(existing.backgroundPaths ?? []), storagePath];
 
     await kv.set(`${KV}branding`, updated);

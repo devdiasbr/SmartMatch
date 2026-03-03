@@ -350,7 +350,7 @@ export const api = {
   >>, token: string) =>
     aPut<{ success: boolean }>('/admin/branding', data, token),
 
-  uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background' | 'cta-background' | 'scanner-image'; base64: string; mimeType: string }, token: string) =>
+  uploadBrandingAsset: (data: { type: 'logo' | 'favicon' | 'background' | 'cta-background' | 'scanner-image' | 'footer-image'; base64: string; mimeType: string }, token: string) =>
     aPost<{ url: string | null; path: string }>('/admin/branding/upload', data, token),
 
   deleteBrandingAsset: (asset: 'logo' | 'favicon' | 'cta-background' | 'scanner-image', token: string) =>
