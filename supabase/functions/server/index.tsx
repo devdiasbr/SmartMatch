@@ -71,29 +71,114 @@ function bustBrandingCache(prefix?: string) {
 
 // ── Auth middleware ───────────────────────────────────────────────────────────
 
+// ── JWT crypto helpers ────────────────────────────────────────────────────────
+// Validate Supabase JWTs locally using SUPABASE_JWT_SECRET (always available in
+// Edge Functions). This avoids calling supabase.auth.getUser(jwt) which checks
+// for an ACTIVE SESSION — causing spurious "Auth session missing!" 401s when
+// the session expires server-side even though the JWT is still cryptographically
+// valid (within its 1-hour exp window).
+
+function base64UrlDecode(str: string): Uint8Array {
+  const pad = str.length % 4;
+  const padded = pad ? str + "=".repeat(4 - pad) : str;
+  const base64 = padded.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function verifySupabaseJWT(jwt: string): Promise<{ userId: string } | null> {
+  try {
+    const secret = Deno.env.get("SUPABASE_JWT_SECRET");
+    if (!secret) {
+      console.log("[adminAuth] SUPABASE_JWT_SECRET não configurado — fallback necessário");
+      return null;
+    }
+    const parts = jwt.split(".");
+    if (parts.length !== 3) return null;
+
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"],
+    );
+
+    const message = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const signature = base64UrlDecode(parts[2]);
+    const valid = await crypto.subtle.verify({ name: "HMAC" }, key, signature, message);
+    if (!valid) {
+      console.log("[adminAuth] Assinatura JWT inválida");
+      return null;
+    }
+
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1])));
+
+    // Reject tokens past their exp claim
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      console.log(`[adminAuth] Token expirado (exp=${payload.exp} < now=${Math.floor(Date.now() / 1000)})`);
+      return null;
+    }
+
+    if (!payload.sub) {
+      console.log("[adminAuth] sub ausente no payload JWT");
+      return null;
+    }
+
+    return { userId: payload.sub };
+  } catch (err) {
+    console.log("[adminAuth] Erro ao verificar JWT:", err);
+    return null;
+  }
+}
+
 async function adminAuth(c: any, next: () => Promise<void>) {
-  // Prefer X-Admin-Token (user JWT) — fallback to Authorization header.
-  // We always send publicAnonKey as Authorization for Supabase gateway access,
-  // so we must NOT accept the anon key as a valid admin token.
-  const adminToken =
-    c.req.header("X-Admin-Token") ||
-    c.req.header("Authorization")?.replace("Bearer ", "");
+  // ONLY use X-Admin-Token for admin auth — Authorization header carries the
+  // publicAnonKey (for the Supabase gateway) and must NOT be treated as an admin token.
+  const adminToken = c.req.header("X-Admin-Token");
 
   if (!adminToken) {
-    return c.json({ error: "Não autorizado: token de admin ausente" }, 401);
+    console.log("adminAuth: X-Admin-Token ausente");
+    return c.json({ error: "Não autorizado: token de admin ausente (X-Admin-Token)" }, 401);
   }
 
+  // ── Primary: cryptographic JWT verification (no active-session check needed) ──
+  // SUPABASE_JWT_SECRET is automatically available in all Supabase Edge Functions.
+  // This eliminates "Auth session missing!" errors caused by expired/cleaned sessions.
+  const verified = await verifySupabaseJWT(adminToken);
+  if (verified?.userId) {
+    // JWT is valid — fetch user via admin API (bypasses session state entirely)
+    const { data: { user }, error } = await sb().auth.admin.getUserById(verified.userId);
+    if (error || !user) {
+      console.log("adminAuth: usuário não encontrado via getUserById:", error?.message);
+      return c.json({ error: "Não autorizado: usuário não encontrado" }, 401);
+    }
+
+    // Check role: only 'owner' users can access admin routes.
+    // Legacy users (created before role was added) are allowed through.
+    const role = user.user_metadata?.role;
+    if (role && role !== "owner") {
+      console.log(`adminAuth: user ${user.id} tem role '${role}', esperado 'owner'`);
+      return c.json({ error: "Não autorizado: permissão insuficiente" }, 403);
+    }
+
+    c.set("userId", user.id);
+    return await next();
+  }
+
+  // ── Fallback: session-based validation (if SUPABASE_JWT_SECRET not available) ──
+  console.log("adminAuth: verificação crypto falhou, usando getUser() como fallback");
   const { data: { user }, error } = await sb().auth.getUser(adminToken);
   if (error || !user) {
-    console.log("adminAuth falhou:", error?.message ?? "token inválido");
+    console.log("adminAuth getUser() falhou:", error?.message ?? "token inválido");
     return c.json({ error: `Não autorizado: ${error?.message ?? "token inválido"}` }, 401);
   }
 
-  // Check role: only 'owner' users can access admin routes.
-  // Legacy users (created before role was added) are allowed through.
   const role = user.user_metadata?.role;
   if (role && role !== "owner") {
-    console.log(`adminAuth: user ${user.id} has role '${role}', expected 'owner'`);
+    console.log(`adminAuth: user ${user.id} tem role '${role}', esperado 'owner'`);
     return c.json({ error: "Não autorizado: permissão insuficiente" }, 403);
   }
 
@@ -1887,18 +1972,27 @@ app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/download", async 
 });
 
 // Return signed URL as JSON (used by MinhaFoto page to avoid CORS issues with redirects)
+// PUBLIC route — no auth required. orderId + photoId act as the access token.
 app.get("/make-server-68454e9b/orders/:orderId/photos/:photoId/signed-url", async (c) => {
   try {
     const orderId = c.req.param("orderId");
     const photoId = c.req.param("photoId");
 
+    console.log(`[signed-url] orderId=${orderId} photoId=${photoId}`);
+
     const order: any = await kv.get(`${KV}order:${orderId}`);
-    if (!order) return c.json({ error: "Pedido não encontrado" }, 404);
+    if (!order) {
+      console.log(`[signed-url] Pedido não encontrado: ${orderId}`);
+      return c.json({ error: "Pedido não encontrado" }, 404);
+    }
 
     const hasPhoto = order.items?.some(
       (item: any) => String(item.photoId) === String(photoId),
     );
-    if (!hasPhoto) return c.json({ error: "Foto não pertence a este pedido" }, 403);
+    if (!hasPhoto) {
+      console.log(`[signed-url] Foto ${photoId} não pertence ao pedido ${orderId}. Items:`, order.items?.map((i: any) => i.photoId));
+      return c.json({ error: "Foto não pertence a este pedido" }, 403);
+    }
 
     const photo: any = await kv.get(`${KV}photo:${photoId}`);
     if (!photo?.storagePath) return c.json({ error: "Foto não encontrada no storage" }, 404);

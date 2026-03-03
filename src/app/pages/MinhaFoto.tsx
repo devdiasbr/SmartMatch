@@ -6,6 +6,13 @@ import { projectId, publicAnonKey } from '/utils/supabase/info';
 
 const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
 
+// Supabase Edge Function gateway aceita auth via header OU query param ?apikey=
+// Enviamos os dois para garantir que o gateway aceite mesmo em browsers mobile
+// que possam stripppar o Authorization header em requests cross-origin.
+function buildUrl(path: string): string {
+  return `${BASE}${path}?apikey=${encodeURIComponent(publicAnonKey)}`;
+}
+
 export function MinhaFoto() {
   const { orderId, photoId } = useParams<{ orderId: string; photoId: string }>();
 
@@ -27,17 +34,28 @@ export function MinhaFoto() {
       return;
     }
 
-    fetch(`${BASE}/orders/${orderId}/photos/${photoId}/signed-url`, {
+    // Usa buildUrl() para incluir ?apikey= como query param —
+    // garante que o Supabase gateway aceite mesmo sem o Authorization header.
+    fetch(buildUrl(`/orders/${orderId}/photos/${photoId}/signed-url`), {
       headers: { Authorization: `Bearer ${publicAnonKey}` },
     })
-      .then(res => res.json())
-      .then(data => {
+      .then(async res => {
+        // Parseia JSON independente do status HTTP
+        const data = await res.json().catch(() => ({}));
+        // Agora verifica se houve erro HTTP (401, 403, 404, 500…)
+        if (!res.ok) {
+          const msg = data.error ?? data.message ?? `Erro HTTP ${res.status}`;
+          throw new Error(msg);
+        }
         if (data.error) throw new Error(data.error);
         setViewUrl(data.viewUrl);
         setDownloadUrl(data.downloadUrl ?? data.viewUrl);
         if (data.fileName) setFileName(data.fileName);
       })
-      .catch(err => setError(err.message ?? 'Não foi possível carregar a foto.'))
+      .catch(err => {
+        console.error('[MinhaFoto] Erro ao carregar foto:', err);
+        setError(err.message ?? 'Não foi possível carregar a foto.');
+      })
       .finally(() => setLoading(false));
   }, [orderId, photoId]);
 

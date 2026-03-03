@@ -36,27 +36,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const supabase = getSupabase();
 
-    // Validate user actually exists on the server (not just cached JWT).
-    // getSession() only reads local storage; getUser() hits the auth server
-    // and catches "user from sub claim does not exist" before any API call.
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session) {
-        // Validate the user still exists in auth.users
-        const { data: { user }, error } = await supabase.auth.getUser(session.access_token);
-        if (error || !user) {
-          console.warn('[Auth] Session JWT references a deleted user — signing out. Error:', error?.message);
-          await supabase.auth.signOut();
-          setSession(null);
-          setUser(null);
-          setLoading(false);
-          return;
-        }
-        setSession(session);
-        setUser(user);
-      } else {
-        setSession(null);
-        setUser(null);
-      }
+    // getSession() reads the locally stored session and auto-refreshes the
+    // access token via the refresh token if it has expired.
+    // We intentionally do NOT call getUser() here — that validates against
+    // Supabase's active-session store and can return "Auth session missing!"
+    // even for valid cached sessions, causing spurious sign-outs.
+    // Server-side adminAuth now validates JWTs cryptographically, so a
+    // deleted-user JWT will be rejected there instead.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
       setLoading(false);
     });
 
@@ -73,24 +62,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Always fetches a fresh session from Supabase (which auto-refreshes if expired).
-   * Use this before any admin API call to avoid 401 due to stale token.
+   * Returns a fresh (auto-refreshed) access token for admin API calls.
+   * getSession() handles silent token refresh via the refresh token — no
+   * extra getUser() network call needed. Server-side adminAuth validates JWTs
+   * cryptographically, so expired / invalid tokens are rejected there.
    */
   const getToken = useCallback(async (): Promise<string | null> => {
     const supabase = getSupabase();
     const { data, error } = await supabase.auth.getSession();
     if (error || !data.session) return null;
-
-    // Validate user still exists — if deleted, sign out immediately
-    const { error: userErr } = await supabase.auth.getUser(data.session.access_token);
-    if (userErr) {
-      console.warn('[Auth] getToken: user no longer exists — signing out. Error:', userErr.message);
-      await supabase.auth.signOut();
-      setSession(null);
-      setUser(null);
-      return null;
-    }
-
     return data.session.access_token;
   }, []);
 
