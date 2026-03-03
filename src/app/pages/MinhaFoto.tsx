@@ -46,11 +46,11 @@ async function fetchFooterConfig(): Promise<{ footerImageUrl: string | null; foo
     });
     return {
       footerImageUrl: data.footerImageUrl ?? null,
-      footerQrRight:  typeof data.footerQrRight === 'number' ? data.footerQrRight : 16,
+      footerQrRight:  typeof data.footerQrRight === 'number' ? data.footerQrRight : 2,
     };
   } catch (err) {
     console.warn('[MinhaFoto] Não foi possível carregar config do rodapé:', err);
-    return { footerImageUrl: null, footerQrRight: 16 };
+    return { footerImageUrl: null, footerQrRight: 2 };
   }
 }
 
@@ -163,12 +163,10 @@ async function composePhotoWithFooter(
     if ((footerImg as any)._blobUrl) URL.revokeObjectURL((footerImg as any)._blobUrl);
 
     // ── 3. QR code sobreposto ao rodapé na posição configurada ───────────────
-    // Replica EXATAMENTE o CSS do print: right:qrRight%, top:6%, height:88%, aspect-ratio:1/1
-    // CSS right:X% → borda direita do elemento fica X% da largura a partir da direita
-    //   → left = containerWidth * (1 - X/100) - elementWidth
+    // qrRight agora é LEFT-based: left:X% (borda esquerda do QR a X% da largura)
     const qrSize = Math.round(FH * 0.88);
     const qrY    = H + Math.round(FH * 0.06);
-    const qrX    = Math.round(W * (1 - qrRight / 100)) - qrSize;
+    const qrX    = Math.round(W * (qrRight / 100));
 
     try {
       const qrDataUrl = await QRCode.toDataURL(qrContent, {

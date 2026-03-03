@@ -289,7 +289,7 @@ async function brandingWithUrls(bustCache = false) {
     watermarkPhotoTag: b.watermarkPhotoTag ?? "◆ FOTO PROTEGIDA ◆",
     watermarkTour: b.watermarkTour ?? "© TOUR PALMEIRAS",
     logoUrl, faviconUrl, backgroundUrls, ctaBgUrl, scannerImageUrl, footerImageUrl,
-    footerQrRight: typeof b.footerQrRight === 'number' ? b.footerQrRight : 16,
+    footerQrRight: typeof b.footerQrRight === 'number' ? b.footerQrRight : 2,
     hasLogo: !!b.logoPath, hasFavicon: !!b.faviconPath,
     backgroundCount: (b.backgroundPaths ?? []).length,
     updatedAt: b.updatedAt ?? null,

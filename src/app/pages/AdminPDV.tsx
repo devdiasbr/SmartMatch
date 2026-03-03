@@ -122,9 +122,21 @@ export function AdminPDV() {
     try { return localStorage.getItem('pdv_footer_img') ?? ''; } catch { return ''; }
   });
 
-  /* ── Posição horizontal do QR (% a partir da direita) ── */
+  /* ── Dimensões da imagem do rodapé (para calcular max do slider) ── */
+  const [footerDims, setFooterDims] = useState<{ w: number; h: number }>({ w: 1, h: 1 });
+  useEffect(() => {
+    if (!footerSrc) return;
+    const img = new Image();
+    img.onload = () => setFooterDims({ w: img.naturalWidth, h: img.naturalHeight });
+    img.src = footerSrc;
+  }, [footerSrc]);
+  // QR width as % of footer width (height:88%, aspect-ratio:1/1)
+  const qrWidthPct = footerDims.w > 0 ? (0.88 * footerDims.h / footerDims.w) * 100 : 15;
+  const sliderMax = Math.max(0, Math.round((100 - qrWidthPct) * 2) / 2);
+
+  /* ── Posição horizontal do QR (% a partir da ESQUERDA) ── */
   const [qrRight, setQrRight] = useState<number>(() => {
-    try { return Number(localStorage.getItem('pdv_qr_right') ?? '16'); } catch { return 16; }
+    try { return Number(localStorage.getItem('pdv_qr_right') ?? '2'); } catch { return 2; }
   });
   const saveQrRight = (v: number) => {
     setQrRight(v);
@@ -898,7 +910,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                         <div
                           className="absolute flex items-center justify-center rounded"
                           style={{
-                            right: `${qrRight}%`,
+                            left: `${qrRight}%`,
                             top: '6%',
                             height: '88%',
                             aspectRatio: '1/1',
@@ -921,26 +933,27 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                           </div>
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded"
                             style={{ background:inputBg, color:green }}>
-                            {qrRight}% da direita
+                            {qrRight}%
                           </span>
                         </div>
                         <input
                           type="range"
                           min={0}
-                          max={100}
+                          max={sliderMax}
                           step={0.5}
-                          value={qrRight}
+                          value={Math.min(qrRight, sliderMax)}
                           onChange={e => syncQrRight(Number(e.target.value))}
                           className="w-full h-2 rounded-full appearance-none cursor-pointer"
                           style={{
-                            direction: 'rtl',
-                            background: `linear-gradient(to left, ${green} 0%, ${green} ${qrRight}%, ${inputBg} ${qrRight}%, ${inputBg} 100%)`,
+                            background: sliderMax > 0
+                              ? `linear-gradient(to right, ${green} 0%, ${green} ${(Math.min(qrRight, sliderMax) / sliderMax) * 100}%, ${inputBg} ${(Math.min(qrRight, sliderMax) / sliderMax) * 100}%, ${inputBg} 100%)`
+                              : inputBg,
                             accentColor: green,
                           }}
                         />
                         <div className="flex justify-between text-[9px] mt-1" style={{ color:muted }}>
-                          <span>← mais para a esquerda</span>
-                          <span>mais para a direita →</span>
+                          <span>← esquerda</span>
+                          <span>direita →</span>
                         </div>
                       </div>
 
