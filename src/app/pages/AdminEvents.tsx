@@ -147,8 +147,8 @@ interface ConfirmModalProps {
 }
 function ConfirmModal({ open, title, description, detail, confirmLabel = 'Excluir', onConfirm, onCancel, isDark, loading }: ConfirmModalProps) {
   const cardBg     = isDark ? 'rgba(15,10,20,0.98)' : '#fff';
-  const textColor  = isDark ? '#fff' : '#0D2818';
-  const mutedColor = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(13,40,24,0.5)';
+  const textColor  = isDark ? '#fff' : '#09090B';
+  const mutedColor = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(9,9,11,0.5)';
 
   return (
     <AnimatePresence>
@@ -265,18 +265,18 @@ function SuccessToast({ msg, onClose, isDark }: { msg: string | null; onClose: (
           className="fixed bottom-6 right-6 z-[300] flex items-start gap-3 px-4 py-3.5 rounded-2xl shadow-2xl max-w-xs"
           style={{
             background: isDark ? 'rgba(4,20,10,0.97)' : '#fff',
-            border: `1px solid ${isDark ? 'rgba(134,239,172,0.22)' : 'rgba(0,107,43,0.18)'}`,
+            border: `1px solid ${isDark ? 'rgba(134,239,172,0.22)' : 'rgba(22,101,52,0.18)'}`,
             backdropFilter: 'blur(14px)',
             boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
           }}
         >
           <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.08)' }}>
-            <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#86efac' : '#006B2B' }} />
+            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.08)' }}>
+            <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#86efac' : '#166534' }} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold mb-0.5" style={{ color: isDark ? '#86efac' : '#006B2B' }}>Excluído com sucesso</p>
-            <p className="text-xs leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)' }}>{msg}</p>
+            <p className="text-xs font-bold mb-0.5" style={{ color: isDark ? '#86efac' : '#166534' }}>Excluído com sucesso</p>
+            <p className="text-xs leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(9,9,11,0.55)' }}>{msg}</p>
           </div>
           <button onClick={onClose} className="flex-shrink-0 rounded-lg p-0.5 hover:opacity-60 transition-opacity">
             <X className="w-3.5 h-3.5" style={{ color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }} />
@@ -308,7 +308,7 @@ function ErrorToast({ msg, onClose, isDark }: { msg: string | null; onClose: () 
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-bold mb-0.5" style={{ color: isDark ? '#fca5a5' : '#dc2626' }}>Erro ao excluir</p>
-            <p className="text-xs leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)' }}>{msg}</p>
+            <p className="text-xs leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(9,9,11,0.55)' }}>{msg}</p>
           </div>
           <button onClick={onClose} className="flex-shrink-0 rounded-lg p-0.5 hover:opacity-60 transition-opacity">
             <X className="w-3.5 h-3.5" style={{ color: isDark ? 'rgba(255,255,255,0.3)' : 'rgba(0,0,0,0.3)' }} />
@@ -419,13 +419,13 @@ export function AdminEvents() {
     catch (err: any) { closeConfirm(); setErrorMsg(err.message ?? 'Erro desconhecido'); setTimeout(() => setErrorMsg(null), 5000); }
   };
 
-  const bg = isDark ? '#08080E' : '#F2F8F4';
-  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
-  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const mutedText = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,40,20,0.42)';
-  const textColor = isDark ? '#fff' : '#0D2818';
-  const green = isDark ? '#86efac' : '#006B2B';
-  const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+  const bg = isDark ? '#09090F' : '#F8F9FA';
+  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const mutedText = isDark ? 'rgba(255,255,255,0.4)' : '#71717A';
+  const textColor = isDark ? '#fff' : '#09090B';
+  const green = isDark ? '#86efac' : '#166534';
+  const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.04)';
 
   // Auth guard
   useEffect(() => {
@@ -788,7 +788,7 @@ export function AdminEvents() {
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: bg }}>
-        <div className="w-8 h-8 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: isDark ? '#86efac' : '#006B2B' }} />
+        <div className="w-8 h-8 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: isDark ? '#86efac' : '#166534' }} />
       </div>
     );
   }
@@ -871,7 +871,7 @@ export function AdminEvents() {
                 </div>
                 <div
                   className="px-2.5 py-1 rounded-lg text-xs"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', color: green, fontWeight: 700 }}
+                  style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)', color: green, fontWeight: 700 }}
                 >
                   R$ {photoPrice ?? 30} / foto
                 </div>
@@ -1017,10 +1017,10 @@ export function AdminEvents() {
                   className="flex items-center gap-3 p-3.5 rounded-xl cursor-pointer transition-all"
                   style={{
                     background: selectedEvent?.id === event.id
-                      ? isDark ? 'rgba(134,239,172,0.06)' : 'rgba(0,107,43,0.05)'
+                      ? isDark ? 'rgba(134,239,172,0.06)' : 'rgba(22,101,52,0.05)'
                       : isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
                     border: `1px solid ${selectedEvent?.id === event.id
-                      ? isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.2)'
+                      ? isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.2)'
                       : isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}`,
                   }}
                   onClick={() => setSelectedEvent(selectedEvent?.id === event.id ? null : event)}
@@ -1028,7 +1028,7 @@ export function AdminEvents() {
                   {/* Date badge */}
                   <div
                     className="w-12 h-12 rounded-xl flex flex-col items-center justify-center flex-shrink-0 text-center"
-                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)' }}
+                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)' }}
                   >
                     {/^\d{12}$/.test(event.slug ?? '') ? (
                       <>
@@ -1052,7 +1052,7 @@ export function AdminEvents() {
                       </p>
                       {event.sessionType && (
                         <span className="flex-shrink-0 text-[9px] px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wide"
-                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'}` }}>
+                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.12)'}` }}>
                           {event.sessionType}
                         </span>
                       )}
@@ -1133,9 +1133,9 @@ export function AdminEvents() {
                           className="w-7 h-7 rounded-lg text-[11px] font-bold transition-all"
                           style={{
                             background: p === eventsPage
-                              ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)')
+                              ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.12)')
                               : cardBg,
-                            border: `1px solid ${p === eventsPage ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                            border: `1px solid ${p === eventsPage ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.25)') : cardBorder}`,
                             color: p === eventsPage ? green : mutedText,
                           }}
                         >
@@ -1263,8 +1263,8 @@ export function AdminEvents() {
                                 onClick={() => setUploadSessionType(uploadSessionType === st ? '' : st)}
                                 className="px-3 py-1 rounded-lg text-[10px] transition-all font-medium"
                                 style={{
-                                  background: active ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)') : inputBg,
-                                  border: `1px solid ${active ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                                  background: active ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)') : inputBg,
+                                  border: `1px solid ${active ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)') : cardBorder}`,
                                   color: active ? green : mutedText,
                                   fontWeight: active ? 700 : 500,
                                 }}
@@ -1286,10 +1286,10 @@ export function AdminEvents() {
                       className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all"
                       style={{
                         background: (uploadDate && uploadTime)
-                          ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.09)')
+                          ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.09)')
                           : inputBg,
                         border: `1px solid ${(uploadDate && uploadTime)
-                          ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.22)')
+                          ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.22)')
                           : cardBorder}`,
                         color: (uploadDate && uploadTime) ? green : mutedText,
                         opacity: (!uploadDate || !uploadTime) ? 0.5 : 1,
@@ -1313,10 +1313,10 @@ export function AdminEvents() {
                       className="flex-1 min-h-[120px] rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-3 cursor-pointer transition-all"
                       style={{
                         borderColor: dragOver
-                          ? isDark ? 'rgba(134,239,172,0.5)' : 'rgba(0,107,43,0.4)'
+                          ? isDark ? 'rgba(134,239,172,0.5)' : 'rgba(22,101,52,0.4)'
                           : isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
                         background: dragOver
-                          ? isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.03)'
+                          ? isDark ? 'rgba(134,239,172,0.04)' : 'rgba(22,101,52,0.03)'
                           : 'transparent',
                       }}
                       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -1429,7 +1429,7 @@ export function AdminEvents() {
                       <button
                         onClick={() => viewerFileInputRef.current?.click()}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
-                        style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)', color: green, fontWeight: 700 }}
+                        style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)', color: green, fontWeight: 700 }}
                       >
                         <Upload className="w-3 h-3" /> Enviar
                       </button>
@@ -1488,7 +1488,7 @@ export function AdminEvents() {
                             }
                           }}
                           className="px-2.5 py-1 rounded-lg text-[10px] font-bold flex-shrink-0"
-                          style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}` }}
+                          style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'}` }}
                         >
                           Salvar
                         </button>
@@ -1504,8 +1504,8 @@ export function AdminEvents() {
                               onClick={() => setViewerSessionTypeInput(st)}
                               className="px-2 py-0.5 rounded-md text-[10px] transition-all"
                               style={{
-                                background: active ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)') : inputBg,
-                                border: `1px solid ${active ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                                background: active ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)') : inputBg,
+                                border: `1px solid ${active ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)') : cardBorder}`,
                                 color: active ? green : mutedText,
                                 fontWeight: active ? 700 : 500,
                               }}
@@ -1569,7 +1569,7 @@ export function AdminEvents() {
                               }
                             }}
                             className="px-2.5 py-1 rounded-lg text-[10px] font-bold flex-shrink-0"
-                            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}` }}
+                            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'}` }}
                           >
                             Salvar
                           </button>
@@ -1695,10 +1695,10 @@ export function AdminEvents() {
                           className="min-h-[100px] rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-all p-4"
                           style={{
                             borderColor: dragOver
-                              ? isDark ? 'rgba(134,239,172,0.5)' : 'rgba(0,107,43,0.4)'
+                              ? isDark ? 'rgba(134,239,172,0.5)' : 'rgba(22,101,52,0.4)'
                               : isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
                             background: dragOver
-                              ? isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.03)'
+                              ? isDark ? 'rgba(134,239,172,0.04)' : 'rgba(22,101,52,0.03)'
                               : 'transparent',
                           }}
                           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -1785,9 +1785,9 @@ export function AdminEvents() {
                                     className="w-7 h-7 rounded-lg text-[11px] font-bold transition-all"
                                     style={{
                                       background: p === photosPage
-                                        ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)')
+                                        ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.12)')
                                         : cardBg,
-                                      border: `1px solid ${p === photosPage ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)') : cardBorder}`,
+                                      border: `1px solid ${p === photosPage ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.25)') : cardBorder}`,
                                       color: p === photosPage ? green : mutedText,
                                     }}
                                   >

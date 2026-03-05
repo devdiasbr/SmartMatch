@@ -40,15 +40,15 @@ export function TabNav({
   }, []);
 
   /* ─── tokens ─── */
-  const containerBg    = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
-  const containerBorder= isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const activeBg       = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(0,107,43,0.1)';
-  const activeColor    = isDark ? '#ffffff'                 : '#006B2B';
-  const inactiveColor  = isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,40,20,0.45)';
-  const dividerColor   = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,107,43,0.08)';
-  const badgeActiveBg  = isDark ? 'rgba(134,239,172,0.18)' : 'rgba(0,107,43,0.12)';
-  const badgeActiveClr = isDark ? '#86efac'                : '#006B2B';
-  const badgeIdleBg    = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
+  const containerBg    = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.9)';
+  const containerBorder= isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const activeBg       = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(22,101,52,0.09)';
+  const activeColor    = isDark ? '#ffffff'                 : '#166534';
+  const inactiveColor  = isDark ? 'rgba(255,255,255,0.42)' : '#71717A';
+  const dividerColor   = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(9,9,11,0.07)';
+  const badgeActiveBg  = isDark ? 'rgba(134,239,172,0.18)' : 'rgba(22,101,52,0.1)';
+  const badgeActiveClr = isDark ? '#86efac'                : '#166534';
+  const badgeIdleBg    = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.06)';
 
   const sharedStyle = (isActive: boolean, isLast: boolean): React.CSSProperties => ({
     display: 'flex',

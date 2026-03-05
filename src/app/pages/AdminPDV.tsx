@@ -116,17 +116,17 @@ export function AdminPDV() {
   const { user, isAdmin, loading: authLoading, getToken, token } = useAuth();
 
   /* design tokens */
-  const bg      = isDark ? '#08080E' : '#F2F8F4';
-  const card    = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
-  const border  = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const muted   = isDark ? 'rgba(255,255,255,0.4)'  : 'rgba(0,40,20,0.42)';
-  const text    = isDark ? '#fff'                    : '#0D2818';
-  const green   = isDark ? '#86efac'                 : '#006B2B';
-  const inputBg = isDark ? 'rgba(255,255,255,0.05)'  : 'rgba(0,0,0,0.04)';
+  const bg      = isDark ? '#09090F' : '#F8F9FA';
+  const card    = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const border  = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const muted   = isDark ? 'rgba(255,255,255,0.4)'  : '#71717A';
+  const text    = isDark ? '#fff'                    : '#09090B';
+  const green   = isDark ? '#86efac'                 : '#166534';
+  const inputBg = isDark ? 'rgba(255,255,255,0.05)'  : 'rgba(9,9,11,0.04)';
   const brd     = `1px solid ${border}`;
   const btnPri  = isDark
     ? 'rgba(22,101,52,0.85)'
-    : 'linear-gradient(135deg,#006B2B,#00843D)';
+    : 'linear-gradient(135deg,#166534,#15803D)';
 
   /* ── Imagem do rodapé — salva no localStorage ── */
   const footerFileRef = useRef<HTMLInputElement>(null);
@@ -302,7 +302,7 @@ export function AdminPDV() {
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
 .hd{text-align:center;border-bottom:2px dashed #ccc;padding-bottom:12px;margin-bottom:12px;}
-.logo{font-weight:900;font-size:18px;}.logo span{color:#006B2B;}
+.logo{font-weight:900;font-size:18px;}.logo span{color:#166534;}
 .sub{font-size:10px;color:#888;margin-top:2px;}
 .info div{display:flex;justify-content:space-between;padding:3px 0;font-size:11px;}
 .items{border-top:1px solid #ddd;border-bottom:1px solid #ddd;padding:8px 0;margin:10px 0;}
@@ -608,12 +608,12 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
               <motion.div initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }}
                 className="rounded-2xl overflow-hidden" style={{ background:card, border:`1px solid ${border}` }}>
                 <div className="px-5 py-3 flex items-center gap-2"
-                  style={{ borderBottom:`1px solid ${border}`, background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,107,43,0.03)' }}>
+                  style={{ borderBottom:`1px solid ${border}`, background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(22,101,52,0.03)' }}>
                   <CalendarDays className="w-4 h-4" style={{ color:green }} />
                   <span className="text-xs font-bold" style={{ color:muted }}>EVENTO</span>
                   {selectedEvent && (
                     <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full font-bold"
-                      style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', color:green }}>
+                      style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)', color:green }}>
                       {selectedEvent.photoCount} fotos
                     </span>
                   )}
@@ -645,9 +645,9 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                             onClick={() => setSelectedEvent(e)}
                             className="flex-shrink-0 w-44 text-left px-3 py-3 rounded-xl transition-all"
                             style={{
-                              background: active ? (isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.09)') : inputBg,
-                              border: `1.5px solid ${active ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.3)') : border}`,
-                              boxShadow: active ? `0 0 0 3px ${isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)'}` : 'none',
+                              background: active ? (isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)') : inputBg,
+                              border: `1.5px solid ${active ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.28)') : border}`,
+                              boxShadow: active ? `0 0 0 3px ${isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.05)'}` : 'none',
                             }}
                           >
                             <div className="flex items-center gap-1.5 mb-1">
@@ -663,7 +663,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                               <span
                                 className="text-[9px] px-1.5 py-0.5 rounded-full font-bold"
                                 style={{
-                                  background: active ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
+                                  background: active ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.08)') : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
                                   color: active ? green : muted,
                                 }}
                               >
@@ -708,10 +708,10 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                   className="flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-bold whitespace-nowrap"
                   style={{
                     background: faceMatchIds.length > 0
-                      ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)')
+                      ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)')
                       : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)'),
                     border: `1px solid ${faceMatchIds.length > 0
-                      ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)') : border}`,
+                      ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.22)') : border}`,
                     color: faceMatchIds.length > 0 ? green : text,
                     opacity: !selectedEvent ? 0.4 : 1,
                   }}
@@ -730,7 +730,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
 
                 {faceMatchIds.length > 0 && (
                   <div className="flex items-center gap-2 mb-3 p-2.5 rounded-xl text-xs"
-                    style={{ background: isDark ? 'rgba(134,239,172,0.06)' : 'rgba(0,107,43,0.05)', border:`1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'}`, color:green }}>
+                    style={{ background: isDark ? 'rgba(134,239,172,0.06)' : 'rgba(22,101,52,0.05)', border:`1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)'}`, color:green }}>
                     <Scan className="w-3.5 h-3.5" />
                     {filteredPhotos.length} foto{filteredPhotos.length !== 1 ? 's' : ''} correspondentes ao rosto
                     <button onClick={() => setFaceMatchIds([])} className="ml-auto opacity-60 hover:opacity-100">
@@ -870,10 +870,10 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                               className="w-7 h-7 rounded-lg text-[11px] font-bold transition-all"
                               style={{
                                 background: p === photosPage
-                                  ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)')
+                                  ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)')
                                   : card,
                                 border: `1px solid ${p === photosPage
-                                  ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)')
+                                  ? (isDark ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.22)')
                                   : border}`,
                                 color: p === photosPage ? green : muted,
                               }}
@@ -904,7 +904,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                 className="rounded-2xl overflow-hidden" style={{ background:card, border:`1px solid ${border}` }}>
 
                 <div className="px-5 py-3 flex items-center gap-2"
-                  style={{ borderBottom:`1px solid ${border}`, background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,107,43,0.03)' }}>
+                  style={{ borderBottom:`1px solid ${border}`, background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(22,101,52,0.03)' }}>
                   <ImageIcon className="w-4 h-4" style={{ color:green }} />
                   <span className="text-xs font-bold" style={{ color:muted }}>IMAGEM DO RODAPÉ</span>
                   {footerSrc && (
@@ -999,13 +999,13 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                       onClick={() => footerFileRef.current?.click()}
                       className="w-full flex flex-col items-center justify-center gap-3 py-10 rounded-xl transition-all"
                       style={{
-                        background: isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.04)',
-                        border: `1.5px dashed ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.2)'}`,
+                        background: isDark ? 'rgba(134,239,172,0.04)' : 'rgba(22,101,52,0.04)',
+                        border: `1.5px dashed ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.18)'}`,
                         color: green,
                       }}
                     >
                       <div className="w-12 h-12 rounded-2xl flex items-center justify-center"
-                        style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)' }}>
+                        style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)' }}>
                         <FolderOpen className="w-6 h-6" />
                       </div>
                       <div className="text-center">
@@ -1042,7 +1042,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                     Carrinho PDV
                   </h2>
                   <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-bold"
-                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', color:green }}>
+                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)', color:green }}>
                     {cart.length} {cart.length === 1 ? 'foto' : 'fotos'}
                   </span>
                 </div>
@@ -1106,9 +1106,9 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                           className="flex items-center gap-1.5 px-2 py-2.5 rounded-xl text-[10px] font-bold transition-all"
                           style={{
                             background: paymentMethod === pm.key
-                              ? (isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)') : inputBg,
+                              ? (isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.07)') : inputBg,
                             border: `1px solid ${paymentMethod === pm.key
-                              ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.2)') : border}`,
+                              ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.18)') : border}`,
                             color: paymentMethod === pm.key ? green : muted,
                           }}
                         >

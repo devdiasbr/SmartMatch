@@ -21,10 +21,10 @@ export function Root() {
     <div
       className="relative transition-colors duration-300"
       style={{
-        background: isDark ? '#08080E' : '#F2F8F4',
+        background: isDark ? '#09090F' : '#F8F9FA',
         minHeight: '100vh',
-        color: isDark ? 'white' : '#0D2818',
-        fontFamily: "'Inter', sans-serif",
+        color: isDark ? 'white' : '#09090B',
+        fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
         overflowX: 'hidden',
       }}
     >
@@ -33,8 +33,8 @@ export function Root() {
         className="pointer-events-none fixed inset-0 z-0"
         style={{
           backgroundImage: isDark
-            ? 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)'
-            : 'radial-gradient(circle, rgba(0,107,43,0.06) 1px, transparent 1px)',
+            ? 'radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px)'
+            : 'radial-gradient(circle, rgba(9,9,11,0.05) 1px, transparent 1px)',
           backgroundSize: '28px 28px',
         }}
       />

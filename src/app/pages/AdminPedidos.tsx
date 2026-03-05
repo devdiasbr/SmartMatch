@@ -80,9 +80,9 @@ function CancelModal({ order, onClose, onConfirm, isDark }: {
 }) {
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
-  const text = isDark ? '#fff' : '#0D2818';
-  const muted = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,40,20,0.42)';
-  const border = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
+  const text = isDark ? '#fff' : '#09090B';
+  const muted = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(9,9,11,0.42)';
+  const border = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(22,101,52,0.1)';
 
   const handleConfirm = async () => {
     setLoading(true);
@@ -216,9 +216,9 @@ function CustomSelect({ value, onChange, options, isDark, border, card, text, mu
               onClick={() => { onChange(opt.value); setOpen(false); }}
               className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-left cursor-pointer transition-colors"
               style={{
-                color: opt.value === value ? (isDark ? '#86efac' : '#006B2B') : text,
+                color: opt.value === value ? (isDark ? '#86efac' : '#166534') : text,
                 background: opt.value === value
-                  ? (isDark ? 'rgba(134,239,172,0.07)' : 'rgba(0,107,43,0.06)')
+                  ? (isDark ? 'rgba(134,239,172,0.07)' : 'rgba(22,101,52,0.06)')
                   : 'transparent',
               }}
               onMouseEnter={e => {
@@ -256,13 +256,13 @@ export function AdminPedidos() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [cancelOrder, setCancelOrder] = useState<OrderRecord | null>(null);
 
-  const bg     = isDark ? '#08080E' : '#F2F8F4';
-  const card   = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
-  const border = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const muted  = isDark ? 'rgba(255,255,255,0.4)'  : 'rgba(0,40,20,0.42)';
-  const text   = isDark ? '#fff' : '#0D2818';
-  const green  = isDark ? '#86efac' : '#006B2B';
-  const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+  const bg     = isDark ? '#09090F' : '#F8F9FA';
+  const card   = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const border = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const muted  = isDark ? 'rgba(255,255,255,0.4)'  : '#71717A';
+  const text   = isDark ? '#fff' : '#09090B';
+  const green  = isDark ? '#86efac' : '#166534';
+  const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.04)';
 
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/admin/login', { replace: true });
@@ -448,7 +448,7 @@ export function AdminPedidos() {
               disabled={loading || filtered.length === 0}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm self-start sm:self-auto"
               style={{
-                background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,107,43,0.07)',
+                background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(22,101,52,0.06)',
                 border: `1px solid ${border}`,
                 color: muted,
                 cursor: (loading || filtered.length === 0) ? 'not-allowed' : 'pointer',
@@ -461,7 +461,7 @@ export function AdminPedidos() {
               {filtered.length > 0 && (
                 <span
                   className="px-1.5 py-0.5 rounded text-[10px] font-bold"
-                  style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.1)', color: green }}
+                  style={{ background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(22,101,52,0.08)', color: green }}
                 >
                   {filtered.length}
                 </span>

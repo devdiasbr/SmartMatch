@@ -89,7 +89,7 @@ function KpiCard({
             className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg"
             style={{
               background: trendUp
-                ? isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)'
+                ? isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)'
                 : isDark ? 'rgba(252,165,165,0.08)' : 'rgba(220,38,38,0.07)',
               color: trendUp
                 ? isDark ? '#86efac' : '#166534'
@@ -214,13 +214,13 @@ export function AdminDashboard() {
   }, [token]);
 
   /* Colors */
-  const bg = isDark ? '#08080E' : '#F2F8F4';
-  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
-  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const mutedText = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,40,20,0.42)';
-  const textColor = isDark ? '#ffffff' : '#0D2818';
-  const green = isDark ? '#86efac' : '#006B2B';
-  const greenBright = isDark ? '#4ade80' : '#00843D';
+  const bg = isDark ? '#09090F' : '#F8F9FA';
+  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const mutedText = isDark ? 'rgba(255,255,255,0.38)' : '#71717A';
+  const textColor = isDark ? '#ffffff' : '#09090B';
+  const green = isDark ? '#86efac' : '#166534';
+  const greenBright = isDark ? '#4ade80' : '#15803D';
   const cyan = isDark ? '#7dd3fc' : '#0284c7';
   const violet = isDark ? '#c4b5fd' : '#7c3aed';
   const rose = isDark ? '#fda4af' : '#be185d';
@@ -339,13 +339,13 @@ export function AdminDashboard() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: isDark ? '#08080E' : '#F2F8F4' }}>
-        <div className="w-8 h-8 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: isDark ? '#86efac' : '#006B2B' }} />
+      <div className="min-h-screen flex items-center justify-center" style={{ background: isDark ? '#09090F' : '#F8F9FA' }}>
+        <div className="w-8 h-8 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: isDark ? '#86efac' : '#166534' }} />
       </div>
     );
   }
 
-  const gridBorder = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,107,43,0.06)';
+  const gridBorder = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(9,9,11,0.07)';
 
   return (
     <div className="pt-20 pb-20 min-h-screen" style={{ background: bg }}>
@@ -387,7 +387,7 @@ export function AdminDashboard() {
               disabled={!stats}
               className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
               style={{
-                background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,107,43,0.07)',
+                background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(22,101,52,0.06)',
                 border: `1px solid ${cardBorder}`,
                 color: mutedText,
                 cursor: stats ? 'pointer' : 'not-allowed',
@@ -402,8 +402,8 @@ export function AdminDashboard() {
                 whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
                 style={{
-                  background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)',
-                  border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.18)'}`,
+                  background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.09)',
+                  border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.18)'}`,
                   color: green,
                   fontWeight: 700,
                 }}
@@ -437,7 +437,7 @@ export function AdminDashboard() {
             value={`R$ ${totalRevenue.toLocaleString('pt-BR')}`}
             sub="desde o início"
             color={green}
-            iconBg={isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)'}
+            iconBg={isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)'}
             delay={0.05}
             isDark={isDark}
             cardBg={cardBg}
@@ -525,7 +525,7 @@ export function AdminDashboard() {
                     className="px-3 py-1.5 text-xs transition-all"
                     style={{
                       background: chartView === v
-                        ? isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,107,43,0.12)'
+                        ? isDark ? 'rgba(255,255,255,0.1)' : 'rgba(22,101,52,0.1)'
                         : 'transparent',
                       color: chartView === v ? textColor : mutedText,
                       fontWeight: chartView === v ? 700 : 500,
@@ -616,13 +616,13 @@ export function AdminDashboard() {
                       transition={{ delay: 0.35 + i * 0.07 }}
                       className="flex items-center gap-3 p-3 rounded-xl"
                       style={{
-                        background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(0,107,43,0.04)',
+                        background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(9,9,11,0.02)',
                         border: `1px solid ${gridBorder}`,
                       }}
                     >
                       <div
                         className="flex flex-col items-center justify-center w-10 h-10 rounded-lg flex-shrink-0"
-                        style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.08)' }}
+                        style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)' }}
                       >
                         <span style={{ fontSize: '0.65rem', color: green, fontWeight: 800, lineHeight: 1 }}>{dateStr}</span>
                         <span style={{ fontSize: '0.6rem', color: mutedText, lineHeight: 1.4 }}>{weekday}</span>
@@ -645,7 +645,7 @@ export function AdminDashboard() {
                   whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
                   className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm"
                   style={{
-                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,107,43,0.06)',
+                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(9,9,11,0.03)',
                     border: `1px solid ${cardBorder}`,
                     color: mutedText,
                     fontWeight: 600,
@@ -746,7 +746,7 @@ export function AdminDashboard() {
                 >
                   <div
                     className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)' }}
+                    style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)' }}
                   >
                     <DollarSign className="w-3.5 h-3.5" style={{ color: green }} />
                   </div>
@@ -764,7 +764,7 @@ export function AdminDashboard() {
                     </p>
                     <div className="flex items-center gap-1.5 mt-1">
                       {order.status === 'paid' || order.status === 'delivered'
-                        ? <CheckCircle2 className="w-2.5 h-2.5" style={{ color: isDark ? 'rgba(134,239,172,0.5)' : 'rgba(0,107,43,0.5)' }} />
+                        ? <CheckCircle2 className="w-2.5 h-2.5" style={{ color: isDark ? 'rgba(134,239,172,0.5)' : 'rgba(22,101,52,0.5)' }} />
                         : <Clock className="w-2.5 h-2.5" style={{ color: isDark ? 'rgba(0,158,227,0.7)' : '#007ab3' }} />}
                       <span style={{ fontSize: '0.65rem', color: mutedText }}>
                         {order.status === 'pending' ? 'Aguardando MP' : order.status === 'paid' ? 'Pago' : 'Entregue'}
@@ -831,7 +831,7 @@ export function AdminDashboard() {
                   className="grid items-center px-3 py-2.5 rounded-xl"
                   style={{
                     gridTemplateColumns: '1fr 80px 80px 90px 120px',
-                    background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,107,43,0.03)',
+                    background: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(9,9,11,0.02)',
                   }}
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -839,7 +839,7 @@ export function AdminDashboard() {
                       className="w-5 h-5 rounded-md flex items-center justify-center text-xs flex-shrink-0"
                       style={{
                         background: i === 0
-                          ? isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'
+                          ? isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)'
                           : isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
                         color: i === 0 ? green : mutedText,
                         fontWeight: 800,

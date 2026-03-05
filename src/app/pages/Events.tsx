@@ -54,20 +54,20 @@ function SessionCard({ session, index, orgId }: { session: TourSession; index: n
   const displayEventType = session.eventType !== 'Tour' ? session.eventType : (branding.tourLabel || session.eventType);
 
   const accentColor = hasPhotos
-    ? isDark ? '#86efac' : '#006B2B'
-    : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,40,20,0.35)';
+    ? isDark ? '#86efac' : '#166534'
+    : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(9,9,11,0.35)';
   const accentBarColor = hasPhotos
     ? isDark
       ? 'linear-gradient(90deg, #166534, #15803d)'
-      : 'linear-gradient(90deg, #006B2B, #00843D)'
+      : 'linear-gradient(90deg, #166534, #15803D)'
     : isDark
       ? 'linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))'
-      : 'linear-gradient(90deg, rgba(0,0,0,0.06), rgba(0,0,0,0.03))';
-  const cardBg = isDark ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.85)';
-  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const titleColor = isDark ? '#ffffff' : '#0D2818';
-  const subtitleColor = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)';
-  const metaColor = isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)';
+      : 'linear-gradient(90deg, rgba(9,9,11,0.06), rgba(9,9,11,0.03))';
+  const cardBg = isDark ? 'rgba(255,255,255,0.025)' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const titleColor = isDark ? '#ffffff' : '#09090B';
+  const subtitleColor = isDark ? 'rgba(255,255,255,0.35)' : '#71717A';
+  const metaColor = isDark ? 'rgba(255,255,255,0.5)' : '#71717A';
 
   return (
     <motion.div
@@ -88,7 +88,7 @@ function SessionCard({ session, index, orgId }: { session: TourSession; index: n
             transition: 'border-color 0.25s, box-shadow 0.25s',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,107,43,0.2)';
+            e.currentTarget.style.borderColor = isDark ? 'rgba(255,255,255,0.14)' : 'rgba(22,101,52,0.2)';
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.borderColor = cardBorder;
@@ -140,10 +140,10 @@ function SessionCard({ session, index, orgId }: { session: TourSession; index: n
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
                 style={{
                   background: hasPhotos
-                    ? isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)'
+                    ? isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)'
                     : isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
                   border: hasPhotos
-                    ? isDark ? '1px solid rgba(134,239,172,0.2)' : '1px solid rgba(0,107,43,0.15)'
+                    ? isDark ? '1px solid rgba(134,239,172,0.2)' : '1px solid rgba(22,101,52,0.18)'
                     : isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.07)',
                   color: accentColor,
                   fontWeight: 600,
@@ -224,13 +224,13 @@ export function Events() {
   // Unique dates that have events (for quick-access chips)
   const availableDates = [...new Set(sessions.map(s => s.rawDate))].sort().reverse();
 
-  const headingColor = isDark ? '#ffffff' : '#0D2818';
-  const subtitleColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(13,40,24,0.5)';
+  const headingColor = isDark ? '#ffffff' : '#09090B';
+  const subtitleColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(9,9,11,0.45)';
   const sectionBg = isDark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)';
-  const sectionBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.1)';
-  const accentGreen = isDark ? '#86efac' : '#006B2B';
+  const sectionBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(9,9,11,0.09)';
+  const accentGreen = isDark ? '#86efac' : '#166534';
   const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
-  const inputBorder = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,107,43,0.12)';
+  const inputBorder = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(9,9,11,0.09)';
 
   // Dynamic unit label for the counter: filtered type or generic "eventos"
   const unitLabel = sessionTypeFilter ? sessionTypeFilter.toLowerCase() : 'eventos';
@@ -261,7 +261,7 @@ export function Events() {
           style={{
             background: isDark
               ? 'linear-gradient(to bottom, rgba(8,8,14,0.55) 0%, rgba(8,8,14,0.85) 70%, rgba(8,8,14,1) 100%)'
-              : 'linear-gradient(to bottom, rgba(0,30,15,0.6) 0%, rgba(0,30,15,0.92) 70%, #F2F8F4 100%)',
+              : 'linear-gradient(to bottom, rgba(9,9,11,0.55) 0%, rgba(9,9,11,0.88) 70%, var(--background) 100%)',
           }}
         />
 
@@ -371,10 +371,10 @@ export function Events() {
                   className="px-3 py-1.5 rounded-lg text-xs transition-all flex-shrink-0"
                   style={{
                     background: !sessionTypeFilter
-                      ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                      ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.09)'
                       : inputBg,
                     border: `1px solid ${!sessionTypeFilter
-                      ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                      ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'
                       : inputBorder}`,
                     color: !sessionTypeFilter ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
                     fontWeight: !sessionTypeFilter ? 700 : 500,
@@ -394,10 +394,10 @@ export function Events() {
                       className="px-3 py-1.5 rounded-lg text-xs transition-all flex-shrink-0 flex items-center gap-1.5"
                       style={{
                         background: active
-                          ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                          ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.09)'
                           : inputBg,
                         border: `1px solid ${active
-                          ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                          ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'
                           : inputBorder}`,
                         color: active ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
                         fontWeight: active ? 700 : 500,
@@ -405,7 +405,7 @@ export function Events() {
                     >
                       {st}
                       <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{
-                        background: active ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'),
+                        background: active ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)') : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'),
                         color: active ? accentGreen : (isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.4)'),
                       }}>{count}</span>
                     </button>
@@ -425,10 +425,10 @@ export function Events() {
                 className="px-3 py-1.5 rounded-lg text-xs transition-all"
                 style={{
                   background: !dateFilter
-                    ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                    ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.09)'
                     : inputBg,
                   border: `1px solid ${!dateFilter
-                    ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                    ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'
                     : inputBorder}`,
                   color: !dateFilter ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
                   fontWeight: !dateFilter ? 700 : 500,
@@ -443,10 +443,10 @@ export function Events() {
                 className="px-3 py-1.5 rounded-lg text-xs transition-all"
                 style={{
                   background: dateFilter === todayStr
-                    ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                    ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.09)'
                     : inputBg,
                   border: `1px solid ${dateFilter === todayStr
-                    ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                    ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'
                     : inputBorder}`,
                   color: dateFilter === todayStr ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
                   fontWeight: dateFilter === todayStr ? 700 : 500,
@@ -463,10 +463,10 @@ export function Events() {
                   className="px-3 py-1.5 rounded-lg text-xs transition-all"
                   style={{
                     background: dateFilter === d
-                      ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                      ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.09)'
                       : inputBg,
                     border: `1px solid ${dateFilter === d
-                      ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'
+                      ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'
                       : inputBorder}`,
                     color: dateFilter === d ? accentGreen : (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.6)'),
                     fontWeight: dateFilter === d ? 700 : 500,
@@ -517,8 +517,8 @@ export function Events() {
                       onClick={() => setSessionTypeFilter('')}
                       className="text-sm px-4 py-2 rounded-xl"
                       style={{
-                        background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)',
-                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`,
+                        background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)',
+                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.15)'}`,
                         color: accentGreen,
                         fontWeight: 600,
                       }}
@@ -531,8 +531,8 @@ export function Events() {
                       onClick={() => setDateFilter('')}
                       className="text-sm px-4 py-2 rounded-xl"
                       style={{
-                        background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)',
-                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`,
+                        background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)',
+                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.15)'}`,
                         color: accentGreen,
                         fontWeight: 600,
                       }}

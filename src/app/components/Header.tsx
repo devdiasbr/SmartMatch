@@ -53,8 +53,8 @@ export function Header() {
     }
     // scrolled — adapta ao tema
     return active
-      ? (isDark ? '#ffffff' : '#006B2B')
-      : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)');
+      ? (isDark ? '#ffffff' : '#166534')
+      : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(9,9,11,0.5)');
   };
 
   const linkBg = (active: boolean) => {
@@ -62,16 +62,16 @@ export function Header() {
       return active ? 'rgba(255,255,255,0.1)' : 'transparent';
     }
     return active
-      ? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.07)')
+      ? (isDark ? 'rgba(255,255,255,0.08)' : 'rgba(22,101,52,0.08)')
       : 'transparent';
   };
 
   const iconColor = useThemedColors
-    ? (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.5)')
+    ? (isDark ? 'rgba(255,255,255,0.6)' : 'rgba(9,9,11,0.5)')
     : 'rgba(255,255,255,0.7)';
 
   const iconBg = useThemedColors
-    ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
+    ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.05)')
     : 'rgba(255,255,255,0.1)';
 
   const publicLinks = [
@@ -88,11 +88,11 @@ export function Header() {
         className="fixed top-0 left-0 right-0 z-50 transition-all duration-300"
         style={{
           background: scrolled
-            ? isDark ? 'rgba(8,8,14,0.94)' : 'rgba(242,248,244,0.96)'
+            ? isDark ? 'rgba(9,9,15,0.94)' : 'rgba(255,255,255,0.96)'
             : 'transparent',
           backdropFilter: scrolled ? 'blur(20px)' : 'none',
           borderBottom: scrolled
-            ? `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)'}`
+            ? `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.08)'}`
             : '1px solid transparent',
         }}
       >
@@ -112,26 +112,26 @@ export function Header() {
               <>
                 <div
                   className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ background: 'linear-gradient(135deg, #006B2B, #00843D)' }}
+                  style={{ background: 'linear-gradient(135deg, #166534, #15803d)' }}
                 >
                   <Camera className="w-4 h-4 text-white" strokeWidth={2.5} />
                 </div>
                 <span
                   style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800, fontSize: '1.2rem' }}
                   className={useThemedColors
-                    ? (isDark ? 'text-white' : 'text-[#0D2818]')
+                    ? (isDark ? 'text-white' : 'text-[#09090B]')
                     : 'text-white'}
                 >
                   {/* Split appName into first word + rest for color accent */}
                   {branding.appName.includes(' ') ? (
                     <>
                       {branding.appName.split(' ')[0]}
-                      <span style={{ color: useThemedColors ? (isDark ? '#86efac' : '#006B2B') : '#4ade80' }}>
+                      <span style={{ color: useThemedColors ? (isDark ? '#86efac' : '#166534') : '#4ade80' }}>
                         {' '}{branding.appName.split(' ').slice(1).join(' ')}
                       </span>
                     </>
                   ) : (
-                    <span style={{ color: useThemedColors ? (isDark ? '#86efac' : '#006B2B') : '#4ade80' }}>
+                    <span style={{ color: useThemedColors ? (isDark ? '#86efac' : '#166534') : '#4ade80' }}>
                       {branding.appName}
                     </span>
                   )}
@@ -177,15 +177,15 @@ export function Header() {
             {/* Admin info + logout — só em páginas admin */}
             {isAdminPage && isAdmin && (
               <>
-                <span className="text-sm mr-1" style={{ color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)' }}>
+                <span className="text-sm mr-1" style={{ color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(9,9,11,0.4)' }}>
                   Administrador
                 </span>
                 <button
                   onClick={() => signOut()}
                   className="text-sm flex items-center gap-1 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                   style={{
-                    color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)',
-                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                    color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(9,9,11,0.5)',
+                    background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(9,9,11,0.04)',
                   }}
                 >
                   <LogOut className="w-3.5 h-3.5" />
@@ -210,7 +210,7 @@ export function Header() {
                       exit={{ scale: 0 }}
                       className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[10px]"
                       style={{ background: useThemedColors
-                        ? (isDark ? '#4ade80' : '#006B2B')
+                        ? (isDark ? '#4ade80' : '#166534')
                         : '#4ade80', color: '#000', fontWeight: 700 }}
                     >
                       {totalItems}
@@ -229,14 +229,14 @@ export function Header() {
                   className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm"
                   style={{
                     background: useThemedColors
-                      ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')
+                      ? (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.05)')
                       : 'rgba(255,255,255,0.12)',
                     color: useThemedColors
-                      ? (isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)')
+                      ? (isDark ? 'rgba(255,255,255,0.7)' : 'rgba(9,9,11,0.65)')
                       : 'rgba(255,255,255,0.85)',
                     fontWeight: 600,
                     border: `1px solid ${useThemedColors
-                      ? (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)')
+                      ? (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(9,9,11,0.09)')
                       : 'rgba(255,255,255,0.18)'}`,
                   }}
                 >
@@ -303,9 +303,9 @@ export function Header() {
             transition={{ duration: 0.2 }}
             className="fixed top-16 left-0 right-0 z-40 md:hidden"
             style={{
-              background: isDark ? 'rgba(8,8,14,0.97)' : 'rgba(242,248,244,0.97)',
+              background: isDark ? 'rgba(8,8,14,0.97)' : 'rgba(255,255,255,0.97)',
               backdropFilter: 'blur(20px)',
-              borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)'}`,
+              borderBottom: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.08)'}`,
             }}
           >
             <div className="px-6 py-6 flex flex-col gap-2">
@@ -315,7 +315,7 @@ export function Header() {
                   to={link.href}
                   className="px-4 py-3 rounded-xl text-base"
                   style={{
-                    color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)',
+                    color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(9,9,11,0.75)',
                     fontWeight: 500,
                   }}
                   onClick={() => setMenuOpen(false)}
@@ -327,7 +327,7 @@ export function Header() {
                 <Link
                   to="/admin"
                   className="px-4 py-3 rounded-xl text-base"
-                  style={{ color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)', fontWeight: 500 }}
+                  style={{ color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(9,9,11,0.75)', fontWeight: 500 }}
                   onClick={() => setMenuOpen(false)}
                 >
                   Admin
@@ -338,8 +338,8 @@ export function Header() {
                   <button
                     className="mt-4 w-full py-3 rounded-xl text-base flex items-center justify-center gap-2 cursor-pointer"
                     style={{
-                      background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
-                      color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.7)',
+                      background: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(9,9,11,0.05)',
+                      color: isDark ? 'rgba(255,255,255,0.8)' : 'rgba(9,9,11,0.75)',
                       fontWeight: 600,
                     }}
                   >

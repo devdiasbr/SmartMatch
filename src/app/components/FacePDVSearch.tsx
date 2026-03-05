@@ -90,9 +90,9 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
 
   const GREEN    = '#86efac';
   const ELECTRIC = '#00FF7F';
-  const MUTED    = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,40,20,0.42)';
-  const BORDER   = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.12)';
-  const TEXT     = isDark ? '#fff' : '#0D2818';
+  const MUTED    = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(9,9,11,0.45)';
+  const BORDER   = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(9,9,11,0.09)';
+  const TEXT     = isDark ? '#fff' : '#09090B';
 
   const stopCamera = useCallback(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -309,7 +309,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.94, y: 16 }}
         className="w-full max-w-md rounded-2xl overflow-hidden"
-        style={{ background: isDark ? '#0F1A0F' : '#fff', border: `1px solid ${BORDER}` }}
+        style={{ background: isDark ? '#0F1A0F' : '#FFFFFF', border: `1px solid ${BORDER}` }}
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -317,7 +317,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
           style={{ borderBottom: `1px solid ${BORDER}` }}>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center"
-              style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)' }}>
+              style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.07)' }}>
               <Scan className="w-4 h-4" style={{ color: GREEN }} />
             </div>
             <div>
@@ -362,8 +362,8 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
                     onClick={startCamera}
                     className="flex flex-col items-center gap-2 py-5 rounded-xl font-bold text-xs"
                     style={{
-                      background: isDark ? 'rgba(22,101,52,0.3)' : 'rgba(0,107,43,0.06)',
-                      border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : BORDER}`,
+                      background: isDark ? 'rgba(22,101,52,0.3)' : 'rgba(22,101,52,0.07)',
+                      border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.2)'}`,
                       color: GREEN,
                       fontFamily: "'Montserrat',sans-serif",
                     }}>
@@ -466,8 +466,8 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
                     className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-opacity"
                     style={{
                       background: faceDetected
-                        ? (isDark ? 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))' : 'linear-gradient(135deg,#006B2B,#00843D)')
-                        : 'rgba(255,255,255,0.05)',
+                        ? (isDark ? 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))' : 'linear-gradient(135deg,#166534,#15803d)')
+                        : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.03)'),
                       border: faceDetected ? '1px solid rgba(134,239,172,0.25)' : `1px solid ${BORDER}`,
                       color: faceDetected ? '#fff' : MUTED,
                       fontFamily: "'Montserrat',sans-serif",
@@ -593,7 +593,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
                   </div>
                 )}
                 <div className="flex flex-col items-center gap-2 py-4 rounded-xl"
-                  style={{ background: matchCount > 0 ? (isDark ? 'rgba(134,239,172,0.06)' : 'rgba(0,107,43,0.05)') : 'rgba(255,255,255,0.03)', border: `1px solid ${BORDER}` }}>
+                  style={{ background: matchCount > 0 ? (isDark ? 'rgba(134,239,172,0.06)' : 'rgba(22,101,52,0.05)') : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(9,9,11,0.02)'), border: `1px solid ${BORDER}` }}>
                   {matchCount > 0 ? (
                     <>
                       <CheckCircle2 className="w-8 h-8" style={{ color: '#22c55e' }} />
@@ -631,7 +631,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
                   {matchCount > 0 && (
                     <button onClick={closeKeepingMatches}
                       className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold"
-                      style={{ background: isDark ? 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))' : 'linear-gradient(135deg,#006B2B,#00843D)', color: '#fff', border: '1px solid rgba(134,239,172,0.25)' }}>
+                      style={{ background: isDark ? 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))' : 'linear-gradient(135deg,#166534,#15803d)', color: '#fff', border: '1px solid rgba(134,239,172,0.25)' }}>
                       <CheckCircle2 className="w-3.5 h-3.5" /> Ver fotos
                     </button>
                   )}
@@ -660,7 +660,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
                     whileTap={{ scale: 0.96 }}
                     onClick={() => { setStage('idle'); setError(''); }}
                     className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold"
-                    style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)', border: `1px solid ${BORDER}`, color: TEXT }}>
+                    style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(9,9,11,0.03)', border: `1px solid ${BORDER}`, color: TEXT }}>
                     <Upload className="w-4 h-4" /> Enviar selfie em vez disso
                   </motion.button>
                 )}

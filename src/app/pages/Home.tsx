@@ -30,7 +30,7 @@ const IMG_FAN_PORTRAIT =
 function FaceScanWidget() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const accentGreen = isDark ? '#4ade80' : '#006B2B';
+  const accentGreen = isDark ? '#4ade80' : '#166534';
   const { branding } = useBranding();
   const scannerImg = branding.scannerImageUrl || IMG_FAN_PORTRAIT;
 
@@ -156,7 +156,7 @@ function FaceScanWidget() {
         className="absolute -bottom-4 -left-4 px-3 py-2 rounded-xl text-xs"
         style={{
           background: isDark ? 'rgba(10,10,20,0.9)' : 'rgba(255,255,255,0.95)',
-          border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,107,43,0.15)',
+          border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(22,101,52,0.15)',
           backdropFilter: 'blur(8px)',
         }}
         initial={{ opacity: 0, y: 10 }}
@@ -169,7 +169,7 @@ function FaceScanWidget() {
         </div>
         <div
           className="h-1.5 rounded-full overflow-hidden"
-          style={{ background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,107,43,0.1)', width: 100 }}
+          style={{ background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(22,101,52,0.1)', width: 100 }}
         >
           <motion.div
             className="h-full rounded-full"
@@ -185,7 +185,7 @@ function FaceScanWidget() {
         className="absolute -bottom-4 right-4 px-3 py-2 rounded-xl text-xs"
         style={{
           background: isDark ? 'rgba(10,10,20,0.9)' : 'rgba(255,255,255,0.95)',
-          border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,107,43,0.15)',
+          border: isDark ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(22,101,52,0.15)',
           backdropFilter: 'blur(8px)',
         }}
         initial={{ opacity: 0, y: 10 }}
@@ -269,7 +269,7 @@ function HeroSection() {
         className="absolute inset-0 z-10"
         style={{
           background:
-            'radial-gradient(ellipse at 30% 50%, rgba(0,107,43,0.12) 0%, transparent 60%)',
+            'radial-gradient(ellipse at 30% 50%, rgba(22,101,52,0.12) 0%, transparent 60%)',
         }}
       />
 
@@ -287,8 +287,8 @@ function HeroSection() {
               transition={{ duration: 0.6 }}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-8"
               style={{
-                background: 'rgba(0,107,43,0.15)',
-                border: '1px solid rgba(0,107,43,0.4)',
+                background: 'rgba(22,101,52,0.15)',
+                border: '1px solid rgba(22,101,52,0.4)',
               }}
             >
               <Trophy className="w-3.5 h-3.5" style={{ color: '#00FF7F' }} />
@@ -347,7 +347,7 @@ function HeroSection() {
                   whileTap={{ scale: 0.97 }}
                   className="flex items-center gap-3 px-7 py-4 rounded-2xl text-base"
                   style={{
-                    background: 'linear-gradient(135deg, #006B2B, #00843D)',
+                    background: 'linear-gradient(135deg, #166534, #15803d)',
                     color: '#fff',
                     fontWeight: 800,
                     fontFamily: "'Montserrat', sans-serif",
@@ -452,7 +452,7 @@ function HeroSection() {
 function MarqueeStrip() {
   const { theme } = useTheme();
   const isDark = theme === 'dark';
-  const green = isDark ? '#00FF7F' : '#006B2B';
+  const green = isDark ? '#00FF7F' : '#166534';
 
   const items = [
     'TOUR DO PALMEIRAS · ALLIANZ PARQUE',
@@ -469,7 +469,7 @@ function MarqueeStrip() {
     <div
       className="relative overflow-hidden py-4"
       style={{
-        background: isDark ? 'rgba(0,107,43,0.08)' : 'rgba(0,107,43,0.06)',
+        background: isDark ? 'rgba(22,101,52,0.08)' : 'rgba(22,101,52,0.05)',
         borderTop: `1px solid ${green}1A`,
         borderBottom: `1px solid ${green}1A`,
       }}
@@ -483,7 +483,7 @@ function MarqueeStrip() {
           <span
             key={i}
             className="inline-flex items-center gap-3 text-xs tracking-widest"
-            style={{ color: isDark ? 'rgba(0,255,127,0.65)' : 'rgba(0,107,43,0.7)', fontWeight: 700 }}
+            style={{ color: isDark ? 'rgba(0,255,127,0.65)' : 'rgba(22,101,52,0.75)', fontWeight: 700 }}
           >
             <span
               className="w-1.5 h-1.5 rounded-full"
@@ -508,29 +508,29 @@ function HowItWorks() {
       number: '01',
       title: 'Tire uma selfie',
       desc: 'Abra a câmera do celular e capture seu rosto. A IA começa a trabalhar imediatamente.',
-      color: isDark ? '#86efac' : '#006B2B',
+      color: isDark ? '#86efac' : '#166534',
     },
     {
       icon: Scan,
       number: '02',
       title: 'A IA te encontra',
       desc: 'Nosso algoritmo varre todas as fotos do evento e identifica você com 98.7% de precisão.',
-      color: isDark ? '#7dd3fc' : '#0369a1',
+      color: isDark ? '#7dd3fc' : '#0284c7',
     },
     {
       icon: ShoppingBag,
       number: '03',
       title: 'Escolha e compre',
       desc: 'Selecione suas favoritas, adicione ao carrinho e faça download em alta resolução.',
-      color: '#00D4FF',
+      color: isDark ? '#00D4FF' : '#0369a1',
     },
   ];
 
-  const cardBg = isDark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.8)';
-  const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,107,43,0.1)';
-  const headingColor = isDark ? '#ffffff' : '#0D2818';
-  const textColor = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(13,40,24,0.55)';
-  const watermarkColor = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,107,43,0.04)';
+  const cardBg = isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(9,9,11,0.09)';
+  const headingColor = isDark ? '#ffffff' : '#09090B';
+  const textColor = isDark ? 'rgba(255,255,255,0.45)' : '#71717A';
+  const watermarkColor = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(9,9,11,0.04)';
 
   return (
     <section id="como-funciona" className="py-32 px-6">
@@ -545,7 +545,7 @@ function HowItWorks() {
         >
           <span
             className="text-xs tracking-widest"
-            style={{ color: isDark ? '#7dd3fc' : '#0369a1', fontWeight: 600, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
+            style={{ color: isDark ? '#7dd3fc' : '#0284c7', fontWeight: 600, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
           >
             Como funciona
           </span>
@@ -562,7 +562,7 @@ function HowItWorks() {
           >
             Três passos para
             <br />
-            <span style={{ color: isDark ? '#7dd3fc' : '#0369a1' }}>eternizar seu momento</span>
+            <span style={{ color: isDark ? '#7dd3fc' : '#0284c7' }}>eternizar seu momento</span>
           </h2>
         </motion.div>
 
@@ -584,6 +584,7 @@ function HowItWorks() {
                 padding: '2.5rem',
                 transition: 'border-color 0.3s, box-shadow 0.3s',
                 backdropFilter: isDark ? 'none' : 'blur(8px)',
+                boxShadow: isDark ? 'none' : 'var(--shadow-card)',
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.borderColor = `${step.color}4D`;
@@ -638,7 +639,7 @@ function HowItWorks() {
               {/* Connector arrow */}
               {i < steps.length - 1 && (
                 <div className="hidden md:block absolute -right-4 top-1/2 -translate-y-1/2 z-10">
-                  <ArrowRight className="w-6 h-6" style={{ color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,107,43,0.2)' }} />
+                  <ArrowRight className="w-6 h-6" style={{ color: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(22,101,52,0.2)' }} />
                 </div>
               )}
             </motion.div>
@@ -668,8 +669,8 @@ function CtaBanner() {
             borderRadius: 28,
             background: isDark
               ? 'linear-gradient(135deg, #006B2B1A 0%, #00D4FF0D 50%, #006B2B0D 100%)'
-              : 'linear-gradient(135deg, #006B2B0F 0%, #00843D0A 50%, #006B2B0A 100%)',
-            border: `1px solid ${isDark ? 'rgba(0,107,43,0.25)' : 'rgba(0,107,43,0.18)'}`,
+              : 'linear-gradient(135deg, #1665341A 0%, #00D4FF0D 50%, #1665340D 100%)',
+            border: `1px solid ${isDark ? 'rgba(22,101,52,0.25)' : 'rgba(22,101,52,0.15)'}`,
             padding: 'clamp(2rem, 5vw, 5rem)',
           }}
         >
@@ -689,8 +690,8 @@ function CtaBanner() {
             className="absolute -top-20 -right-20 w-72 h-72 rounded-full"
             style={{
               background: isDark
-                ? 'radial-gradient(circle, rgba(0,107,43,0.2) 0%, transparent 70%)'
-                : 'radial-gradient(circle, rgba(0,107,43,0.12) 0%, transparent 70%)',
+                ? 'radial-gradient(circle, rgba(22,101,52,0.2) 0%, transparent 70%)'
+                : 'radial-gradient(circle, rgba(22,101,52,0.12) 0%, transparent 70%)',
             }}
           />
 
@@ -701,14 +702,14 @@ function CtaBanner() {
               viewport={{ once: true }}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6"
               style={{
-                background: isDark ? 'rgba(0,107,43,0.15)' : 'rgba(0,107,43,0.08)',
-                border: `1px solid ${isDark ? 'rgba(0,107,43,0.4)' : 'rgba(0,107,43,0.2)'}`,
+                background: isDark ? 'rgba(22,101,52,0.15)' : 'rgba(22,101,52,0.07)',
+                border: `1px solid ${isDark ? 'rgba(22,101,52,0.4)' : 'rgba(22,101,52,0.18)'}`,
               }}
             >
-              <Trophy className="w-3.5 h-3.5" style={{ color: isDark ? '#00FF7F' : '#006B2B' }} />
+              <Trophy className="w-3.5 h-3.5" style={{ color: isDark ? '#00FF7F' : '#166534' }} />
               <span
                 className="text-xs tracking-widest"
-                style={{ color: isDark ? '#00FF7F' : '#006B2B', fontWeight: 700, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
+                style={{ color: isDark ? '#00FF7F' : '#166534', fontWeight: 700, textTransform: 'uppercase', fontFamily: "'Montserrat', sans-serif" }}
               >
                 {branding.homeExclusiveText || 'Exclusivo Allianz Parque'}
               </span>
@@ -721,18 +722,18 @@ function CtaBanner() {
                 fontWeight: 900,
                 lineHeight: 1.1,
                 letterSpacing: '-0.02em',
-                color: isDark ? '#ffffff' : '#0D2818',
+                color: isDark ? '#ffffff' : '#09090B',
                 marginBottom: '1.5rem',
               }}
             >
               {branding.ctaTitle1 || 'Pronto para encontrar'}
               <br />
-              <span style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>{branding.ctaTitle2 || 'seus momentos?'}</span>
+              <span style={{ color: isDark ? '#00FF7F' : '#166534' }}>{branding.ctaTitle2 || 'seus momentos?'}</span>
             </h2>
 
             <p
               className="text-lg mb-10"
-              style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)', lineHeight: 1.7 }}
+              style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(9,9,11,0.55)', lineHeight: 1.7 }}
             >
               {branding.ctaSubtitle || `Tire uma selfie e nossa IA encontra você em segundos entre milhares de fotos do ${branding.venueName || 'Allianz Parque'}.`}
             </p>
@@ -745,11 +746,11 @@ function CtaBanner() {
                 style={{
                   background: isDark
                     ? 'linear-gradient(135deg, #00FF7F, #00CC64)'
-                    : 'linear-gradient(135deg, #006B2B, #00843D)',
+                    : 'linear-gradient(135deg, #166534, #15803d)',
                   color: isDark ? '#000' : '#fff',
                   fontWeight: 800,
                   fontFamily: "'Montserrat', sans-serif",
-                  boxShadow: `0 0 40px rgba(0,107,43,0.35), 0 4px 20px rgba(0,0,0,0.15)`,
+                  boxShadow: `0 0 40px rgba(22,101,52,0.3), 0 4px 20px rgba(0,0,0,0.15)`,
                 }}
               >
                 {branding.ctaButton || 'Ver eventos'}

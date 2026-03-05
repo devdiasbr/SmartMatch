@@ -113,7 +113,7 @@ function DropZone({ label, accept, onFile, uploading, isDark, green, muted, inpu
       className="flex flex-col items-center justify-center gap-2 py-6 rounded-xl cursor-pointer transition-all"
       style={{
         border: `2px dashed ${drag ? green : border}`,
-        background: drag ? (isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.03)') : inputBg,
+        background: drag ? (isDark ? 'rgba(134,239,172,0.04)' : 'rgba(22,101,52,0.03)') : inputBg,
       }}
     >
       <input ref={inputRef} type="file" accept={accept} className="hidden"
@@ -193,8 +193,8 @@ function SaveBar({ dirty, saving, onSave, green, isDark }: {
             onClick={onSave} disabled={saving}
             className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold"
             style={{
-              background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)',
-              border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}`,
+              background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.09)',
+              border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.22)'}`,
               color: green,
             }}
           >
@@ -221,12 +221,12 @@ function SectionCard({ icon: Icon, title, subtitle, children, isDark, cardBg, ca
     >
       <div className="flex items-start gap-3 mb-4">
         <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)' }}>
+          style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.07)' }}>
           <Icon className="w-4 h-4" style={{ color: green }} />
         </div>
         <div>
           <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '0.95rem', color: text }}>{title}</h3>
-          {subtitle && <p className="text-xs mt-0.5" style={{ color: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,40,20,0.42)' }}>{subtitle}</p>}
+          {subtitle && <p className="text-xs mt-0.5" style={{ color: isDark ? 'rgba(255,255,255,0.38)' : 'rgba(9,9,11,0.42)' }}>{subtitle}</p>}
         </div>
       </div>
       {children}
@@ -250,13 +250,13 @@ function PageSection({ number, icon: Icon, title, desc, preview, children, isDar
     >
       {/* ── Header da seção ── */}
       <div className="flex items-center gap-3 px-5 py-4"
-        style={{ borderBottom: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,107,43,0.02)' }}>
+        style={{ borderBottom: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(22,101,52,0.02)' }}>
         <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0"
-          style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)', color: green }}>
+          style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.09)', color: green }}>
           {number}
         </span>
         <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)' }}>
+          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)' }}>
           <Icon className="w-3.5 h-3.5" style={{ color: green }} />
         </div>
         <div className="flex-1 min-w-0">
@@ -279,7 +279,7 @@ function PageSection({ number, icon: Icon, title, desc, preview, children, isDar
           }}
         >
           <p className="text-[10px] uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5"
-            style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,40,20,0.3)' }}>
+            style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(9,9,11,0.3)' }}>
             <Eye className="w-3 h-3" /> Prévia ao vivo
           </p>
           {preview}
@@ -465,14 +465,14 @@ export function AdminConfig() {
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   // ── Colors ──
-  const bg         = isDark ? '#08080E' : '#F2F8F4';
-  const cardBg     = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
-  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const text       = isDark ? '#ffffff' : '#0D2818';
-  const muted      = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,40,20,0.42)';
-  const green      = isDark ? '#86efac' : '#006B2B';
-  const inputBg    = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.9)';
-  const inputBrd   = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,107,43,0.15)';
+  const bg         = isDark ? '#09090F' : '#F8F9FA';
+  const cardBg     = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const text       = isDark ? '#ffffff' : '#09090B';
+  const muted      = isDark ? 'rgba(255,255,255,0.38)' : '#71717A';
+  const green      = isDark ? '#86efac' : '#166534';
+  const inputBg    = isDark ? 'rgba(255,255,255,0.05)' : '#FFFFFF';
+  const inputBrd   = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(9,9,11,0.12)';
 
   // ── Auth guard ──
   useEffect(() => {
@@ -1135,7 +1135,7 @@ export function AdminConfig() {
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
           <div className="flex items-center gap-3 mb-1">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)' }}>
+              style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.07)' }}>
               <Settings className="w-4.5 h-4.5" style={{ color: green }} />
             </div>
             <h1 style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, fontSize: 'clamp(1.4rem,3vw,2rem)', color: text, letterSpacing: '-0.02em' }}>
@@ -1160,10 +1160,10 @@ export function AdminConfig() {
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm whitespace-nowrap transition-all cursor-pointer flex-shrink-0"
                 style={{
                   background: active
-                    ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)')
+                    ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)')
                     : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.7)'),
                   border: `1px solid ${active
-                    ? (isDark ? 'rgba(134,239,172,0.25)' : 'rgba(0,107,43,0.2)')
+                    ? (isDark ? 'rgba(134,239,172,0.25)' : 'rgba(22,101,52,0.2)')
                     : cardBorder}`,
                   color: active ? green : muted,
                   fontWeight: active ? 700 : 500,
@@ -1223,7 +1223,7 @@ export function AdminConfig() {
                         </div>
                       </div>
                       <div className="px-4 py-3 flex items-center gap-3"
-                        style={{ background: isDark ? '#0f0f1a' : '#006B2B' }}>
+                        style={{ background: isDark ? '#0f0f1a' : '#09090B' }}>
                         {branding?.logoUrl
                           ? <img src={branding.logoUrl} alt="logo" className="h-7 object-contain" />
                           : <div className="flex items-center gap-2">
@@ -1354,7 +1354,7 @@ export function AdminConfig() {
                         />
                         <div
                           className="flex items-center justify-center rounded-xl text-sm font-bold min-w-[56px] h-10"
-                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`, color: green, fontFamily: "'Montserrat',sans-serif" }}
+                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.15)'}`, color: green, fontFamily: "'Montserrat',sans-serif" }}
                         >
                           {bgTransitionInterval}s
                         </div>
@@ -1369,10 +1369,10 @@ export function AdminConfig() {
                             className="px-3 py-1.5 rounded-lg text-xs transition-all"
                             style={{
                               background: bgTransitionInterval === v
-                                ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)'
+                                ? isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)'
                                 : inputBg,
                               border: `1px solid ${bgTransitionInterval === v
-                                ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.2)'
+                                ? isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.2)'
                                 : inputBrd}`,
                               color: bgTransitionInterval === v ? green : muted,
                               fontWeight: bgTransitionInterval === v ? 700 : 500,
@@ -1398,7 +1398,7 @@ export function AdminConfig() {
 
                 {/* ── Aviso informativo ── */}
                 <div className="flex items-start gap-3 px-4 py-3 rounded-xl text-sm"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.04)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.12)'}` }}>
+                  style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(22,101,52,0.04)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.12)'}` }}>
                   <Eye className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: green }} />
                   <p className="text-xs leading-relaxed" style={{ color: muted }}>
                     As seções abaixo estão na mesma ordem em que aparecem na página Home. Edite os campos e veja a prévia ao vivo antes de salvar.
@@ -1465,7 +1465,7 @@ export function AdminConfig() {
                               </motion.button>
                               <label
                                 className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
-                                style={{ background: 'rgba(0,107,43,0.9)', color: '#fff' }}
+                                style={{ background: 'rgba(22,101,52,0.9)', color: '#fff' }}
                               >
                                 <Upload className="w-3 h-3" /> Trocar
                                 <input type="file" accept="image/*" className="hidden"
@@ -1506,7 +1506,7 @@ export function AdminConfig() {
                       <div className="absolute inset-0 flex flex-col justify-center px-5 py-4">
                         {/* Badge */}
                         <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full mb-3 self-start"
-                          style={{ background: 'rgba(0,107,43,0.18)', border: '1px solid rgba(0,107,43,0.4)' }}>
+                          style={{ background: 'rgba(22,101,52,0.18)', border: '1px solid rgba(22,101,52,0.4)' }}>
                           <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#00FF7F' }} />
                           <span className="text-[8px] tracking-widest uppercase font-bold" style={{ color: '#00FF7F' }}>
                             {heroBadge || 'Allianz Parque · Tour Oficial'}
@@ -1525,7 +1525,7 @@ export function AdminConfig() {
                         {/* CTA */}
                         <div className="mt-3">
                           <span className="text-[9px] px-3 py-1.5 rounded-lg font-bold inline-block"
-                            style={{ background: 'linear-gradient(135deg,#006B2B,#00843D)', color: '#fff' }}>
+                            style={{ background: 'linear-gradient(135deg,#166534,#15803d)', color: '#fff' }}>
                             {heroCTA || 'Ver eventos'}
                           </span>
                         </div>
@@ -1582,7 +1582,7 @@ export function AdminConfig() {
                   desc="Seção na parte inferior da Home que convida o usuário a comprar"
                   isDark={isDark} cardBg={cardBg} cardBorder={cardBorder} green={green} text={text} muted={muted}
                   preview={
-                    <div className="rounded-xl overflow-hidden relative" style={{ background: isDark ? 'rgba(0,107,43,0.08)' : 'rgba(0,107,43,0.05)', border: `1px solid ${isDark ? 'rgba(0,107,43,0.2)' : 'rgba(0,107,43,0.12)'}` }}>
+                    <div className="rounded-xl overflow-hidden relative" style={{ background: isDark ? 'rgba(22,101,52,0.08)' : 'rgba(22,101,52,0.05)', border: `1px solid ${isDark ? 'rgba(22,101,52,0.2)' : 'rgba(22,101,52,0.12)'}` }}>
                       {/* BG image thumbnail */}
                       {branding?.ctaBgUrl && (
                         <div className="absolute inset-0 rounded-xl overflow-hidden">
@@ -1592,24 +1592,24 @@ export function AdminConfig() {
                       <div className="relative z-10 p-4">
                         {/* exclusive badge */}
                         <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full mb-3"
-                          style={{ background: isDark ? 'rgba(0,107,43,0.18)' : 'rgba(0,107,43,0.08)', border: `1px solid ${isDark ? 'rgba(0,107,43,0.4)' : 'rgba(0,107,43,0.2)'}` }}>
-                          <span className="text-[8px] tracking-widest uppercase font-bold" style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>
+                          style={{ background: isDark ? 'rgba(22,101,52,0.18)' : 'rgba(22,101,52,0.08)', border: `1px solid ${isDark ? 'rgba(22,101,52,0.4)' : 'rgba(22,101,52,0.2)'}` }}>
+                          <span className="text-[8px] tracking-widest uppercase font-bold" style={{ color: green }}>
                             {homeExclusiveText || 'Exclusivo Allianz Parque'}
                           </span>
                         </div>
                         {/* Title */}
                         <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 900, lineHeight: 1.1, fontSize: '0.95rem' }}>
-                          <div style={{ color: isDark ? '#fff' : '#0D2818' }}>{ctaTitle1 || 'Pronto para encontrar'}</div>
-                          <div style={{ color: isDark ? '#00FF7F' : '#006B2B' }}>{ctaTitle2 || 'seus momentos?'}</div>
+                          <div style={{ color: isDark ? '#fff' : '#09090B' }}>{ctaTitle1 || 'Pronto para encontrar'}</div>
+                          <div style={{ color: green }}>{ctaTitle2 || 'seus momentos?'}</div>
                         </div>
                         {/* Subtitle */}
-                        <p className="text-[8px] mt-2 leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(13,40,24,0.5)', maxWidth: 200 }}>
+                        <p className="text-[8px] mt-2 leading-relaxed" style={{ color: isDark ? 'rgba(255,255,255,0.42)' : 'rgba(9,9,11,0.5)', maxWidth: 200 }}>
                           {ctaSubtitle || 'Tire uma selfie e nossa IA encontra você em segundos.'}
                         </p>
                         {/* Button */}
                         <div className="mt-3">
                           <span className="text-[9px] px-3 py-1.5 rounded-lg font-bold inline-block"
-                            style={{ background: isDark ? 'linear-gradient(135deg,#00FF7F,#00CC64)' : 'linear-gradient(135deg,#006B2B,#00843D)', color: isDark ? '#000' : '#fff' }}>
+                            style={{ background: isDark ? 'linear-gradient(135deg,#00FF7F,#00CC64)' : 'linear-gradient(135deg,#166534,#15803d)', color: isDark ? '#000' : '#fff' }}>
                             {ctaButton || 'Ver eventos'}
                           </span>
                         </div>
@@ -1686,7 +1686,7 @@ export function AdminConfig() {
                               </motion.button>
                               <label
                                 className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer"
-                                style={{ background: 'rgba(0,107,43,0.9)', color: '#fff' }}
+                                style={{ background: 'rgba(22,101,52,0.9)', color: '#fff' }}
                               >
                                 <Upload className="w-3 h-3" /> Trocar
                                 <input type="file" accept="image/*" className="hidden"
@@ -1851,21 +1851,21 @@ export function AdminConfig() {
 
                       {/* Card mock */}
                       <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.85)' }}>
-                        <div style={{ height: 3, background: isDark ? 'linear-gradient(90deg,#166534,#15803d)' : 'linear-gradient(90deg,#006B2B,#00843D)' }} />
+                        <div style={{ height: 3, background: isDark ? 'linear-gradient(90deg,#166534,#15803d)' : 'linear-gradient(90deg,#166534,#15803d)' }} />
                         <div className="p-3">
-                          <span className="text-[9px] tracking-widest uppercase font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)', fontFamily: "'Montserrat',sans-serif" }}>
+                          <span className="text-[9px] tracking-widest uppercase font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(9,9,11,0.45)', fontFamily: "'Montserrat',sans-serif" }}>
                             {tourLabel || 'Tour'}
                           </span>
                           <div className="text-xs font-bold mt-0.5" style={{ color: text, fontFamily: "'Montserrat',sans-serif" }}>27/02/2026, 10:00</div>
-                          <div className="text-[10px] mt-0.5" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)' }}>sexta-feira</div>
-                          <div className="flex items-center gap-1 mt-2 text-[9px] uppercase tracking-wider font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(13,40,24,0.55)' }}>
+                          <div className="text-[10px] mt-0.5" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(9,9,11,0.45)' }}>sexta-feira</div>
+                          <div className="flex items-center gap-1 mt-2 text-[9px] uppercase tracking-wider font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.5)' : 'rgba(9,9,11,0.55)' }}>
                             <span>📍</span>
                             <span>{venueName || 'Allianz Parque'}</span>
                             <span style={{ opacity: 0.4 }}>·</span>
                             <span>{venueLocation || 'São Paulo, SP'}</span>
                           </div>
                           <div className="mt-2 inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[9px]"
-                            style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`, color: green, fontWeight: 600 }}>
+                            style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.15)'}`, color: green, fontWeight: 600 }}>
                             🖼 48 fotos →
                           </div>
                         </div>
@@ -1917,11 +1917,11 @@ export function AdminConfig() {
                 >
                   {/* Header */}
                   <div className="flex items-center gap-3 px-5 py-4"
-                    style={{ borderBottom: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,107,43,0.02)' }}>
+                    style={{ borderBottom: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.015)' : 'rgba(0,0,0,0.015)' }}>
                     <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0"
-                      style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)', color: green }}>3</span>
+                      style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)', color: green }}>3</span>
                     <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
-                      style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)' }}>
+                      style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)' }}>
                       <List className="w-3.5 h-3.5" style={{ color: green }} />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1948,8 +1948,8 @@ export function AdminConfig() {
                               exit={{ opacity: 0, scale: 0.85 }}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold"
                               style={{
-                                background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)',
-                                border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}`,
+                                background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)',
+                                border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.15)'}`,
                                 color: green,
                               }}
                             >
@@ -2004,8 +2004,8 @@ export function AdminConfig() {
                             }}
                             className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-bold"
                             style={{
-                              background: newSessionType.trim() ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)') : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
-                              border: `1px solid ${newSessionType.trim() ? (isDark ? 'rgba(134,239,172,0.25)' : 'rgba(0,107,43,0.2)') : cardBorder}`,
+                              background: newSessionType.trim() ? (isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)') : (isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
+                              border: `1px solid ${newSessionType.trim() ? (isDark ? 'rgba(134,239,172,0.25)' : 'rgba(22,101,52,0.2)') : cardBorder}`,
                               color: newSessionType.trim() ? green : muted,
                               opacity: newSessionType.trim() ? 1 : 0.5,
                             }}
@@ -2061,7 +2061,7 @@ export function AdminConfig() {
                       }}
                     >
                       <p className="text-[10px] uppercase tracking-widest font-bold mb-3 flex items-center gap-1.5"
-                        style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,40,20,0.3)' }}>
+                        style={{ color: isDark ? 'rgba(255,255,255,0.22)' : 'rgba(9,9,11,0.3)' }}>
                         <Eye className="w-3 h-3" /> Prévia ao vivo
                       </p>
                       {/* Simulate filter bar */}
@@ -2071,7 +2071,7 @@ export function AdminConfig() {
                         <div className="flex flex-wrap gap-1.5">
                           {/* "Todos" chip */}
                           <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold"
-                            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}`, color: green }}>
+                            style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'}`, color: green }}>
                             Todos
                           </span>
                           {eventSessionTypes.map((st, i) => (
@@ -2091,9 +2091,9 @@ export function AdminConfig() {
                       </div>
                       {/* Card mock */}
                       <div className="mt-3 rounded-xl overflow-hidden" style={{ border: `1px solid ${cardBorder}`, background: isDark ? 'rgba(255,255,255,0.025)' : 'rgba(255,255,255,0.85)' }}>
-                        <div style={{ height: 3, background: isDark ? 'linear-gradient(90deg,#166534,#15803d)' : 'linear-gradient(90deg,#006B2B,#00843D)' }} />
+                        <div style={{ height: 3, background: isDark ? 'linear-gradient(90deg,#166534,#15803d)' : 'linear-gradient(90deg,#166534,#15803d)' }} />
                         <div className="p-3">
-                          <span className="text-[9px] tracking-widest uppercase font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(13,40,24,0.45)', fontFamily: "'Montserrat',sans-serif" }}>
+                          <span className="text-[9px] tracking-widest uppercase font-semibold" style={{ color: isDark ? 'rgba(255,255,255,0.35)' : 'rgba(9,9,11,0.45)', fontFamily: "'Montserrat',sans-serif" }}>
                             {eventSessionTypes[0] || 'Tipo de Sessão'}
                           </span>
                           <div className="text-xs font-bold mt-0.5" style={{ color: text, fontFamily: "'Montserrat',sans-serif" }}>27/02/2026, 10:00</div>
@@ -2200,7 +2200,7 @@ export function AdminConfig() {
                     {/* Label */}
                     <div className="absolute top-2 left-2 z-10">
                       <span className="text-[10px] uppercase tracking-widest font-bold px-2 py-0.5 rounded"
-                        style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)', color: green }}>
+                        style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)', color: green }}>
                         prévia
                       </span>
                     </div>
@@ -2615,10 +2615,10 @@ export function AdminConfig() {
                                     <div key={evt.id} className="rounded-lg p-2.5 flex items-center justify-between gap-2"
                                       style={{ 
                                         background: evt.photoCount > 0 
-                                          ? (isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.04)') 
+                                          ? (isDark ? 'rgba(134,239,172,0.05)' : 'rgba(22,101,52,0.04)') 
                                           : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)'), 
                                         border: `1px solid ${evt.photoCount > 0 
-                                          ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') 
+                                          ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)') 
                                           : cardBorder}` 
                                       }}>
                                       <div className="flex-1 min-w-0">
@@ -2629,7 +2629,7 @@ export function AdminConfig() {
                                         <span className="text-xs font-bold px-2 py-0.5 rounded" 
                                           style={{ 
                                             background: evt.photoCount > 0 
-                                              ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.1)') 
+                                              ? (isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)') 
                                               : (isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'),
                                             color: evt.photoCount > 0 ? green : muted 
                                           }}>
@@ -2657,9 +2657,9 @@ export function AdminConfig() {
                   <div className="p-5 border-b" style={{ borderColor: cardBorder }}>
                     <div className="flex items-center gap-3 mb-1">
                       <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black" style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.25)'}` }}>2</span>
+                        <span className="w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black" style={{ background: isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.12)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'}` }}>2</span>
                         <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.18)' : 'rgba(0,107,43,0.15)'}` }}>
+                          style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.18)' : 'rgba(22,101,52,0.15)'}` }}>
                           <Database className="w-4.5 h-4.5" style={{ color: green }} />
                         </div>
                       </div>
@@ -2675,7 +2675,7 @@ export function AdminConfig() {
                   {/* body */}
                   <div className="p-5 space-y-5">
                     {/* O que faz */}
-                    <div className="rounded-xl p-4 space-y-2.5" style={{ background: isDark ? 'rgba(0,255,127,0.04)' : 'rgba(0,107,43,0.04)', border: `1px solid ${isDark ? 'rgba(0,255,127,0.1)' : 'rgba(0,107,43,0.1)'}` }}>
+                    <div className="rounded-xl p-4 space-y-2.5" style={{ background: isDark ? 'rgba(134,239,172,0.04)' : 'rgba(22,101,52,0.04)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.1)'}` }}>
                       <p className="text-xs font-bold uppercase tracking-widest" style={{ color: green }}>O que essa migração faz</p>
                       {[
                         { icon: Database, text: 'Lê todos os descritores faciais armazenados no KV Store' },
@@ -2754,7 +2754,7 @@ export function AdminConfig() {
                       <motion.div
                         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                         className="rounded-xl p-4 space-y-4"
-                        style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.05)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)'}` }}
+                        style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(22,101,52,0.05)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.15)'}` }}
                       >
                         <div className="flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4" style={{ color: green }} />
@@ -2925,7 +2925,7 @@ export function AdminConfig() {
                         color: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') 
                           ? muted 
                           : reindexEventId === 'ALL'
-                          ? '#0D2818'
+                          ? '#166534'
                           : '#fff',
                         cursor: (!reindexEventId || reindexStatus === 'loading' || reindexStatus === 'processing') ? 'not-allowed' : 'pointer',
                         fontFamily: "'Montserrat',sans-serif",

@@ -52,7 +52,7 @@ export function AdminLogin() {
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div
           className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full blur-3xl"
-          style={{ background: 'radial-gradient(circle, rgba(0,107,43,0.12) 0%, transparent 70%)' }}
+          style={{ background: 'radial-gradient(circle, rgba(22,101,52,0.12) 0%, transparent 70%)' }}
         />
         <div
           className="absolute -bottom-40 -right-40 w-[600px] h-[600px] rounded-full blur-3xl"
@@ -82,7 +82,7 @@ export function AdminLogin() {
             transition={{ delay: 0.1 }}
             className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-5"
             style={{
-              background: 'linear-gradient(135deg, rgba(0,107,43,0.3), rgba(0,255,127,0.1))',
+              background: 'linear-gradient(135deg, rgba(22,101,52,0.3), rgba(0,255,127,0.1))',
               border: '1px solid rgba(0,255,127,0.2)',
             }}
           >
@@ -207,13 +207,13 @@ export function AdminLogin() {
               className="w-full py-3.5 rounded-xl text-sm flex items-center justify-center gap-2 mt-2"
               style={{
                 background: submitting
-                  ? 'rgba(0,107,43,0.4)'
-                  : 'linear-gradient(135deg, #006B2B, #00843D)',
+                  ? 'rgba(22,101,52,0.4)'
+                  : 'linear-gradient(135deg, #166534, #15803d)',
                 color: '#fff',
                 fontWeight: 800,
                 fontFamily: "'Montserrat', sans-serif",
                 cursor: submitting ? 'not-allowed' : 'pointer',
-                boxShadow: submitting ? 'none' : '0 4px 20px rgba(0,107,43,0.3)',
+                boxShadow: submitting ? 'none' : '0 4px 20px rgba(22,101,52,0.3)',
               }}
             >
               {submitting ? (

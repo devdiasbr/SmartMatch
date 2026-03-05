@@ -16,11 +16,11 @@ export function FaceQueueToast() {
   const visible = q.active || q.pending > 0 || (q.done > 0 && q.total > 0);
   const finished = !q.active && q.pending === 0 && q.done > 0;
 
-  const green   = isDark ? '#86efac' : '#006B2B';
+  const green   = isDark ? '#86efac' : '#166534';
   const cardBg  = isDark ? 'rgba(8,8,14,0.92)'   : 'rgba(255,255,255,0.96)';
-  const border  = isDark ? 'rgba(134,239,172,0.18)' : 'rgba(0,107,43,0.18)';
-  const text    = isDark ? '#fff' : '#0D2818';
-  const muted   = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,40,20,0.5)';
+  const border  = isDark ? 'rgba(134,239,172,0.18)' : 'rgba(22,101,52,0.18)';
+  const text    = isDark ? '#fff' : '#09090B';
+  const muted   = isDark ? 'rgba(255,255,255,0.45)' : '#71717A';
 
   const pct = q.total > 0 ? (q.done / q.total) * 100 : 0;
 
@@ -47,7 +47,7 @@ export function FaceQueueToast() {
           {/* Ícone */}
           <div
             className="flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center"
-            style={{ background: finished ? 'rgba(34,197,94,0.1)' : isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.08)' }}
+            style={{ background: finished ? 'rgba(34,197,94,0.1)' : isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)' }}
           >
             {finished ? (
               <CheckCircle2 className="w-4 h-4" style={{ color: '#22c55e' }} />

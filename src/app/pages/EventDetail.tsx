@@ -278,10 +278,10 @@ function PackagesTab({ price }: { price: number }) {
             style={{
               borderRadius: 20,
               background: pkg.highlight
-                ? (isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.04)')
+                ? (isDark ? 'rgba(134,239,172,0.04)' : 'rgba(22,101,52,0.04)')
                 : (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)'),
               border: pkg.highlight
-                ? `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.2)'}`
+                ? `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.2)'}`
                 : `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)'}`,
             }}>
             {pkg.highlight && <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full text-xs" style={{ background: 'rgba(22,101,52,0.9)', border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 800 }}>MAIS POPULAR</div>}
@@ -319,19 +319,19 @@ export function EventDetail() {
   const orgId = new URLSearchParams(window.location.search).get('org') ?? undefined;
 
   /* theme-aware palette */
-  const bg          = isDark ? '#08080E'                  : '#F2F8F4';
+  const bg          = isDark ? '#09090F'                  : '#F8F9FA';
   const heroGrad    = isDark
-    ? 'linear-gradient(to top, #08080E 0%, rgba(8,8,14,0.5) 50%, rgba(8,8,14,0.3) 100%)'
-    : 'linear-gradient(to top, #F2F8F4 0%, rgba(242,248,244,0.5) 50%, rgba(242,248,244,0.1) 100%)';
-  const textPrimary = isDark ? '#ffffff'                  : '#0D2818';
-  const textMuted   = isDark ? 'rgba(255,255,255,0.55)'   : 'rgba(0,40,0,0.5)';
-  const textSubtle  = isDark ? 'rgba(255,255,255,0.35)'   : 'rgba(0,0,0,0.38)';
-  const divider     = isDark ? 'rgba(255,255,255,0.06)'   : 'rgba(0,107,43,0.1)';
-  const statAccent1 = isDark ? '#86efac'                  : '#006B2B';
-  const statAccent2 = isDark ? '#7dd3fc'                  : '#00843D';
-  const cardBg      = isDark ? 'rgba(255,255,255,0.03)'   : 'rgba(0,0,0,0.02)';
-  const cardBorder  = isDark ? 'rgba(255,255,255,0.06)'   : 'rgba(0,107,43,0.1)';
-  const emptyText   = isDark ? 'rgba(255,255,255,0.35)'   : 'rgba(0,0,0,0.38)';
+    ? 'linear-gradient(to top, #09090F 0%, rgba(9,9,15,0.5) 50%, rgba(9,9,15,0.3) 100%)'
+    : 'linear-gradient(to top, #F8F9FA 0%, rgba(248,249,250,0.5) 50%, rgba(248,249,250,0.1) 100%)';
+  const textPrimary = isDark ? '#ffffff'                  : '#09090B';
+  const textMuted   = isDark ? 'rgba(255,255,255,0.55)'   : '#71717A';
+  const textSubtle  = isDark ? 'rgba(255,255,255,0.35)'   : '#A1A1AA';
+  const divider     = isDark ? 'rgba(255,255,255,0.06)'   : 'rgba(9,9,11,0.08)';
+  const statAccent1 = isDark ? '#86efac'                  : '#166534';
+  const statAccent2 = isDark ? '#7dd3fc'                  : '#15803D';
+  const cardBg      = isDark ? 'rgba(255,255,255,0.03)'   : '#FFFFFF';
+  const cardBorder  = isDark ? 'rgba(255,255,255,0.06)'   : 'rgba(9,9,11,0.09)';
+  const emptyText   = isDark ? 'rgba(255,255,255,0.35)'   : '#A1A1AA';
 
   const [activeTab, setActiveTab] = useState<'fotos' | 'minhas' | 'agrupamento'>('fotos');
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -526,7 +526,7 @@ export function EventDetail() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: bg }}>
-        <Loader2 className="w-10 h-10 animate-spin" style={{ color: isDark ? '#86efac' : '#006B2B' }} />
+        <Loader2 className="w-10 h-10 animate-spin" style={{ color: isDark ? '#86efac' : '#166534' }} />
       </div>
     );
   }
@@ -688,10 +688,10 @@ export function EventDetail() {
                                 className="w-10 h-10 rounded-xl flex items-center justify-center text-sm transition-all"
                                 style={{
                                   background: isActive
-                                    ? isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'
+                                    ? isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.1)'
                                     : cardBg,
                                   border: `1px solid ${isActive
-                                    ? isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.25)'
+                                    ? isDark ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.25)'
                                     : cardBorder}`,
                                   color: isActive ? statAccent1 : textPrimary,
                                   fontWeight: isActive ? 800 : 500,

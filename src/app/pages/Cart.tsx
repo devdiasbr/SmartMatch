@@ -30,9 +30,10 @@ import { api } from '../lib/api';
 
 /* ── Success Modal ── */
 function SuccessModal({ onClose, isDark, orderId }: { onClose: () => void; isDark: boolean; orderId: string }) {
-  const textColor = isDark ? '#ffffff' : '#0D2818';
-  const mutedColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,40,20,0.45)';
-  const green = isDark ? '#86efac' : '#006B2B';
+  const textColor = isDark ? '#ffffff' : '#09090B';
+  const mutedColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(9,9,11,0.45)';
+  const green = isDark ? '#86efac' : '#166534';
+  const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(22,101,52,0.1)';
 
   return (
     <motion.div
@@ -50,7 +51,7 @@ function SuccessModal({ onClose, isDark, orderId }: { onClose: () => void; isDar
         className="w-full max-w-sm p-8 rounded-3xl text-center relative"
         style={{
           background: isDark ? '#0e0e1a' : '#ffffff',
-          border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.15)'}`,
+          border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.15)'}`,
           boxShadow: '0 40px 80px rgba(0,0,0,0.4)',
         }}
       >
@@ -67,7 +68,7 @@ function SuccessModal({ onClose, isDark, orderId }: { onClose: () => void; isDar
           animate={{ scale: 1 }}
           transition={{ delay: 0.2, type: 'spring', damping: 14, stiffness: 200 }}
           className="w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6"
-          style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)', border: `2px solid ${green}` }}
+          style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)', border: `2px solid ${green}` }}
         >
           <CheckCircle2 className="w-10 h-10" style={{ color: green }} />
         </motion.div>
@@ -89,7 +90,7 @@ function SuccessModal({ onClose, isDark, orderId }: { onClose: () => void; isDar
 
         <div
           className="mt-6 p-4 rounded-2xl text-sm"
-          style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,107,43,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)'}` }}
+          style={{ background: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(22,101,52,0.04)', border: `1px solid ${isDark ? 'rgba(255,255,255,0.07)' : 'rgba(22,101,52,0.1)'}` }}
         >
           <p className="text-xs uppercase tracking-widest mb-1" style={{ color: mutedColor, fontWeight: 600 }}>
             Código do pedido
@@ -104,7 +105,7 @@ function SuccessModal({ onClose, isDark, orderId }: { onClose: () => void; isDar
           whileTap={{ scale: 0.97 }}
           className="mt-5 w-full py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2"
           style={{
-            background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #006B2B, #00843D)',
+            background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #166534, #15803d)',
             color: '#fff',
             fontWeight: 800,
           }}
@@ -144,10 +145,10 @@ function PixQrPanel({
   onConfirm: () => void;
   amount: number;
 }) {
-  const textColor = isDark ? '#ffffff' : '#0D2818';
-  const mutedColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(0,40,20,0.45)';
-  const green = isDark ? '#86efac' : '#006B2B';
-  const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
+  const textColor = isDark ? '#ffffff' : '#09090B';
+  const mutedColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(9,9,11,0.45)';
+  const green = isDark ? '#86efac' : '#166534';
+  const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(22,101,52,0.1)';
   const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
 
   return (
@@ -157,7 +158,7 @@ function PixQrPanel({
       className="flex flex-col items-center gap-4"
     >
       {/* Valor */}
-      <div className="w-full text-center py-3 rounded-xl" style={{ background: isDark ? 'rgba(134,239,172,0.06)' : 'rgba(0,107,43,0.05)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'}` }}>
+      <div className="w-full text-center py-3 rounded-xl" style={{ background: isDark ? 'rgba(134,239,172,0.06)' : 'rgba(22,101,52,0.05)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.12)'}` }}>
         <p className="text-xs uppercase tracking-widest mb-0.5" style={{ color: mutedColor, fontWeight: 600 }}>Valor a pagar</p>
         <p style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 900, fontSize: '1.4rem', color: green }}>
           R$ {amount.toFixed(2).replace('.', ',')}
@@ -188,8 +189,8 @@ function PixQrPanel({
           onClick={onCopy}
           className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs transition-all"
           style={{
-            background: copied ? isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)' : inputBg,
-            border: `1px solid ${copied ? (isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.15)') : borderColor}`,
+            background: copied ? isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)' : inputBg,
+            border: `1px solid ${copied ? (isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.15)') : borderColor}`,
             color: copied ? green : textColor,
             fontWeight: 700,
           }}
@@ -209,8 +210,8 @@ function PixQrPanel({
         onClick={onConfirm}
         className="w-full py-3.5 rounded-2xl text-sm flex items-center justify-center gap-2"
         style={{
-          background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(0,107,43,0.1)',
-          border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(0,107,43,0.2)'}`,
+          background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)',
+          border: `1px solid ${isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,101,52,0.2)'}`,
           color: green,
           fontWeight: 800,
           fontFamily: "'Montserrat', sans-serif",
@@ -259,13 +260,13 @@ export function Cart() {
   // Card installments
   const [installments, setInstallments] = useState(1);
 
-  const bg = isDark ? '#08080E' : '#F2F8F4';
-  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.9)';
-  const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const textColor = isDark ? '#ffffff' : '#0D2818';
-  const mutedColor = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,40,20,0.42)';
-  const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)';
-  const green = isDark ? '#86efac' : '#006B2B';
+  const bg = isDark ? '#09090F' : '#F8F9FA';
+  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const textColor = isDark ? '#ffffff' : '#09090B';
+  const mutedColor = isDark ? 'rgba(255,255,255,0.38)' : '#71717A';
+  const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.04)';
+  const green = isDark ? '#86efac' : '#166534';
 
   const discount = couponApplied ? Math.round(totalPrice * 0.1) : 0;
   const finalPrice = totalPrice - discount;
@@ -470,7 +471,7 @@ export function Cart() {
             <span
               className="px-2 py-0.5 rounded-lg text-xs"
               style={{
-                background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)',
+                background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)',
                 color: green,
                 fontWeight: 700,
               }}
@@ -532,7 +533,7 @@ export function Cart() {
                 whileTap={{ scale: 0.97 }}
                 className="mt-8 flex items-center gap-2 px-6 py-3 rounded-2xl text-sm"
                 style={{
-                  background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #006B2B, #00843D)',
+                  background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #166534, #15803d)',
                   color: '#fff',
                   fontWeight: 700,
                 }}
@@ -720,7 +721,7 @@ export function Cart() {
                           className="w-full pl-9 pr-3 py-2.5 rounded-xl text-sm outline-none"
                           style={{
                             background: inputBg,
-                            border: `1px solid ${couponError ? '#fca5a5' : couponApplied ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.3)') : borderColor}`,
+                            border: `1px solid ${couponError ? '#fca5a5' : couponApplied ? (isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.3)') : borderColor}`,
                             color: textColor,
                           }}
                         />
@@ -733,7 +734,7 @@ export function Cart() {
                         className="px-3 py-2.5 rounded-xl text-xs"
                         style={{
                           background: couponApplied
-                            ? isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)'
+                            ? isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)'
                             : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)',
                           border: `1px solid ${borderColor}`,
                           color: couponApplied ? green : textColor,
@@ -911,10 +912,10 @@ export function Cart() {
                                     className="flex flex-col items-center gap-0.5 py-2.5 px-2 rounded-xl text-center transition-all"
                                     style={{
                                       background: isActive
-                                        ? isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)'
+                                        ? isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)'
                                         : inputBg,
                                       border: `1.5px solid ${isActive
-                                        ? isDark ? 'rgba(134,239,172,0.35)' : 'rgba(0,107,43,0.3)'
+                                        ? isDark ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.3)'
                                         : borderColor}`,
                                       color: isActive ? green : textColor,
                                     }}
@@ -969,7 +970,7 @@ export function Cart() {
                         disabled={checkingOut || pixState === 'loading'}
                         className="w-full py-4 rounded-2xl text-sm flex items-center justify-center gap-2 mt-2 disabled:opacity-60"
                         style={{
-                          background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #006B2B, #00843D)',
+                          background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #166534, #15803d)',
                           color: '#fff',
                           fontWeight: 800,
                           fontFamily: "'Montserrat', sans-serif",

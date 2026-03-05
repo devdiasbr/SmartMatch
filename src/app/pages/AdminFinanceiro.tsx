@@ -115,17 +115,17 @@ export function AdminFinanceiro() {
   const [cancelling, setCancelling] = useState(false);
 
   /* ── design tokens ── */
-  const bg         = isDark ? '#08080E' : '#F2F8F4';
-  const card       = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.85)';
-  const border     = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,107,43,0.1)';
-  const muted      = isDark ? 'rgba(255,255,255,0.4)'  : 'rgba(0,40,20,0.42)';
-  const text       = isDark ? '#fff' : '#0D2818';
-  const green      = isDark ? '#86efac' : '#006B2B';
-  const inputBg    = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
+  const bg         = isDark ? '#09090F' : '#F8F9FA';
+  const card       = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const border     = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const muted      = isDark ? 'rgba(255,255,255,0.4)'  : '#71717A';
+  const text       = isDark ? '#fff' : '#09090B';
+  const green      = isDark ? '#86efac' : '#166534';
+  const inputBg    = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.04)';
   const inputBrd   = `1px solid ${border}`;
   const btnPrimary = isDark
     ? 'rgba(22,101,52,0.85)'
-    : 'linear-gradient(135deg,#006B2B,#00843D)';
+    : 'linear-gradient(135deg,#166534,#15803D)';
 
   const WEBHOOK = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b/payments/webhook`;
 
@@ -326,7 +326,7 @@ export function AdminFinanceiro() {
                   type="number" min={1} max={999} step={1} value={photoPrice}
                   onChange={e => setPhotoPrice(Math.max(1, Number(e.target.value)))}
                   className="w-24 text-center text-2xl font-bold rounded-xl px-3 py-2 outline-none"
-                  style={{ background: inputBg, border: `2px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(0,107,43,0.3)'}`, color: green, fontFamily: "'Montserrat',sans-serif" }}
+                  style={{ background: inputBg, border: `2px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.3)'}`, color: green, fontFamily: "'Montserrat',sans-serif" }}
                 />
               </div>
 
@@ -335,7 +335,7 @@ export function AdminFinanceiro() {
                 className="w-full mb-4" style={{ accentColor: green }} />
 
               <div className="p-3 rounded-xl text-xs space-y-1"
-                style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(0,107,43,0.04)', border: inputBrd }}>
+                style={{ background: isDark ? 'rgba(134,239,172,0.05)' : 'rgba(22,101,52,0.04)', border: inputBrd }}>
                 <div className="flex justify-between">
                   <span style={{ color: muted }}>Taxa do gateway (~4.5%)</span>
                   <span style={{ color: isDark ? '#fca5a5' : '#dc2626', fontWeight: 600 }}>− {fmt(photoPrice * 0.045)}</span>
@@ -396,7 +396,7 @@ export function AdminFinanceiro() {
                 </div>
                 <button onClick={addCoupon} disabled={!newCode.trim()}
                   className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-bold"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)', color: green, opacity: newCode.trim() ? 1 : 0.4 }}>
+                  style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.08)', color: green, opacity: newCode.trim() ? 1 : 0.4 }}>
                   <Plus className="w-3 h-3" /> Adicionar Cupom
                 </button>
               </div>
@@ -419,7 +419,7 @@ export function AdminFinanceiro() {
                     initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                     className="flex items-center gap-2 mt-3 text-xs p-3 rounded-xl"
                     style={saveMsg.type === 'ok'
-                      ? { background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)', color: green }
+                      ? { background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)', color: green }
                       : { background: isDark ? 'rgba(252,165,165,0.08)' : 'rgba(220,38,38,0.06)', color: isDark ? '#fca5a5' : '#dc2626' }}>
                     {saveMsg.type === 'ok'
                       ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
@@ -447,7 +447,7 @@ export function AdminFinanceiro() {
                 {/* Simple status — no technical jargon */}
                 <div className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold"
                   style={{
-                    background: mpActive ? (isDark ? 'rgba(34,197,94,0.1)' : 'rgba(0,107,43,0.07)') : (isDark ? 'rgba(239,68,68,0.1)' : 'rgba(220,38,38,0.06)'),
+                    background: mpActive ? (isDark ? 'rgba(34,197,94,0.1)' : 'rgba(22,101,52,0.07)') : (isDark ? 'rgba(239,68,68,0.1)' : 'rgba(220,38,38,0.06)'),
                     color: mpActive ? green : (isDark ? '#fca5a5' : '#dc2626'),
                   }}>
                   <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
@@ -475,7 +475,7 @@ export function AdminFinanceiro() {
                 {/* Current token preview (when set and not being edited) */}
                 {mpActive && !tokenChanged && (
                   <div className="flex items-center gap-2 mb-3 px-4 py-3 rounded-xl"
-                    style={{ background: isDark ? 'rgba(134,239,172,0.06)' : 'rgba(0,107,43,0.05)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(0,107,43,0.12)'}` }}>
+                    style={{ background: isDark ? 'rgba(134,239,172,0.06)' : 'rgba(22,101,52,0.05)', border: `1px solid ${isDark ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.12)'}` }}>
                     <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: green }} />
                     <span className="text-xs flex-1" style={{ color: green, fontWeight: 600 }}>
                       Chave configurada e ativa
@@ -502,7 +502,7 @@ export function AdminFinanceiro() {
                     style={{
                       background: inputBg,
                       border: `1px solid ${tokenChanged && mpTokenInput
-                        ? (isDark ? 'rgba(134,239,172,0.4)' : 'rgba(0,107,43,0.4)')
+                        ? (isDark ? 'rgba(134,239,172,0.4)' : 'rgba(22,101,52,0.4)')
                         : border}`,
                       color: text,
                     }}
@@ -554,7 +554,7 @@ export function AdminFinanceiro() {
                       initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
                       className="flex items-center gap-2 mt-2 text-xs p-3 rounded-xl"
                       style={tokenMsg.type === 'ok'
-                        ? { background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.06)', color: green }
+                        ? { background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.06)', color: green }
                         : { background: isDark ? 'rgba(252,165,165,0.08)' : 'rgba(220,38,38,0.06)', color: isDark ? '#fca5a5' : '#dc2626' }}>
                       {tokenMsg.type === 'ok'
                         ? <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
@@ -590,7 +590,7 @@ export function AdminFinanceiro() {
                 </div>
 
                 <div className="p-4 rounded-xl"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.04)' : 'rgba(0,107,43,0.03)', border: inputBrd }}>
+                  style={{ background: isDark ? 'rgba(134,239,172,0.04)' : 'rgba(22,101,52,0.03)', border: inputBrd }}>
                   <p className="text-xs font-bold mb-2" style={{ color: muted }}>RECEITA LÍQUIDA ESTIMADA</p>
                   <div className="space-y-1.5">
                     {([
@@ -641,7 +641,7 @@ export function AdminFinanceiro() {
               <div className="flex gap-3">
                 <a href="https://www.mercadopago.com.br/activities" target="_blank" rel="noreferrer"
                   className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', color: green }}>
+                  style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)', color: green }}>
                   <ExternalLink className="w-3.5 h-3.5" /> Ver Extrato MP
                 </a>
                 <a href="https://www.mercadopago.com.br/developers/panel/app" target="_blank" rel="noreferrer"
@@ -661,7 +661,7 @@ export function AdminFinanceiro() {
                   Últimos Pedidos
                 </h2>
                 <span className="ml-auto text-xs px-2.5 py-0.5 rounded-full font-bold"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(0,107,43,0.07)', color: green }}>
+                  style={{ background: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.07)', color: green }}>
                   {orders.length} pedido{orders.length !== 1 ? 's' : ''}
                 </span>
               </div>

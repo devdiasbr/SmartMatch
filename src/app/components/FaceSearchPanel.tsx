@@ -12,6 +12,7 @@ import { motion, AnimatePresence, useMotionValue, useTransform, animate } from '
 import * as faceService from '../lib/faceService';
 import { useCart } from '../contexts/CartContext';
 import { api } from '../lib/api';
+import { useTheme } from './ThemeProvider';
 
 /* ── tipos ──────────────────────────────────────────────────────────────── */
 
@@ -35,9 +36,6 @@ interface Props {
 
 const GREEN = '#86efac';
 const ELECTRIC = '#00FF7F';
-const MUTED = 'rgba(255,255,255,0.4)';
-const CARD  = 'rgba(255,255,255,0.03)';
-const BORD  = 'rgba(255,255,255,0.07)';
 
 /* ── AnimatedCounter ─────────────────────────────────────────────────────── */
 function AnimatedCounter({ from, to, duration = 1.8 }: { from: number; to: number; duration?: number }) {
@@ -94,6 +92,18 @@ function ScanRect() {
 
 export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
   const { addItem, isInCart, openDrawer } = useCart();
+  const { theme } = useTheme();
+  const d = theme === 'dark';
+
+  /* ── theme tokens ── */
+  const MUTED = d ? 'rgba(255,255,255,0.4)'  : 'rgba(9,9,11,0.45)';
+  const CARD  = d ? 'rgba(255,255,255,0.03)' : 'rgba(9,9,11,0.02)';
+  const BORD  = d ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const TEXT  = d ? '#fff' : '#09090B';
+  const IDLE_CAM_BG = d ? 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))' : 'linear-gradient(135deg,#166534,#15803d)';
+  const BUY_BG = d ? 'linear-gradient(135deg,rgba(22,101,52,0.9),rgba(21,128,61,0.85))' : 'linear-gradient(135deg,#166534,#15803d)';
+  const UPLOAD_BG = d ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.04)';
+  const UPLOAD_TEXT = d ? 'rgba(255,255,255,0.75)' : 'rgba(9,9,11,0.6)';
 
   const [stage,        setStage]        = useState<Stage>('idle');
   const [loadStep,     setLoadStep]     = useState('');
@@ -363,7 +373,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
               <Scan className="w-10 h-10" style={{ color: GREEN }} />
             </motion.div>
 
-            <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1.8rem', fontWeight: 900, color: '#fff', letterSpacing: '-0.02em' }} className="mb-3">
+            <h3 style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1.8rem', fontWeight: 900, color: TEXT, letterSpacing: '-0.02em' }} className="mb-3">
               Encontre suas fotos
             </h3>
             <p className="mb-8 text-sm leading-relaxed" style={{ color: MUTED }}>
@@ -376,7 +386,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                 whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                 onClick={startCamera}
                 className="flex items-center justify-center gap-3 px-6 py-4 rounded-2xl text-sm flex-1"
-                style={{ background: 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))', border: '1px solid rgba(134,239,172,0.25)', color: '#fff', fontWeight: 800, fontFamily: "'Montserrat',sans-serif" }}
+                style={{ background: IDLE_CAM_BG, border: '1px solid rgba(134,239,172,0.25)', color: '#fff', fontWeight: 800, fontFamily: "'Montserrat',sans-serif" }}
               >
                 <Camera className="w-5 h-5" /> Usar câmera
               </motion.button>
@@ -385,13 +395,13 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                 whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                 onClick={startUpload}
                 className="flex items-center justify-center gap-3 px-6 py-4 rounded-2xl text-sm flex-1"
-                style={{ background: 'rgba(255,255,255,0.05)', border: `1px solid ${BORD}`, color: 'rgba(255,255,255,0.75)', fontWeight: 700 }}
+                style={{ background: UPLOAD_BG, border: `1px solid ${BORD}`, color: UPLOAD_TEXT, fontWeight: 700 }}
               >
                 <Upload className="w-4 h-4" /> Enviar selfie
               </motion.button>
             </div>
 
-            <p className="mt-5 text-xs flex items-center justify-center gap-1.5" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            <p className="mt-5 text-xs flex items-center justify-center gap-1.5" style={{ color: d ? 'rgba(255,255,255,0.2)' : 'rgba(9,9,11,0.25)' }}>
               <Lock className="w-3 h-3" /> Sua imagem não é armazenada — apenas o vetor biométrico é enviado
             </p>
           </motion.div>
@@ -415,7 +425,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                 <Scan className="w-7 h-7" style={{ color: GREEN }} />
               </div>
             </div>
-            <p style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '1rem', color: '#fff' }} className="mb-2">
+            <p style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, fontSize: '1rem', color: TEXT }} className="mb-2">
               Preparando…
             </p>
             <p className="text-xs" style={{ color: MUTED, lineHeight: 1.7 }}>{loadStep}</p>
@@ -599,7 +609,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
 
             {/* ── texto abaixo ── */}
             <div className="text-center">
-              <p style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1.1rem', fontWeight: 900, color: '#fff' }} className="mb-1">
+              <p style={{ fontFamily: "'Montserrat',sans-serif", fontSize: '1.1rem', fontWeight: 900, color: TEXT }} className="mb-1">
                 {processStep || 'Buscando suas fotos…'}
               </p>
               <p className="text-xs" style={{ color: MUTED }}>
@@ -622,7 +632,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                 {matchedPhotos.length > 0 ? (
                   <>
                     <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm mb-1.5"
-                      style={{ background: 'rgba(134,239,172,0.08)', border: '1px solid rgba(134,239,172,0.2)', color: GREEN, fontWeight: 700 }}>
+                      style={{ background: d ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.08)', border: d ? '1px solid rgba(134,239,172,0.2)' : '1px solid rgba(22,101,52,0.2)', color: d ? GREEN : '#166534', fontWeight: 700 }}>
                       <Zap className="w-3.5 h-3.5" />
                       {matchedPhotos.length} {matchedPhotos.length === 1 ? 'foto encontrada' : 'fotos encontradas'}
                     </div>
@@ -634,7 +644,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                   </>
                 ) : (
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm"
-                    style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid ${BORD}`, color: MUTED, fontWeight: 600 }}>
+                    style={{ background: CARD, border: `1px solid ${BORD}`, color: MUTED, fontWeight: 600 }}>
                     <Users className="w-3.5 h-3.5" />
                     Nenhuma foto encontrada
                   </div>
@@ -653,7 +663,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                       openDrawer();
                     }}
                     className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm"
-                    style={{ background: 'linear-gradient(135deg,rgba(22,101,52,0.9),rgba(21,128,61,0.85))', border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 700 }}
+                    style={{ background: BUY_BG, border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 700 }}
                   >
                     <ShoppingCart className="w-4 h-4" />
                     Comprar tudo
@@ -681,7 +691,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: i * 0.06 }}
                       className="relative group overflow-hidden"
-                      style={{ borderRadius: 14, aspectRatio: '3/2', border: inCart ? '1px solid rgba(134,239,172,0.35)' : '1px solid rgba(255,255,255,0.06)', cursor: 'pointer' }}
+                      style={{ borderRadius: 14, aspectRatio: '3/2', border: inCart ? `1px solid ${d ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.35)'}` : `1px solid ${BORD}`, cursor: 'pointer' }}
                     >
                       <img src={photo.src} alt={photo.tag} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-400" style={{ filter: 'brightness(0.85)' }} />
 
@@ -719,8 +729,8 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                 className="text-center py-14 px-6 rounded-2xl"
                 style={{ background: CARD, border: `1px solid ${BORD}` }}
               >
-                <Users className="w-10 h-10 mx-auto mb-4" style={{ color: 'rgba(255,255,255,0.15)' }} />
-                <p style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, color: '#fff', fontSize: '1rem' }} className="mb-2">
+                <Users className="w-10 h-10 mx-auto mb-4" style={{ color: d ? 'rgba(255,255,255,0.15)' : 'rgba(9,9,11,0.2)' }} />
+                <p style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, color: TEXT, fontSize: '1rem' }} className="mb-2">
                   Nenhuma foto encontrada
                 </p>
                 <p className="text-sm mb-4" style={{ color: MUTED, lineHeight: 1.7 }}>
@@ -741,7 +751,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                   whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                   onClick={reset}
                   className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm mx-auto"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: `1px solid ${BORD}`, color: '#fff', fontWeight: 700 }}
+                  style={{ background: UPLOAD_BG, border: `1px solid ${BORD}`, color: TEXT, fontWeight: 700 }}
                 >
                   <RefreshCw className="w-4 h-4" /> Tentar novamente
                 </motion.button>
@@ -760,7 +770,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
               style={{ background: 'rgba(252,165,165,0.07)', border: '1px solid rgba(252,165,165,0.15)' }}>
               <AlertCircle className="w-8 h-8" style={{ color: '#fca5a5' }} />
             </div>
-            <p style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, color: '#fff', fontSize: '1.1rem' }} className="mb-3">
+            <p style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 800, color: TEXT, fontSize: '1.1rem' }} className="mb-3">
               {isCamBlocked ? 'Câmera não disponível' : 'Algo deu errado'}
             </p>
             <p className="text-sm mb-8" style={{ color: MUTED, lineHeight: 1.7 }}>{error}</p>
@@ -772,7 +782,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                   whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                   onClick={startUpload}
                   className="flex items-center justify-center gap-2 px-7 py-4 rounded-2xl text-sm w-full"
-                  style={{ background: 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))', border: '1px solid rgba(134,239,172,0.25)', color: '#fff', fontWeight: 800, fontFamily: "'Montserrat',sans-serif" }}
+                  style={{ background: IDLE_CAM_BG, border: '1px solid rgba(134,239,172,0.25)', color: '#fff', fontWeight: 800, fontFamily: "'Montserrat',sans-serif" }}
                 >
                   <Upload className="w-5 h-5" /> Enviar selfie do dispositivo
                 </motion.button>
@@ -781,7 +791,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                 whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
                 onClick={reset}
                 className="flex items-center justify-center gap-2 px-7 py-3 rounded-2xl text-sm w-full"
-                style={{ background: 'rgba(255,255,255,0.05)', border: `1px solid ${BORD}`, color: 'rgba(255,255,255,0.6)', fontWeight: 700 }}
+                style={{ background: UPLOAD_BG, border: `1px solid ${BORD}`, color: UPLOAD_TEXT, fontWeight: 700 }}
               >
                 <RefreshCw className="w-4 h-4" /> Voltar
               </motion.button>

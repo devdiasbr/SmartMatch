@@ -18,12 +18,12 @@ export function CartDrawer() {
   }, [drawerOpen, syncPrices, totalItems]);
 
   const bg = isDark ? '#0e0e1a' : '#ffffff';
-  const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,107,43,0.1)';
-  const textColor = isDark ? '#ffffff' : '#0D2818';
-  const mutedColor = isDark ? 'rgba(255,255,255,0.38)' : 'rgba(0,40,20,0.42)';
-  const itemBg = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,107,43,0.03)';
-  const green = isDark ? '#86efac' : '#006B2B';
-  const greenBright = isDark ? '#4ade80' : '#00843D';
+  const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(9,9,11,0.09)';
+  const textColor = isDark ? '#ffffff' : '#09090B';
+  const mutedColor = isDark ? 'rgba(255,255,255,0.38)' : '#71717A';
+  const itemBg = isDark ? 'rgba(255,255,255,0.03)' : '#F8F9FA';
+  const green = isDark ? '#86efac' : '#166534';
+  const greenBright = isDark ? '#4ade80' : '#15803D';
 
   return (
     <AnimatePresence>
@@ -63,7 +63,7 @@ export function CartDrawer() {
               <div className="flex items-center gap-3">
                 <div
                   className="w-8 h-8 rounded-lg flex items-center justify-center"
-                  style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)' }}
+                  style={{ background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.07)' }}
                 >
                   <ShoppingCart className="w-4 h-4" style={{ color: green }} />
                 </div>
@@ -150,8 +150,8 @@ export function CartDrawer() {
                       onClick={closeDrawer}
                       className="mt-6 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
                       style={{
-                        background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(0,107,43,0.08)',
-                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.18)' : 'rgba(0,107,43,0.15)'}`,
+                        background: isDark ? 'rgba(134,239,172,0.1)' : 'rgba(22,101,52,0.07)',
+                        border: `1px solid ${isDark ? 'rgba(134,239,172,0.18)' : 'rgba(22,101,52,0.15)'}`,
                         color: green,
                         fontWeight: 700,
                       }}
@@ -267,7 +267,7 @@ export function CartDrawer() {
                       style={{
                         background: isDark
                           ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))'
-                          : 'linear-gradient(135deg, #006B2B, #00843D)',
+                          : 'linear-gradient(135deg, #166534, #15803d)',
                         color: '#fff',
                         fontWeight: 800,
                         fontFamily: "'Montserrat', sans-serif",
