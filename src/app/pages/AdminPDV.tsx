@@ -65,14 +65,26 @@ function PhotoPreviewWithFooter({
   compact?: boolean;
   qrRight?: number;
 }) {
+  /* Detecta orientação da foto para exibir na proporção correta */
+  const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('landscape');
+  useEffect(() => {
+    const img = new Image();
+    img.onload = () => setOrientation(img.naturalWidth >= img.naturalHeight ? 'landscape' : 'portrait');
+    img.src = src;
+  }, [src]);
+
+  // 20×15 landscape = 4:3, 15×20 portrait = 3:4
+  const aspectRatio = orientation === 'landscape' ? '4/3' : '3/4';
+
   return (
-    <div className="overflow-hidden rounded-xl bg-black">
-      <img
-        src={src}
-        alt=""
-        className="w-full block object-cover"
-        style={{ maxHeight: compact ? 200 : 400 }}
-      />
+    <div className="overflow-hidden rounded-xl" style={{ breakInside: 'avoid', marginBottom: '0.75rem' }}>
+      <div className="relative w-full" style={{ aspectRatio }}>
+        <img
+          src={src}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+      </div>
       {footerSrc && (
         <div className="relative w-full select-none">
           <img src={footerSrc} alt="Rodapé" className="w-full block" draggable={false} />
@@ -367,7 +379,7 @@ body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
       const pageClass = it.orientation === 'portrait' ? 'page-portrait' : 'page-landscape';
 
       return `
-        <div class="page ${pageClass}"${idx > 0 ? ' style="page-break-before:always"' : ''}>
+        <div class="page ${pageClass}">
           <img src="${it.src}" class="photo"/>
           <div class="footer-wrap">
             <img src="${footerDataUrl}" class="footer-img"/>
@@ -378,7 +390,7 @@ body{font-family:'Montserrat',sans-serif;width:80mm;padding:8mm;color:#111;}
 
     pw.document.write(`<!DOCTYPE html><html><head><title>Fotos Smart Match</title>
 <style>
-/* Named pages — permitem orientação diferente por folha */
+/* Named pages — orientação diferente por folha */
 @page { margin: 0; }
 @page landscape-page { size: 200mm 150mm; margin: 0; }
 @page portrait-page  { size: 150mm 200mm; margin: 0; }
@@ -390,27 +402,30 @@ html, body { margin: 0; padding: 0; background: white; }
 .page {
   display: flex; flex-direction: column;
   overflow: hidden;
-  page-break-after: always; break-after: page;
 }
-.page:last-child { page-break-after: avoid; break-after: avoid; }
 
-/* Paisagem (padrão) — 200 × 150 mm (papel 15×20 deitado) */
+/* Quebra de página entre folhas (não antes da primeira) */
+.page + .page {
+  break-before: page;
+}
+
+/* Paisagem — 20 × 15 cm */
 .page-landscape {
   page: landscape-page;
   width: 200mm; height: 150mm;
 }
 
-/* Retrato — 150 × 200 mm (papel 15×20 em pé) */
+/* Retrato — 15 × 20 cm */
 .page-portrait {
   page: portrait-page;
   width: 150mm; height: 200mm;
 }
 
-/* Foto ocupa o espaço restante */
+/* Foto ocupa o espaço restante sem distorcer */
 .photo {
   display: block;
   width: 100%;
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
   object-fit: cover;
   object-position: center center;
@@ -529,7 +544,7 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                       <p className="text-xs" style={{ color:muted }}>Nenhum rodapé configurado</p>
                     </div>
                   )}
-                  <div className={`grid gap-3 ${(lastOrder.items?.length ?? 0) > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  <div style={(lastOrder.items?.length ?? 0) > 1 ? { columns: 2, columnGap: '0.75rem' } : {}}>
                     {lastOrder.items?.map((item: any, i: number) => (
                       <PhotoPreviewWithFooter
                         key={i}
