@@ -2,6 +2,10 @@
 
 Este indice organiza a documentacao tecnica por topicos.
 
+## Entrada principal
+
+- [Manual Tecnico Consolidado](manual/index.md)
+
 ## Sumario
 
 1. [Visao Geral e Fluxos](manual/01-visao-geral.md)
