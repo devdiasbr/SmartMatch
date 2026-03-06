@@ -145,22 +145,29 @@ async function adminAuth(c: any, next: () => Promise<void>) {
   // 2. Decode payload (no sig check) and validate user via admin API
   //    This handles ES256 / rotated keys / any algo the Supabase project uses.
   const payload = decodeJwtPayload(adminToken);
+  console.log("adminAuth: payload decoded:", payload ? `sub=${payload.sub}, exp=${payload.exp}` : "NULL");
+  console.log("adminAuth: env check: SUPABASE_URL=", process.env.SUPABASE_URL ? "SET" : "MISSING",
+    "SERVICE_ROLE_KEY=", process.env.SUPABASE_SERVICE_ROLE_KEY ? `SET(len=${process.env.SUPABASE_SERVICE_ROLE_KEY.length})` : "MISSING");
+
   if (payload?.sub) {
     // Check expiration
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-      console.log(`adminAuth: token expirado (exp=${payload.exp})`);
+      console.log(`adminAuth: token expirado (exp=${payload.exp}, now=${Math.floor(Date.now() / 1000)})`);
       return c.json({ error: "Não autorizado: token expirado" }, 401);
     }
-    const { data: { user }, error } = await sb().auth.admin.getUserById(payload.sub);
-    if (user && !error) {
-      console.log("adminAuth: validado via admin.getUserById (ES256/fallback)");
-      c.set("userId", user.id);
-      return await next();
+    try {
+      const { data: { user }, error } = await sb().auth.admin.getUserById(payload.sub);
+      console.log("adminAuth: getUserById result:", user ? `found(id=${user.id})` : "null", "error:", error?.message ?? "none");
+      if (user && !error) {
+        c.set("userId", user.id);
+        return await next();
+      }
+    } catch (e: any) {
+      console.log("adminAuth: getUserById exception:", e?.message);
     }
-    console.log("adminAuth: getUserById falhou:", error?.message);
   }
 
-  console.log("adminAuth: todas as estratégias falharam");
+  console.log("adminAuth: todas as estratégias falharam, token starts with:", adminToken.substring(0, 20));
   return c.json({ error: "Não autorizado: token inválido" }, 401);
 }
 
@@ -247,7 +254,15 @@ initStorage();
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
-app.get("/make-server-68454e9b/health", (c) => c.json({ status: "ok" }));
+app.get("/make-server-68454e9b/health", (c) => c.json({
+  status: "ok",
+  env: {
+    SUPABASE_URL: process.env.SUPABASE_URL ? "SET" : "MISSING",
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? `SET(len=${process.env.SUPABASE_SERVICE_ROLE_KEY.length})` : "MISSING",
+    SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET ? "SET" : "MISSING",
+    RESEND_API_KEY: process.env.RESEND_API_KEY ? "SET" : "MISSING",
+  },
+}));
 
 // ── Public Stats ──────────────────────────────────────────────────────────────
 
