@@ -268,9 +268,22 @@ app.get("/make-server-68454e9b/health", (c) => c.json({
 // Debug: test if Supabase admin client works at all
 app.get("/make-server-68454e9b/health/auth-test", async (c) => {
   try {
-    const { data, error } = await sb().auth.admin.listUsers({ page: 1, perPage: 1 });
-    if (error) return c.json({ ok: false, error: error.message });
-    return c.json({ ok: true, userCount: data.users.length });
+    const url = process.env.SUPABASE_URL ?? "";
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+    // Show partial URL/key to diagnose wrong project (safe: hostname only)
+    const urlPreview = url.substring(0, 45);
+    const keyPrefix = key.substring(0, 20);
+    const keySuffix = key.substring(key.length - 10);
+
+    const { data, error } = await sb().auth.admin.listUsers({ page: 1, perPage: 5 });
+    return c.json({
+      ok: !error,
+      userCount: data?.users?.length ?? 0,
+      userEmails: data?.users?.map((u: any) => u.email) ?? [],
+      error: error?.message ?? null,
+      urlPreview,
+      keyPreview: `${keyPrefix}...${keySuffix}`,
+    });
   } catch (e: any) {
     return c.json({ ok: false, exception: e?.message });
   }
