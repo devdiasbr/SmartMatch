@@ -1,3 +1,11 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [02. Arquitetura →](02-arquitetura-stack.md)
+
+---
+
+---
+
+---
+
 # Visao Geral e Fluxos
 
 A Smart Match resolve um problema real da fotografia de eventos: como o visitante encontra suas fotos entre milhares de imagens.
@@ -18,3 +26,12 @@ A Smart Match resolve um problema real da fotografia de eventos: como o visitant
 3. Monta carrinho e registra forma de pagamento.
 4. Finaliza venda, imprime fotos 15x20 com rodape e QR.
 5. Opcionalmente coleta opt-in de WhatsApp para envio e campanhas futuras.
+
+
+---
+
+---
+
+---
+
+[📚 Sumário](index.md) | [02. Arquitetura →](02-arquitetura-stack.md)

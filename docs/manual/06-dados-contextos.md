@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 05. Rotas e API](05-rotas-api.md) | [07. Design e Impressão →](07-design-impressao.md)
+
+---
+
+---
+
 # Modelo de Dados e Contextos
 
 ## KV principal
@@ -33,3 +39,9 @@ Chaves principais:
 - `AuthContext`: autenticacao admin e token.
 - `BrandingContext`: configuracoes de marca.
 - `CartContext`: estado do carrinho publico.
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 05. Rotas e API](05-rotas-api.md) | [07. Design e Impressão →](07-design-impressao.md)

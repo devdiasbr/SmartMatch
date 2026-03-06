@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 07. Design e Impressão](07-design-impressao.md) | [09. Segurança →](09-seguranca.md)
+
+---
+
+---
+
 # Configuracao e Deploy
 
 ## Pre-requisitos
@@ -31,3 +37,9 @@ No frontend:
 1. Publicar atualizacoes de `supabase/functions/server/index.tsx`.
 2. Validar endpoints admin com token.
 3. Validar fluxo PDV fim a fim (checkout, impressao, WhatsApp opt-in).
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 07. Design e Impressão](07-design-impressao.md) | [09. Segurança →](09-seguranca.md)

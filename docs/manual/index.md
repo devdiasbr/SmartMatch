@@ -1,79 +1,91 @@
-# Smart Match - Manual Tecnico
+# 📚 SUMÁRIO
 
-Este manual centraliza a documentacao por topicos para facilitar onboarding, operacao e evolucao da plataforma.
-
-## 📑 Indice
-
-- [01. Visao Geral e Fluxos](#01-visao-geral-e-fluxos)
-- [02. Arquitetura e Stack](#02-arquitetura-e-stack)
-- [03. Estrutura do Projeto](#03-estrutura-do-projeto)
-- [04. Funcionalidades](#04-funcionalidades)
-- [05. Rotas e API](#05-rotas-e-api)
-- [06. Modelo de Dados e Contextos](#06-modelo-de-dados-e-contextos)
-- [07. Design System e Impressao](#07-design-system-e-impressao)
-- [08. Configuracao e Deploy](#08-configuracao-e-deploy)
-- [09. Seguranca](#09-seguranca)
-- [10. PDV WhatsApp (Opt-in)](#10-pdv-whatsapp-opt-in)
+Bem-vindo ao manual completo do **SmartMatch**. Navegue pelos tópicos abaixo para entender a arquitetura, funcionalidades e operação da plataforma.
 
 ---
 
-## Indice do Manual
+[🏠 Home](../../README.md) | [01. Visão Geral](01-visao-geral.md) | [02. Arquitetura](02-arquitetura-stack.md) | [03. Estrutura](03-estrutura-projeto.md) | [04. Funcionalidades](04-funcionalidades.md) | [05. Rotas e API](05-rotas-api.md) | [06. Dados e Contextos](06-dados-contextos.md) | [07. Design e Impressão](07-design-impressao.md) | [08. Config e Deploy](08-configuracao-deploy.md) | [09. Segurança](09-seguranca.md) | [10. PDV WhatsApp](10-pdv-whatsapp.md)
 
-| Secao | Descricao |
-|---|---|
-| [01. Visao Geral e Fluxos](01-visao-geral.md) | Contexto do produto e jornadas de usuario/operador. |
-| [02. Arquitetura e Stack](02-arquitetura-stack.md) | Arquitetura, camadas e tecnologias principais. |
-| [03. Estrutura do Projeto](03-estrutura-projeto.md) | Mapa de pastas e arquivos chave do repositorio. |
-| [04. Funcionalidades](04-funcionalidades.md) | Recursos da area publica, admin e PDV. |
-| [05. Rotas e API](05-rotas-api.md) | Rotas frontend e endpoints backend relevantes. |
-| [06. Modelo de Dados e Contextos](06-dados-contextos.md) | Modelo KV, tabela de WhatsApp e contexts React. |
-| [07. Design System e Impressao](07-design-impressao.md) | Tokens visuais e padroes de impressao no PDV. |
-| [08. Configuracao e Deploy](08-configuracao-deploy.md) | Setup local, variaveis e publicacao. |
-| [09. Seguranca](09-seguranca.md) | Boas praticas, auth e protecao de dados. |
-| [10. PDV WhatsApp (Opt-in)](10-pdv-whatsapp.md) | Captura de consentimento e envio assistido. |
+---
 
-## 01. Visao Geral e Fluxos
+### **1. [VISÃO GERAL E FLUXOS](01-visao-geral.md)**
 
-Link: [01-visao-geral.md](01-visao-geral.md)
+*   **1.1. [Fluxo do usuário final](01-visao-geral.md#fluxo-do-usuario-final)**
+*   **1.2. [Fluxo do operador PDV](01-visao-geral.md#fluxo-do-operador-pdv)**
 
-## 02. Arquitetura e Stack
+---
 
-Link: [02-arquitetura-stack.md](02-arquitetura-stack.md)
+### **2. [ARQUITETURA E STACK](02-arquitetura-stack.md)**
 
-## 03. Estrutura do Projeto
+*   **2.1. [Arquitetura (alto nível)](02-arquitetura-stack.md#arquitetura-alto-nivel)**
+*   **2.2. [Camadas](02-arquitetura-stack.md#camadas)**
+*   **2.3. [Stack principal](02-arquitetura-stack.md#stack-principal)**
 
-Link: [03-estrutura-projeto.md](03-estrutura-projeto.md)
+---
 
-## 04. Funcionalidades
+### **3. [ESTRUTURA DO PROJETO](03-estrutura-projeto.md)**
 
-Link: [04-funcionalidades.md](04-funcionalidades.md)
+*   **3.1. [Pastas principais](03-estrutura-projeto.md#pastas-principais)**
+*   **3.2. [Arquivos chave](03-estrutura-projeto.md#arquivos-chave)**
 
-## 05. Rotas e API
+---
 
-Link: [05-rotas-api.md](05-rotas-api.md)
+### **4. [FUNCIONALIDADES](04-funcionalidades.md)**
 
-## 06. Modelo de Dados e Contextos
+*   **4.1. [Área pública](04-funcionalidades.md#area-publica)**
+*   **4.2. [Painel administrativo](04-funcionalidades.md#painel-administrativo)**
+*   **4.3. [PDV](04-funcionalidades.md#pdv)**
 
-Link: [06-dados-contextos.md](06-dados-contextos.md)
+---
 
-## 07. Design System e Impressao
+### **5. [ROTAS E API](05-rotas-api.md)**
 
-Link: [07-design-impressao.md](07-design-impressao.md)
+*   **5.1. [Rotas públicas (frontend)](05-rotas-api.md#rotas-publicas-frontend)**
+*   **5.2. [Rotas administrativas (frontend)](05-rotas-api.md#rotas-administrativas-frontend)**
+*   **5.3. [Endpoints públicos (backend)](05-rotas-api.md#endpoints-publicos-backend)**
+*   **5.4. [Endpoints administrativos (backend)](05-rotas-api.md#endpoints-administrativos-backend)**
 
-## 08. Configuracao e Deploy
+---
 
-Link: [08-configuracao-deploy.md](08-configuracao-deploy.md)
+### **6. [MODELO DE DADOS E CONTEXTOS](06-dados-contextos.md)**
 
-## 09. Seguranca
+*   **6.1. [KV principal](06-dados-contextos.md#kv-principal)**
+*   **6.2. [Estruturas de domínio](06-dados-contextos.md#estruturas-de-dominio)**
+*   **6.3. [Tabela adicional para WhatsApp](06-dados-contextos.md#tabela-adicional-para-whatsapp)**
+*   **6.4. [Contextos React](06-dados-contextos.md#contextos-react)**
 
-Link: [09-seguranca.md](09-seguranca.md)
+---
 
-## 10. PDV WhatsApp (Opt-in)
+### **7. [DESIGN SYSTEM E IMPRESSÃO](07-design-impressao.md)**
 
-Link: [10-pdv-whatsapp.md](10-pdv-whatsapp.md)
+*   **7.1. [Design](07-design-impressao.md#design)**
+*   **7.2. [Impressão fotográfica no PDV](07-design-impressao.md#impressao-fotografica-no-pdv)**
 
-## Guias relacionados
+---
 
-- [Indice Geral de Docs](../index.md)
-- [Implementacao Final](../IMPLEMENTACAO_FINAL.md)
-- [Orcamento Comercial](../ORCAMENTO_COMERCIAL.md)
+### **8. [CONFIGURAÇÃO E DEPLOY](08-configuracao-deploy.md)**
+
+*   **8.1. [Pré-requisitos](08-configuracao-deploy.md#pre-requisitos)**
+*   **8.2. [Setup local](08-configuracao-deploy.md#setup-local)**
+*   **8.3. [Variáveis e segredos](08-configuracao-deploy.md#variaveis-e-segredos)**
+*   **8.4. [Operação recomendada](08-configuracao-deploy.md#operacao-recomendada)**
+
+---
+
+### **9. [SEGURANÇA](09-seguranca.md)**
+
+*   **9.1. [Controles principais](09-seguranca.md#controles-principais)**
+*   **9.2. [Boas práticas operacionais](09-seguranca.md#boas-praticas-operacionais)**
+
+---
+
+### **10. [PDV WHATSAPP (OPT-IN)](10-pdv-whatsapp.md)**
+
+*   **10.1. [Objetivo](10-pdv-whatsapp.md#objetivo)**
+*   **10.2. [Fluxo implementado](10-pdv-whatsapp.md#fluxo-implementado)**
+*   **10.3. [Endpoints envolvidos](10-pdv-whatsapp.md#endpoints-envolvidos)**
+*   **10.4. [SQL da tabela](10-pdv-whatsapp.md#sql-da-tabela)**
+
+---
+
+*Documentação gerada em 2025-07-15.*

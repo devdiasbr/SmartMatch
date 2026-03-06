@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 03. Estrutura](03-estrutura-projeto.md) | [05. Rotas e API →](05-rotas-api.md)
+
+---
+
+---
+
 # Funcionalidades
 
 ## Area publica
@@ -24,3 +30,9 @@
 - Impressao fotografica 15x20 com rodape e QR ajustavel.
 - Comprovante termico.
 - Opt-in de WhatsApp no checkout para comunicacao posterior.
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 03. Estrutura](03-estrutura-projeto.md) | [05. Rotas e API →](05-rotas-api.md)

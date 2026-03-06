@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 06. Dados e Contextos](06-dados-contextos.md) | [08. Config e Deploy →](08-configuracao-deploy.md)
+
+---
+
+---
+
 # Design System e Impressao
 
 ## Design
@@ -14,3 +20,9 @@
 - Orientacao detectada por dimensoes reais da imagem.
 - Rodape customizavel com posicao de QR ajustavel via slider.
 - Comprovante termico 80mm para operacao presencial.
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 06. Dados e Contextos](06-dados-contextos.md) | [08. Config e Deploy →](08-configuracao-deploy.md)

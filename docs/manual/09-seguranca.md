@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 08. Config e Deploy](08-configuracao-deploy.md) | [10. PDV WhatsApp →](10-pdv-whatsapp.md)
+
+---
+
+---
+
 # Seguranca
 
 ## Controles principais
@@ -15,3 +21,9 @@
 - Evitar expor tokens em logs.
 - Revisar periodicamente permissao das tabelas auxiliares.
 - Monitorar volume de chamadas de sync/reindex.
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 08. Config e Deploy](08-configuracao-deploy.md) | [10. PDV WhatsApp →](10-pdv-whatsapp.md)

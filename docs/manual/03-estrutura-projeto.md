@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 02. Arquitetura](02-arquitetura-stack.md) | [04. Funcionalidades →](04-funcionalidades.md)
+
+---
+
+---
+
 # Estrutura do Projeto
 
 ## Pastas principais
@@ -17,3 +23,9 @@
 - `src/app/lib/api.ts`: contratos de API e chamadas admin/public.
 - `supabase/functions/server/index.tsx`: endpoints HTTP e regras de negocio.
 - `supabase/functions/server/faces.ts`: indexacao e busca de embeddings no pgvector.
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 02. Arquitetura](02-arquitetura-stack.md) | [04. Funcionalidades →](04-funcionalidades.md)

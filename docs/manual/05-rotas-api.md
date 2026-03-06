@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 04. Funcionalidades](04-funcionalidades.md) | [06. Dados e Contextos →](06-dados-contextos.md)
+
+---
+
+---
+
 # Rotas e API
 
 Todos os endpoints do backend sao prefixados por `/make-server-68454e9b`.
@@ -47,3 +53,9 @@ Todos os endpoints do backend sao prefixados por `/make-server-68454e9b`.
 - `POST /admin/whatsapp-contacts`
 - `GET /admin/whatsapp-contacts`
 - `POST /admin/whatsapp-contacts/mark-sent`
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 04. Funcionalidades](04-funcionalidades.md) | [06. Dados e Contextos →](06-dados-contextos.md)

@@ -1,3 +1,9 @@
+[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [← 01. Visão Geral](01-visao-geral.md) | [03. Estrutura →](03-estrutura-projeto.md)
+
+---
+
+---
+
 # Arquitetura e Stack
 
 ## Arquitetura (alto nivel)
@@ -30,3 +36,9 @@
 - Supabase JS
 - Recharts
 - Lucide React
+
+---
+
+---
+
+[📚 Sumário](index.md) | [← 01. Visão Geral](01-visao-geral.md) | [03. Estrutura →](03-estrutura-projeto.md)
