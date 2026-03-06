@@ -533,8 +533,16 @@ app.get("/make-server-68454e9b/admin/events", adminAuth, async (c) => {
   try {
     await flattenToGlobal(c.get("userId"));
     const ids = await getList(`${KV}events:index`);
-    const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean);
-    (events as any[]).sort((a: any, b: any) => a.date.localeCompare(b.date));
+    const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean) as any[];
+    // Garante que photoCount reflete a lista real (corrige inconsistências após sync)
+    await Promise.all(events.map(async (ev: any) => {
+      const realList: string[] = await getList(`${KV}photos:event:${ev.id}`);
+      if (realList.length !== ev.photoCount) {
+        ev.photoCount = realList.length;
+        await kv.set(`${KV}event:${ev.id}`, { ...ev, photoCount: realList.length, updatedAt: new Date().toISOString() });
+      }
+    }));
+    events.sort((a: any, b: any) => a.date.localeCompare(b.date));
     return c.json({ events });
   } catch (err) {
     console.log("Erro ao listar eventos (admin):", err);
@@ -546,7 +554,15 @@ app.get("/make-server-68454e9b/admin/events", adminAuth, async (c) => {
 app.get("/make-server-68454e9b/events", async (c) => {
   try {
     const ids = await getList(`${KV}events:index`);
-    const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean);
+    const events = (await Promise.all(ids.map((id) => kv.get(`${KV}event:${id}`)))).filter(Boolean) as any[];
+    // Garante que photoCount reflete a lista real (corrige KV desatualizado)
+    await Promise.all(events.map(async (ev: any) => {
+      const realList: string[] = await getList(`${KV}photos:event:${ev.id}`);
+      if (realList.length !== ev.photoCount) {
+        ev.photoCount = realList.length;
+        await kv.set(`${KV}event:${ev.id}`, { ...ev, photoCount: realList.length, updatedAt: new Date().toISOString() });
+      }
+    }));
     (events as any[]).sort((a: any, b: any) => a.date.localeCompare(b.date));
     return c.json({ events });
   } catch (err) {
@@ -1076,6 +1092,30 @@ app.get("/make-server-68454e9b/events/:id/faces", async (c) => {
   }
 });
 
+// ── Clear Embeddings (before re-index) ──────────────────────────────────────
+
+/**
+ * DELETE /admin/clear-embeddings
+ * Body: { eventId?: string }  — omit eventId to clear ALL embeddings
+ */
+app.post("/make-server-68454e9b/admin/clear-embeddings", adminAuth, async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const { eventId } = body as { eventId?: string };
+    if (eventId) {
+      await faces.deleteFacesByEvent(eventId);
+      console.log(`[clear-embeddings] Limpou embeddings do evento ${eventId}`);
+    } else {
+      await faces.clearAllEmbeddings();
+      console.log(`[clear-embeddings] Limpou TODOS os embeddings`);
+    }
+    return c.json({ success: true });
+  } catch (err: any) {
+    console.log("[clear-embeddings] Erro:", err);
+    return c.json({ error: err.message ?? String(err) }, 500);
+  }
+});
+
 // ── Face Migration (KV → pgvector) ───────────────────────────────────────────
 
 app.post("/make-server-68454e9b/admin/migrate-faces-pgvector", adminAuth, async (c) => {
@@ -1244,10 +1284,36 @@ app.get("/make-server-68454e9b/admin/events/:id/photo-ids", adminAuth, async (c)
     if (!event) return c.json({ error: "Evento não encontrado" }, 404);
     const photoIds: string[] = await getList(`${KV}photos:event:${id}`);
     console.log(`[photo-ids] Evento ${id}: ${photoIds.length} fotos`);
-    return c.json({ photoIds, total: photoIds.length });
+
+    // Fetch photo records and batch-create signed URLs for client-side face detection
+    const photoMeta: { id: string; storagePath: string | null }[] = [];
+    const storagePaths: string[] = [];
+    for (const pid of photoIds) {
+      const photo: any = await kv.get(`${KV}photo:${pid}`);
+      const sp = photo?.storagePath ?? null;
+      photoMeta.push({ id: pid, storagePath: sp });
+      if (sp) storagePaths.push(sp);
+    }
+
+    const urlMap: Record<string, string> = {};
+    if (storagePaths.length > 0) {
+      const { data: signed } = await sb().storage.from(BUCKET).createSignedUrls(storagePaths, 3600);
+      if (signed) {
+        for (const item of signed) {
+          if (item.signedUrl) urlMap[item.path] = item.signedUrl;
+        }
+      }
+    }
+
+    const photos = photoMeta.map((p) => ({
+      id: p.id,
+      url: p.storagePath ? (urlMap[p.storagePath] ?? null) : null,
+    }));
+
+    return c.json({ photoIds, photos, total: photoIds.length });
   } catch (err) {
     console.log("Erro ao buscar IDs de fotos:", err);
-    return c.json({ photoIds: [], total: 0, warning: `Erro ao buscar lista: ${err}` });
+    return c.json({ photoIds: [], photos: [], total: 0, warning: `Erro ao buscar lista: ${err}` });
   }
 });
 
@@ -1510,12 +1576,15 @@ app.post("/make-server-68454e9b/faces/search", async (c) => {
       return c.json({ error: "eventId e embedding são obrigatórios" }, 400);
     }
 
-    console.log(`[faces/search] Buscando faces para evento ${eventId}, embedding length: ${embedding.length}, threshold: ${threshold ?? 0.78}`);
+    // threshold padrão 0.88 — precisão alta para evitar falsos positivos em fotos de grupo
+    // (equivale a L2 ~0.49, mais estrito que o padrão face-api.js de 0.60)
+    const primaryThreshold = typeof threshold === "number" ? threshold : 0.88;
 
-    const searchThreshold = typeof threshold === "number" ? threshold : 0.78;
-    const matches = await faces.searchFaces(embedding, eventId, searchThreshold);
+    console.log(`[faces/search] evento=${eventId}, threshold=${primaryThreshold}`);
 
-    console.log(`[faces/search] ✓ Encontrados ${matches.length} matches para evento ${eventId}`);
+    const matches = await faces.searchFaces(embedding, eventId, primaryThreshold);
+
+    console.log(`[faces/search] ✓ ${matches.length} matches para evento ${eventId}`);
     return c.json({ matches });
   } catch (err) {
     console.log("Erro na busca facial por pgvector:", err);
@@ -1818,6 +1887,110 @@ app.post("/make-server-68454e9b/orders/pos", adminAuth, async (c) => {
   } catch (err) {
     console.log("Erro ao criar pedido PDV:", err);
     return c.json({ error: `Erro ao criar pedido PDV: ${err}` }, 500);
+  }
+});
+
+// ── WhatsApp Contacts ── (opt-in PDV → campanhas de marketing) ─────────────────
+
+/*
+  Tabela (criar no Supabase Dashboard → SQL Editor):
+
+  CREATE TABLE IF NOT EXISTS whatsapp_contacts_68454e9b (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    phone        TEXT NOT NULL,
+    customer_name TEXT,
+    order_id     TEXT,
+    event_id     TEXT,
+    event_name   TEXT,
+    photo_ids    TEXT[],
+    photo_urls   TEXT[],
+    opt_in_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    message_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS idx_wa_contacts_phone ON whatsapp_contacts_68454e9b(phone);
+  CREATE INDEX IF NOT EXISTS idx_wa_contacts_event ON whatsapp_contacts_68454e9b(event_id);
+  CREATE INDEX IF NOT EXISTS idx_wa_contacts_order ON whatsapp_contacts_68454e9b(order_id);
+*/
+
+app.post("/make-server-68454e9b/admin/whatsapp-contacts", adminAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { phone, customerName, orderId, eventId, eventName, photoIds, photoUrls } = body;
+
+    if (!phone) return c.json({ error: "Número de WhatsApp é obrigatório" }, 400);
+
+    // Normaliza: remove tudo exceto dígitos e o +
+    const normalizedPhone = phone.replace(/[^\d+]/g, "");
+    if (normalizedPhone.replace(/\D/g, "").length < 10) {
+      return c.json({ error: "Número de WhatsApp inválido" }, 400);
+    }
+
+    const { error } = await sb()
+      .from("whatsapp_contacts_68454e9b")
+      .insert({
+        phone: normalizedPhone,
+        customer_name: customerName ?? null,
+        order_id: orderId ?? null,
+        event_id: eventId ?? null,
+        event_name: eventName ?? null,
+        photo_ids: photoIds ?? [],
+        photo_urls: photoUrls ?? [],
+        opt_in_at: new Date().toISOString(),
+      });
+
+    if (error) {
+      console.log("[WhatsApp] Erro ao salvar contato:", error.message);
+      return c.json({ error: `Erro ao salvar contato: ${error.message}` }, 500);
+    }
+
+    console.log(`[WhatsApp] ✓ Contato salvo: ${normalizedPhone} → pedido ${orderId}`);
+    return c.json({ success: true });
+  } catch (err) {
+    console.log("[WhatsApp] Erro:", err);
+    return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+app.get("/make-server-68454e9b/admin/whatsapp-contacts", adminAuth, async (c) => {
+  try {
+    const eventId = c.req.query("eventId");
+    const limit   = Math.min(500, parseInt(c.req.query("limit") ?? "200", 10));
+
+    let query = sb()
+      .from("whatsapp_contacts_68454e9b")
+      .select("*")
+      .order("opt_in_at", { ascending: false })
+      .limit(limit);
+
+    if (eventId) query = query.eq("event_id", eventId);
+
+    const { data, error } = await query;
+    if (error) return c.json({ error: error.message }, 500);
+
+    return c.json({ contacts: data ?? [], total: data?.length ?? 0 });
+  } catch (err) {
+    return c.json({ error: `Erro: ${err}` }, 500);
+  }
+});
+
+// Marca contato como mensagem enviada (por order_id)
+app.post("/make-server-68454e9b/admin/whatsapp-contacts/mark-sent", adminAuth, async (c) => {
+  try {
+    const { orderId } = await c.req.json();
+    if (!orderId) return c.json({ error: "orderId é obrigatório" }, 400);
+
+    const { error } = await sb()
+      .from("whatsapp_contacts_68454e9b")
+      .update({ message_sent: true })
+      .eq("order_id", orderId);
+
+    if (error) return c.json({ error: error.message }, 500);
+
+    console.log(`[WhatsApp] ✓ Mensagem marcada como enviada: pedido ${orderId}`);
+    return c.json({ success: true });
+  } catch (err) {
+    return c.json({ error: `Erro: ${err}` }, 500);
   }
 });
 
@@ -2411,13 +2584,18 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
 
         console.log(`[Sync] Evento ${eventSlug}: ${kvPhotoCount}/${storagePhotoCount} fotos (${syncPercentage}%)`);
 
+        let event: any = await kv.get(`${KV}event:${eventSlug}`);
+
         if (skipComplete && syncPercentage >= 100) {
           console.log(`[Sync] ⏭ Pulando ${eventSlug} (100% sincronizado)`);
           eventsSkipped++;
+          // Corrige photoCount se o registro estiver desatualizado (mesmo pulando a importação)
+          if (event && event.photoCount !== kvPhotoCount) {
+            await kv.set(`${KV}event:${eventSlug}`, { ...event, photoCount: kvPhotoCount, updatedAt: new Date().toISOString() });
+            console.log(`[Sync] ✓ photoCount corrigido para ${kvPhotoCount} em ${eventSlug} (sem re-importação)`);
+          }
           continue;
         }
-
-        let event: any = await kv.get(`${KV}event:${eventSlug}`);
         const isNewEvent = !event;
 
         if (isNewEvent) {
@@ -2448,6 +2626,8 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
         } else {
           eventsSkipped++;
           console.log(`[Sync] → Evento ${eventSlug} já existe`);
+          // Garante que o evento está no índice mesmo que tenha sido omitido anteriormente
+          await appendToList(`${KV}events:index`, eventSlug);
         }
 
         const existingPaths = new Set<string>();
@@ -2478,9 +2658,13 @@ app.post("/make-server-68454e9b/admin/sync-storage", adminAuth, async (c) => {
           console.log(`[Sync] ✓ Importadas ${newPhotosForEvent} fotos novas para ${eventSlug}`);
         }
 
-        if (newPhotosForEvent > 0 || isNewEvent) {
+        // Sempre atualiza photoCount — garante que o registro reflita a lista real
+        // mesmo quando todas as fotos já existiam (foram puladas)
+        {
           const allPhotoIds = await getList(`${KV}photos:event:${eventSlug}`);
-          await kv.set(`${KV}event:${eventSlug}`, { ...event, photoCount: allPhotoIds.length, updatedAt: new Date().toISOString() });
+          if (event.photoCount !== allPhotoIds.length || newPhotosForEvent > 0 || isNewEvent) {
+            await kv.set(`${KV}event:${eventSlug}`, { ...event, photoCount: allPhotoIds.length, updatedAt: new Date().toISOString() });
+          }
         }
       } catch (e: any) {
         errors.push(`evento=${eventSlug}: ${e.message}`);

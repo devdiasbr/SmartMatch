@@ -434,7 +434,7 @@ export const api = {
 
   // ── Sync Storage → KV ───────────────────────────────────────────────────
   syncStorage: (token: string, skipComplete = false) =>
-    aPost<{ stats: { eventsCreated: number; photosImported: number; errors: string[] } }>(
+    aPost<{ stats: { eventsCreated: number; photosImported: number; eventsSkipped: number; photosSkipped: number; elapsedMs: number; errors: string[] } }>(
       `/admin/sync-storage${skipComplete ? '?skipComplete=true' : ''}`,
       {},
       token,
@@ -454,6 +454,52 @@ export const api = {
   diagnoseKv: (token: string) =>
     aGet<{ total: number; events: { id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }[] }>(
       '/admin/diagnose-kv',
+      token,
+    ),
+
+  // ── Reindex ──────────────────────────────────────────────────────────────
+
+  /** Retorna a lista de IDs de fotos de um evento (para reindexação foto a foto) */
+  getEventPhotoIds: (eventId: string, token: string) =>
+    aGet<{ photoIds: string[]; photos: { id: string; url: string | null }[]; total: number }>(
+      `/admin/events/${eventId}/photo-ids`,
+      token,
+    ),
+
+  /** Limpa embeddings pgvector de um evento (ou todos se eventId omitido) */
+  clearEmbeddings: (token: string, eventId?: string) =>
+    aPost<{ success: boolean }>('/admin/clear-embeddings', eventId ? { eventId } : {}, token),
+
+  /** Reindexar uma foto individual no pgvector */
+  reindexPhoto: (eventId: string, photoId: string, token: string) =>
+    aPost<{ success: boolean; notFound?: boolean; noFace?: boolean; faces: number }>(
+      '/admin/reindex-photo',
+      { eventId, photoId },
+      token,
+    ),
+
+  /** Salva contato de WhatsApp do cliente (opt-in PDV → marketing) */
+  saveWhatsappContact: (
+    data: {
+      phone: string;
+      customerName?: string;
+      orderId?: string;
+      eventId?: string;
+      eventName?: string;
+      photoIds?: string[];
+      photoUrls?: string[];
+    },
+    token: string,
+  ) => aPost<{ success: boolean }>('/admin/whatsapp-contacts', data, token),
+
+  /** Marca contato como mensagem enviada (por order_id) */
+  markWhatsappSent: (orderId: string, token: string) =>
+    aPost<{ success: boolean }>('/admin/whatsapp-contacts/mark-sent', { orderId }, token),
+
+  /** Lista contatos de WhatsApp (para campanhas marketing) */
+  getWhatsappContacts: (token: string, eventId?: string) =>
+    aGet<{ contacts: any[]; total: number }>(
+      `/admin/whatsapp-contacts${eventId ? `?eventId=${eventId}` : ''}`,
       token,
     ),
 };

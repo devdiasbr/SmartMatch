@@ -144,47 +144,48 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
     }
   }, []);
 
-  /* ── processar canvas (comum entre câmera e upload) ───────────────────── */
+  /* ── buscar por embedding (compartilhado entre câmera e upload) ────────── */
+
+  const _searchByDescriptor = async (queryDescriptor: number[]) => {
+    setProcessStep('Buscando suas fotos…');
+    let matched: string[] = [];
+    let conf = 0;
+
+    try {
+      // threshold 0.88 = cosine similarity ~ L2 0.49 (alta precisão, evita falsos positivos em fotos de grupo)
+      const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor, 0.88, org);
+      matched = matches.map((m) => m.photoId);
+      const best = matches.length > 0 ? matches[0].similarity : 0;
+      conf = Math.max(0, Math.min(100, Math.round(best * 100)));
+    } catch (_pgErr) {
+      // ── Fallback: busca local caso o servidor falhe ───────────────────
+      console.warn('[FaceSearch] pgvector falhou, usando fallback local:', _pgErr);
+      setProcessStep('Comparando rostos (modo offline)…');
+      const { faces: allFaces } = await api.getEventFaces(eventId, org);
+        const ranked = faceService.findRankedMatches(queryDescriptor, allFaces, 0.45, 0.52);
+      matched = ranked.map((m) => m.photoId);
+      const bestDist = ranked.length > 0 ? ranked[0].minDistance : 1;
+      conf = Math.max(0, Math.min(100, Math.round((1 - bestDist / 0.75) * 100)));
+    }
+
+    setMatchedIds(matched);
+    setConfidence(conf);
+    setStage('results');
+  };
+
+  /* ── processar canvas (upload de selfie) ─────────────────────────────── */
 
   const processCanvas = async (snap: HTMLCanvasElement) => {
     setStage('processing');
     setProcessStep('Detectando rosto…');
     try {
-      // ── Passo 1: detecta rosto na selfie (local, face-api.js) ─────────────
       const det = await faceService.detectSingleFace(snap);
       if (!det) {
         setError('Nenhum rosto reconhecido. Tente em boa iluminação e olhando diretamente para a câmera.');
         setStage('error');
         return;
       }
-      const queryDescriptor = Array.from(det.descriptor);
-
-      // ── Passo 2: busca no pgvector via servidor (ANN O(log n)) ────────────
-      // Envia apenas 1 vetor 128-dim — sem baixar todos os descritores do evento.
-      setProcessStep('Buscando suas fotos…');
-      let matched: string[] = [];
-      let conf = 0;
-
-      try {
-        const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor, 0.78, org);
-        matched = matches.map((m) => m.photoId);
-        // Confiança baseada na melhor similaridade coseno (0..1 → 0..100%)
-        const best = matches.length > 0 ? matches[0].similarity : 0;
-        conf = Math.max(0, Math.min(100, Math.round(best * 100)));
-      } catch (_pgErr) {
-        // ── Fallback: busca local caso o servidor falhe ───────────────────
-        console.warn('[FaceSearch] pgvector falhou, usando fallback local:', _pgErr);
-        setProcessStep('Comparando rostos (modo offline)…');
-        const { faces: allFaces } = await api.getEventFaces(eventId, org);
-        const ranked = faceService.findRankedMatches(queryDescriptor, allFaces);
-        matched = ranked.map((m) => m.photoId);
-        const bestDist = ranked.length > 0 ? ranked[0].minDistance : 1;
-        conf = Math.max(0, Math.min(100, Math.round((1 - bestDist / 0.8) * 100)));
-      }
-
-      setMatchedIds(matched);
-      setConfidence(conf);
-      setStage('results');
+      await _searchByDescriptor(Array.from(det.descriptor));
     } catch (err: any) {
       setError(err.message ?? 'Erro ao processar reconhecimento facial.');
       setStage('error');
@@ -309,20 +310,34 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
     e.target.value = '';
   };
 
-  /* ── capturar da câmera ────────────────────────────────────────────────── */
+  /* ── capturar da câmera (multi-frame para melhor precisão) ──────────────── */
 
   const capture = async () => {
     const video = videoRef.current;
     if (!video || !faceDetected) return;
 
-    stopCamera();
+    setStage('processing');
+    setProcessStep('Capturando rosto…');
 
-    const snap = document.createElement('canvas');
-    snap.width  = video.videoWidth;
-    snap.height = video.videoHeight;
-    snap.getContext('2d')!.drawImage(video, 0, 0);
+    try {
+      // 3 frames com 150ms de intervalo → descriptor médio L2-norm
+      // Reduz ruído da câmera e melhora significativamente a qualidade do match
+      const det = await faceService.detectSingleFaceMultiFrame(video, 3, 150);
 
-    await processCanvas(snap);
+      stopCamera();
+
+      if (!det) {
+        setError('Nenhum rosto reconhecido. Tente em boa iluminação e olhando diretamente para a câmera.');
+        setStage('error');
+        return;
+      }
+
+      await _searchByDescriptor(Array.from(det.descriptor));
+    } catch (err: any) {
+      stopCamera();
+      setError(err.message ?? 'Erro ao processar reconhecimento facial.');
+      setStage('error');
+    }
   };
 
   /* ── reset ────────────────────────────────────────────────────────────── */

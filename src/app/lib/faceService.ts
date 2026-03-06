@@ -28,7 +28,7 @@ const MODEL_URL =
 
 // ── Cache Storage — persiste entre reloads (ao contrário da memória) ──────────
 
-const CACHE_NAME = 'smart-match-face-models-v2';
+const CACHE_NAME = 'smart-match-face-models-v3';
 
 /**
  * Fetch com cache persistente via Cache Storage API.
@@ -63,7 +63,7 @@ async function cachedFetch(
   }
 }
 
-// ── Singleton: carrega modelos apenas uma vez por sessão ──────────────────────
+// ── Singleton: carrega modelos base apenas uma vez por sessão ─────────────────
 
 let _modelsPromise: Promise<void> | null = null;
 
@@ -81,7 +81,6 @@ async function _doLoad(): Promise<void> {
   faceapi.env.monkeyPatch({ fetch: cachedFetch as typeof globalThis.fetch });
 
   // Monkey-patch para corrigir "Illegal constructor" do HTMLCanvasElement
-  // face-api.js tenta criar canvas com `new HTMLCanvasElement()` que não é permitido
   faceapi.env.monkeyPatch({
     Canvas: HTMLCanvasElement as any,
     createCanvasElement: () => document.createElement('canvas'),
@@ -89,18 +88,39 @@ async function _doLoad(): Promise<void> {
   });
 
   await Promise.all([
-    // TinyFaceDetector — 190 KB (vs 6 MB do SsdMobilenetv1), 15-20× mais rápido
+    // TinyFaceDetector — 190 KB, usado para preview em tempo real
     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-    // faceLandmark68TinyNet — 80 KB (vs 350 KB), mesma qualidade de alinhamento
+    // faceLandmark68TinyNet — 80 KB, alinhamento de face
     faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-    // faceRecognitionNet — mantemos o ResNet-34 completo (128-dim, melhor qualidade)
+    // faceRecognitionNet — ResNet-34 completo (128-dim, qualidade máxima)
     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
   ]);
 }
 
+// ── Modelos de alta qualidade (SsdMobilenetv1 — para indexação de fotos) ──────
+// SsdMobilenetv1 (~5.4 MB) tem MUITO mais recall que TinyFaceDetector:
+//   • detecta rostos em grupos, ângulos, óculos, baixa resolução
+//   • ~15× mais lento, mas só usado durante indexação (admin, não real-time)
+// Carregado lazy — só quando necessário, persistido no Cache Storage.
+
+let _hqModelsPromise: Promise<void> | null = null;
+
+export function loadModelsHighQuality(): Promise<void> {
+  if (!_hqModelsPromise) {
+    _hqModelsPromise = _doLoadHQ();
+  }
+  return _hqModelsPromise;
+}
+
+async function _doLoadHQ(): Promise<void> {
+  // Garante que os modelos base já estão carregados
+  await loadModels();
+  const faceapi = await import('face-api.js');
+  // SsdMobilenetv1 — detector full-accuracy para fotos de eventos
+  await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+}
+
 // ── Pré-carrega em background assim que o módulo é importado ─────────────────
-// Isso garante que quando o usuário clicar em "buscar por rosto" os modelos
-// já estarão (ou estarão quase) prontos — especialmente rápido quando há cache.
 loadModels().catch(() => {/* silencia erros de pré-carregamento */});
 
 // ── Opções TinyFaceDetector ───────────────────────────────────────────────────
@@ -154,6 +174,107 @@ export async function detectAllFaces(
     .withFaceLandmarks(true)     // true = usa faceLandmark68TinyNet
     .withFaceDescriptors();
   return results.map((r) => Array.from(r.descriptor));
+}
+
+/**
+ * detectAllFacesHighQuality — detector duplo para indexação de fotos de evento.
+ *
+ * Usa SsdMobilenetv1 como detector primário (muito melhor recall em fotos de grupo,
+ * ângulos, óculos, iluminação adversa) e TinyFaceDetector como secundário para
+ * capturar qualquer rosto que o SSD possa ter perdido.
+ *
+ * Os descritores são gerados pelo mesmo faceRecognitionNet (ResNet-34 128-dim),
+ * portanto são 100% compatíveis com os gerados durante a busca do usuário.
+ *
+ * REQUER loadModelsHighQuality() antes de chamar.
+ */
+export async function detectAllFacesHighQuality(
+  input: HTMLImageElement | HTMLCanvasElement,
+  options: { scoreThreshold?: number } = {},
+): Promise<number[][]> {
+  const faceapi = await import('face-api.js');
+  const minConf = options.scoreThreshold ?? 0.30;
+
+  // ── Passo 1: SsdMobilenetv1 — detector full-accuracy ─────────────────────
+  const ssdOpts = new faceapi.SsdMobilenetv1Options({
+    minConfidence: minConf,
+    maxResults: 100,
+  });
+  const ssdResults = await faceapi
+    .detectAllFaces(input, ssdOpts)
+    .withFaceLandmarks(true)
+    .withFaceDescriptors();
+
+  // ── Passo 2: TinyFaceDetector — rostos que SSD pode ter perdido ───────────
+  const tinyOpts = new faceapi.TinyFaceDetectorOptions({
+    inputSize: 512,
+    scoreThreshold: 0.20,
+  });
+  const tinyResults = await faceapi
+    .detectAllFaces(input, tinyOpts)
+    .withFaceLandmarks(true)
+    .withFaceDescriptors();
+
+  // ── Merge: deduplica por distância euclidiana (mesma face = dist < 0.40) ──
+  const merged: number[][] = ssdResults.map((r) => Array.from(r.descriptor));
+
+  for (const tiny of tinyResults) {
+    const d = Array.from(tiny.descriptor);
+    const isDuplicate = merged.some(
+      (existing) => euclideanDistance(existing, d) < 0.40,
+    );
+    if (!isDuplicate) {
+      merged.push(d);
+    }
+  }
+
+  return merged;
+}
+
+/**
+ * detectSingleFaceMultiFrame — captura N frames do vídeo e retorna o descritor
+ * médio (L2-normalizado). Reduz ruído de detecção e melhora a precisão do
+ * matching ao tirar a selfie do usuário.
+ */
+export async function detectSingleFaceMultiFrame(
+  video: HTMLVideoElement,
+  numFrames = 3,
+  delayMs = 150,
+): Promise<{ descriptor: Float32Array; box: { x: number; y: number; width: number; height: number } } | null> {
+  const descriptors: Float32Array[] = [];
+  let lastBox: { x: number; y: number; width: number; height: number } | null = null;
+
+  for (let i = 0; i < numFrames; i++) {
+    if (i > 0) {
+      await new Promise<void>((r) => setTimeout(r, delayMs));
+    }
+    const result = await detectSingleFace(video);
+    if (result) {
+      descriptors.push(result.descriptor);
+      lastBox = result.box;
+    }
+  }
+
+  if (descriptors.length === 0) return null;
+  if (descriptors.length === 1) return { descriptor: descriptors[0], box: lastBox! };
+
+  // Média dos descritores
+  const avg = new Float32Array(128);
+  for (const d of descriptors) {
+    for (let i = 0; i < 128; i++) avg[i] += d[i];
+  }
+  for (let i = 0; i < 128; i++) avg[i] /= descriptors.length;
+
+  // L2-normalização do vetor médio (o faceRecognitionNet já normaliza cada
+  // descritor individualmente; re-normalizar a média mantém a escala correta)
+  let norm = 0;
+  for (let i = 0; i < 128; i++) norm += avg[i] * avg[i];
+  norm = Math.sqrt(norm);
+  if (norm > 0) {
+    for (let i = 0; i < 128; i++) avg[i] /= norm;
+  }
+
+  return { descriptor: avg, box: lastBox! };
 }
 
 // ── Redimensiona imagem para acelerar detecção ────────────────────────────────
@@ -266,8 +387,8 @@ export function findMatches(
 export function findRankedMatches(
   query: number[] | Float32Array,
   candidates: PhotoFaces[],
-  strictThreshold = 0.55,
-  relaxedThreshold = 0.70,
+  strictThreshold = 0.45,
+  relaxedThreshold = 0.52,
 ): MatchResult[] {
   const q = Array.from(query);
 

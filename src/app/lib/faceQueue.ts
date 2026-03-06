@@ -31,6 +31,10 @@ import * as faceService from './faceService';
 import { api } from './api';
 import { useState, useEffect } from 'react';
 
+// Pré-carrega SSD em background logo que o módulo é importado.
+// Quando o admin começar a indexar fotos, os modelos já estarão prontos.
+faceService.loadModelsHighQuality().catch(() => {});
+
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
 export interface QueueItem {
@@ -129,20 +133,21 @@ async function _run() {
       _queue.length > 0 ? _prefetch(_queue[0].photoUrl) : Promise.resolve(null);
 
     try {
-      await faceService.loadModels();  // no-op se já carregados
+      // Carrega SSD + modelos base (no-op se já prontos)
+      await faceService.loadModelsHighQuality();
       await _yield();                  // respira antes da inferência pesada
 
       // ── Usa a imagem pré-carregada (ou faz load síncrono se ainda não pronta) ──
       const img = (await nextImgPromise) ?? (await faceService.loadImage(item.photoUrl));
       await _yield();
 
-      // Redimensiona imagem para acelerar detecção
-      const resized = faceService.resizeImage(img, 1200);
+      // Redimensiona para 1280px: melhor qualidade para SSD (precisa de mais detalhe)
+      const resized = faceService.resizeImage(img, 1280);
       await _yield();
 
-      // detectAllFaces é CPU-bound (~500ms-2s) — prefetchingNext roda em paralelo
-      // Usa inputSize 416 (bom balanço velocidade/recall, ~30% mais rápido que 512)
-      const descriptors = await faceService.detectAllFaces(resized, { inputSize: 416 });
+      // detectAllFacesHighQuality: SSD (primário) + TinyFace (secundário)
+      // Muito melhor recall em fotos de grupo, ângulos e condições adversas.
+      const descriptors = await faceService.detectAllFacesHighQuality(resized);
       await _yield();
 
       if (descriptors.length > 0) {

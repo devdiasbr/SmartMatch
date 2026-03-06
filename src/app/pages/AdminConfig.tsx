@@ -1,4 +1,5 @@
 import { api, type BrandingConfig } from '../lib/api';
+import * as faceService from '../lib/faceService';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -838,31 +839,52 @@ export function AdminConfig() {
     onPhotoProgress: (current: number, total: number) => void,
     onStats: (delta: { processed: number; faces: number; noFace: number; failed: number }) => void,
   ) => {
-    // 1. Buscar lista de IDs — com retry em falhas de rede
-    const { photoIds, total } = await withRetry(
-      () => api.getEventPhotoIds(eventId, token),
-      3,
-      1000,
-    );
+    // 0. Pré-carregar modelos SSD antes de começar (evita timeout na 1ª foto)
+    await faceService.loadModelsHighQuality();
+
+    // 1. Buscar fotos com signed URLs usando o endpoint público existente (limit 500)
+    //    Paginação para eventos muito grandes (>500 fotos)
+    let allPhotos: { id: string; url: string | null }[] = [];
+    let page = 1;
+    while (true) {
+      const res = await withRetry(
+        () => api.getEventPhotos(eventId, page, 500),
+        3, 1000,
+      );
+      allPhotos = allPhotos.concat(
+        res.photos.map((p: any) => ({ id: p.id, url: p.url ?? null }))
+      );
+      if (page >= res.totalPages) break;
+      page++;
+    }
+
+    const total = allPhotos.length;
     onPhotoProgress(0, total);
 
     let processed = 0, faces = 0, noFace = 0, failed = 0;
 
-    // 2. Indexar foto a foto (throttle 60 ms entre chamadas para não saturar a Edge Function)
-    for (let j = 0; j < photoIds.length; j++) {
+    // 2. Detectar faces no browser + salvar no pgvector foto a foto
+    for (let j = 0; j < allPhotos.length; j++) {
+      const { id: photoId, url: photoUrl } = allPhotos[j];
       try {
-        const res = await withRetry(
-          () => api.reindexPhoto(eventId, photoIds[j], token),
-          2,
-          500,
-        );
-        if (res.noFace || res.notFound) {
+        if (!photoUrl) {
           noFace++;
-        } else if (res.success) {
-          processed++;
-          faces += res.faces;
         } else {
-          failed++;
+          // Detecção client-side (SSD dual-detector, igual ao faceQueue)
+          const img        = await faceService.loadImage(photoUrl);
+          const resized    = faceService.resizeImage(img, 1280);
+          const descriptors = await faceService.detectAllFacesHighQuality(resized);
+
+          if (descriptors.length === 0) {
+            noFace++;
+          } else {
+            await withRetry(
+              () => api.saveFaceDescriptors(eventId, photoId, descriptors, token),
+              2, 500,
+            );
+            processed++;
+            faces += descriptors.length;
+          }
         }
       } catch {
         failed++;
@@ -870,14 +892,14 @@ export function AdminConfig() {
       onPhotoProgress(j + 1, total);
       onStats({ processed, faces, noFace, failed });
 
-      // Pequena pausa para não sobrecarregar a Edge Function do Supabase
-      if (j < photoIds.length - 1) await sleep(60);
+      // Pausa para manter o browser responsivo
+      if (j < allPhotos.length - 1) await sleep(50);
     }
 
     return { processed, faces, noFace, failed, total };
   };
 
-  // ── Reindex faces for an event (server-side via pgvector) ──
+  // ── Reindex faces for an event (client-side detection → pgvector) ──
   const startReindex = async () => {
     if (!reindexEventId) {
       setReindexError('Selecione um evento');
@@ -896,6 +918,12 @@ export function AdminConfig() {
     setReindexCurrentEvent(event?.name ?? reindexEventId);
 
     try {
+      // Limpa embeddings do evento antes de reindexar (garante base limpa)
+      // Falha silenciosamente se o endpoint ainda não foi deployado
+      await api.clearEmbeddings(t, reindexEventId).catch((e: any) => {
+        console.warn('[reindex] clearEmbeddings falhou (OK se endpoint não deployado):', e?.message);
+      });
+
       const stats = await reindexEventByPhoto(
         reindexEventId,
         t,
@@ -936,6 +964,11 @@ export function AdminConfig() {
       let totalNoFace = 0;
       let totalFailed = 0;
       let totalFacesAll = 0;
+
+      // Limpa TODOS os embeddings antes de reindexar (garante base limpa)
+      await api.clearEmbeddings(t).catch((e: any) => {
+        console.warn('[reindexAll] clearEmbeddings falhou (OK se endpoint não deployado):', e?.message);
+      });
 
       for (let i = 0; i < availableEvents.length; i++) {
         const event = availableEvents[i];
@@ -1001,8 +1034,12 @@ export function AdminConfig() {
       // STEP 1: Sync Storage → KV
       // ═══════════════════════════════════════════════════════════════════════
       setSyncStatus('running');
-      setSyncProgress('Varrendo pastas do Storage S3...');
-      const syncRes = await api.syncStorage(t, skipCompleteSync);
+      setSyncProgress('Conectando ao servidor (pode demorar até 30s no primeiro acesso)…');
+      const syncRes = await withRetry(
+        () => api.syncStorage(t, skipCompleteSync),
+        3,
+        5000,
+      );
       setSyncStatus('done');
       setSyncResult(syncRes.stats);
       
@@ -1031,8 +1068,7 @@ export function AdminConfig() {
       setFlowStep(2);
       setReindexStatus('processing');
       
-      // Pega eventos atualizados
-      const t = await getToken(); if (!t) return;
+      // Pega eventos atualizados (reutiliza o token já obtido no início)
       const eventsRes = await api.getAdminEvents(t);
       const events = eventsRes.events;
       
@@ -1042,7 +1078,12 @@ export function AdminConfig() {
       
       setReindexProgress({ current: 0, total: events.length });
       setReindexPhotoProgress({ current: 0, total: 0 });
-      
+
+      // Limpa TODOS os embeddings antes de reindexar
+      await api.clearEmbeddings(t).catch((e: any) => {
+        console.warn('[completeFlow] clearEmbeddings falhou (OK se endpoint não deployado):', e?.message);
+      });
+
       // Processa evento por evento (foto a foto)
       for (let i = 0; i < events.length; i++) {
         const event = events[i];
@@ -1100,10 +1141,14 @@ export function AdminConfig() {
     setSyncStatus('running');
     setSyncResult(null);
     setSyncError('');
-    setSyncProgress('Varrendo pastas do Storage S3...');
+    setSyncProgress('Conectando ao servidor (pode demorar até 30s no primeiro acesso)…');
     
     try {
-      const res = await api.syncStorage(t, skipCompleteSync);
+      const res = await withRetry(
+        () => api.syncStorage(t, skipCompleteSync),
+        3,
+        5000,
+      );
       setSyncResult(res.stats);
       setSyncStatus('done');
       setSyncProgress(`Concluído: ${res.stats.eventsCreated} evento(s), ${res.stats.photosImported} foto(s)`);
@@ -3064,36 +3109,41 @@ export function AdminConfig() {
                     )}
 
                     {/* Resultado — sucesso */}
-                    {reindexStatus === 'done' && reindexResult && (
+                    {reindexStatus === 'done' && reindexResult && (() => {
+                      const totalPhotos = reindexResult.processed + (reindexResult.noFace ?? 0) + reindexResult.failed;
+                      const noPhotosAtAll = totalPhotos === 0;
+                      const allNoFace = !noPhotosAtAll && reindexResult.processed === 0;
+                      const isWarning = noPhotosAtAll || allNoFace;
+                      return (
                       <motion.div
                         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                         className="rounded-xl p-4 space-y-3"
                         style={{ 
-                          background: reindexResult.processed === 0 
+                          background: isWarning 
                             ? (isDark ? 'rgba(251,191,36,0.05)' : 'rgba(180,130,0,0.05)') 
                             : (isDark ? 'rgba(6,182,212,0.05)' : 'rgba(8,145,178,0.05)'), 
-                          border: `1px solid ${reindexResult.processed === 0 
+                          border: `1px solid ${isWarning 
                             ? (isDark ? 'rgba(251,191,36,0.2)' : 'rgba(180,130,0,0.15)') 
                             : (isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.15)')}` 
                         }}
                       >
                         <div className="flex items-center gap-2">
-                          {reindexResult.processed === 0 ? (
+                          {isWarning ? (
                             <AlertTriangle className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#b45309' }} />
                           ) : (
                             <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
                           )}
                           <p className="text-sm font-bold" style={{ 
-                            color: reindexResult.processed === 0 
+                            color: isWarning 
                               ? (isDark ? '#fbbf24' : '#b45309') 
                               : (isDark ? '#06b6d4' : '#0891b2'), 
                             fontFamily: "'Montserrat',sans-serif" 
                           }}>
-                            {reindexResult.processed === 0 ? 'Nenhuma foto encontrada!' : 'Reindexação concluída!'}
+                            {noPhotosAtAll ? 'Nenhuma foto encontrada!' : allNoFace ? 'Nenhum rosto detectado' : 'Reindexação concluída!'}
                           </p>
                         </div>
 
-                        {reindexResult.processed === 0 ? (
+                        {noPhotosAtAll ? (
                           <div className="text-xs space-y-2 leading-relaxed" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
                             <p><strong>⚠️ Os eventos selecionados não têm fotos no sistema.</strong></p>
                             <p>Você precisa primeiro:</p>
@@ -3101,6 +3151,11 @@ export function AdminConfig() {
                               <li>Fazer upload de fotos via PDV</li>
                               <li>Ou rodar a <strong>Sincronização Storage → KV</strong> abaixo (se já tiver fotos no S3)</li>
                             </ul>
+                          </div>
+                        ) : allNoFace ? (
+                          <div className="text-xs space-y-2 leading-relaxed" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                            <p><strong>⚠️ {reindexResult.noFace} foto(s) processada(s), mas nenhuma face detectada.</strong></p>
+                            <p>Possíveis causas: fotos de cenário/arquitetura, baixa qualidade, rostos muito pequenos ou de lado.</p>
                           </div>
                         ) : (
                           <>
@@ -3135,7 +3190,8 @@ export function AdminConfig() {
                           </>
                         )}
                       </motion.div>
-                    )}
+                      );
+                    })()}
 
                     {/* Resultado — erro */}
                     {reindexStatus === 'error' && (
