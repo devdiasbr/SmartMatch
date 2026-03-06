@@ -1,12 +1,13 @@
-import { projectId, publicAnonKey } from '/utils/supabase/info';
-
-const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
+// API base: relative on Vercel (same domain), override with env var for local dev
+// against the old Supabase function URL.
+const BASE =
+  (import.meta.env.VITE_API_URL as string | undefined) ??
+  '/api/make-server-68454e9b';
 
 // ── Core fetch helpers ────────────────────────────────────────────────────────
 
 /**
- * PUBLIC request — always sends the anon key as Authorization so the Supabase
- * edge-function gateway accepts the call. No user auth required.
+ * PUBLIC request — no gateway auth required on Vercel (same-origin).
  */
 async function request<T = any>(
   path: string,
@@ -14,7 +15,6 @@ async function request<T = any>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${publicAnonKey}`,
     ...(options.headers as Record<string, string>),
   };
 
@@ -28,9 +28,8 @@ async function request<T = any>(
 }
 
 /**
- * ADMIN request — sends anon key as Authorization (for the Supabase gateway)
- * AND the user's JWT as X-Admin-Token (for our adminAuth middleware).
- * This permanently fixes the "HTTP 401" caused by the gateway rejecting user JWTs.
+ * ADMIN request — sends the user's JWT as X-Admin-Token for our adminAuth
+ * middleware. No Supabase gateway wrapper needed on Vercel.
  */
 async function adminRequest<T = any>(
   path: string,
@@ -39,8 +38,7 @@ async function adminRequest<T = any>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${publicAnonKey}`,   // ← gateway auth
-    'X-Admin-Token': token,                      // ← our middleware auth
+    'X-Admin-Token': token,
     ...(options.headers as Record<string, string>),
   };
 
@@ -83,7 +81,6 @@ const aDel  = <T>(path: string, token: string) =>
 async function adminFormData<T = any>(path: string, body: FormData, token: string): Promise<T> {
   const headers: Record<string, string> = {
     // SEM Content-Type — browser define multipart/form-data + boundary
-    Authorization: `Bearer ${publicAnonKey}`,
     'X-Admin-Token': token,
   };
   console.log(`[API] Enviando FormData para ${BASE}${path}`);
