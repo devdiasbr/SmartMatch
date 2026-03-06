@@ -1,8 +1,4 @@
-[📚 Sumário](index.md) | [🏠 Home](../../README.md) | [02. Arquitetura →](02-arquitetura-stack.md)
-
----
-
----
+[🏠 Home](../../README.md) | **01. Visão Geral** | [02. Arquitetura](02-arquitetura-stack.md) | [03. Estrutura](03-estrutura-projeto.md) | [04. Funcionalidades](04-funcionalidades.md) | [05. Rotas e API](05-rotas-api.md) | [06. Dados e Contextos](06-dados-contextos.md) | [07. Design e Impressão](07-design-impressao.md) | [08. Config e Deploy](08-configuracao-deploy.md) | [09. Segurança](09-seguranca.md) | [10. PDV WhatsApp](10-pdv-whatsapp.md) | [📚 Sumário](index.md)
 
 ---
 
@@ -27,11 +23,6 @@ A Smart Match resolve um problema real da fotografia de eventos: como o visitant
 4. Finaliza venda, imprime fotos 15x20 com rodape e QR.
 5. Opcionalmente coleta opt-in de WhatsApp para envio e campanhas futuras.
 
-
 ---
 
----
-
----
-
-[📚 Sumário](index.md) | [02. Arquitetura →](02-arquitetura-stack.md)
+[🏠 Home](../../README.md) | **01. Visão Geral** | [02. Arquitetura](02-arquitetura-stack.md) | [03. Estrutura](03-estrutura-projeto.md) | [04. Funcionalidades](04-funcionalidades.md) | [05. Rotas e API](05-rotas-api.md) | [06. Dados e Contextos](06-dados-contextos.md) | [07. Design e Impressão](07-design-impressao.md) | [08. Config e Deploy](08-configuracao-deploy.md) | [09. Segurança](09-seguranca.md) | [10. PDV WhatsApp](10-pdv-whatsapp.md) | [📚 Sumário](index.md)
