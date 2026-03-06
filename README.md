@@ -83,8 +83,8 @@ Sync/reindexação facial → Pedidos/reembolsos → Configuração de branding
 │                    Navegador / Totem PDV                 │
 │  ┌─────────────────────────────────────────────────────┐ │
 │  │  React 18 + React Router 7 + Tailwind CSS 4         │ │
-│  │  face-api.js (detecção e matching client-side)       │ │
-│  │  src/app/lib/api.ts  (HTTP client tipado)            │ │
+│  │  face-api.js (detecção e matching client-side)      │ │
+│  │  src/app/lib/api.ts  (HTTP client tipado)           │ │
 │  └──────────────────────┬──────────────────────────────┘ │
 └─────────────────────────┼────────────────────────────────┘
                           │ HTTPS
