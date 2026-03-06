@@ -261,8 +261,20 @@ app.get("/make-server-68454e9b/health", (c) => c.json({
     SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ? `SET(len=${process.env.SUPABASE_SERVICE_ROLE_KEY.length})` : "MISSING",
     SUPABASE_JWT_SECRET: process.env.SUPABASE_JWT_SECRET ? "SET" : "MISSING",
     RESEND_API_KEY: process.env.RESEND_API_KEY ? "SET" : "MISSING",
+    VITE_API_URL: process.env.VITE_API_URL ?? "NOT_SET",
   },
 }));
+
+// Debug: test if Supabase admin client works at all
+app.get("/make-server-68454e9b/health/auth-test", async (c) => {
+  try {
+    const { data, error } = await sb().auth.admin.listUsers({ page: 1, perPage: 1 });
+    if (error) return c.json({ ok: false, error: error.message });
+    return c.json({ ok: true, userCount: data.users.length });
+  } catch (e: any) {
+    return c.json({ ok: false, exception: e?.message });
+  }
+});
 
 // ── Public Stats ──────────────────────────────────────────────────────────────
 
