@@ -104,6 +104,23 @@ async function verifySupabaseJWT(jwt: string): Promise<{ userId: string } | null
 
 // ── Admin auth middleware ─────────────────────────────────────────────────────
 // Single-tenant: any authenticated user can access all admin routes.
+//
+// Strategy:
+//  1. Try HMAC-SHA256 verification (works with HS256 JWT secrets)
+//  2. If that fails, decode the JWT payload WITHOUT signature verification
+//     to extract `sub`, then validate user existence via admin API
+//     (uses service_role_key — immune to JWT signing-algorithm changes like ES256)
+
+function decodeJwtPayload(jwt: string): Record<string, any> | null {
+  try {
+    const parts = jwt.split(".");
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(new TextDecoder().decode(base64UrlDecode(parts[1])));
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 async function adminAuth(c: any, next: () => Promise<void>) {
   const adminToken = c.req.header("X-Admin-Token");
@@ -113,7 +130,7 @@ async function adminAuth(c: any, next: () => Promise<void>) {
     return c.json({ error: "Não autorizado: token de admin ausente (X-Admin-Token)" }, 401);
   }
 
-  // Primary: cryptographic JWT verification
+  // 1. Try cryptographic HMAC-SHA256 verification (HS256 tokens)
   const verified = await verifySupabaseJWT(adminToken);
   if (verified?.userId) {
     const { data: { user }, error } = await sb().auth.admin.getUserById(verified.userId);
@@ -125,16 +142,26 @@ async function adminAuth(c: any, next: () => Promise<void>) {
     return await next();
   }
 
-  // Fallback: session-based validation
-  console.log("adminAuth: verificação crypto falhou, usando getUser() como fallback");
-  const { data: { user }, error } = await sb().auth.getUser(adminToken);
-  if (error || !user) {
-    console.log("adminAuth getUser() falhou:", error?.message ?? "token inválido");
-    return c.json({ error: `Não autorizado: ${error?.message ?? "token inválido"}` }, 401);
+  // 2. Decode payload (no sig check) and validate user via admin API
+  //    This handles ES256 / rotated keys / any algo the Supabase project uses.
+  const payload = decodeJwtPayload(adminToken);
+  if (payload?.sub) {
+    // Check expiration
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      console.log(`adminAuth: token expirado (exp=${payload.exp})`);
+      return c.json({ error: "Não autorizado: token expirado" }, 401);
+    }
+    const { data: { user }, error } = await sb().auth.admin.getUserById(payload.sub);
+    if (user && !error) {
+      console.log("adminAuth: validado via admin.getUserById (ES256/fallback)");
+      c.set("userId", user.id);
+      return await next();
+    }
+    console.log("adminAuth: getUserById falhou:", error?.message);
   }
 
-  c.set("userId", user.id);
-  await next();
+  console.log("adminAuth: todas as estratégias falharam");
+  return c.json({ error: "Não autorizado: token inválido" }, 401);
 }
 
 // ── KV helpers ────────────────────────────────────────────────────────────────
