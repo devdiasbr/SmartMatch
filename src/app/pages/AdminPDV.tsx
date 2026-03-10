@@ -5,7 +5,7 @@ import {
   Printer, CheckCircle2, Loader2, Trash2, X, User,
   CreditCard, Banknote, ImageIcon, AlertCircle, ClipboardList,
   FolderOpen, Scan, Trash, MoveHorizontal, ChevronLeft, ChevronRight,
-  Settings, MessageCircle, Phone,
+  Settings,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useTheme } from '../components/ThemeProvider';
@@ -215,22 +215,6 @@ export function AdminPDV() {
   const [customerName,  setCustomerName]  = useState('');
   const [paymentMethod, setPaymentMethod] = useState('dinheiro');
 
-  /* WhatsApp opt-in */
-  const [waOptIn,    setWaOptIn]    = useState(false);
-  const [waPhone,    setWaPhone]    = useState('');
-  const [waSaving,   setWaSaving]   = useState(false);
-  const [waSaved,    setWaSaved]    = useState(false);
-  const [lastWaPhone, setLastWaPhone] = useState(''); // preservado na tela de sucesso
-  const [waMsgSent,  setWaMsgSent]  = useState(false);
-
-  // Normaliza número para wa.me (remove não-dígitos, adiciona 55 se BR sem código)
-  const formatWAPhone = (raw: string): string => {
-    const digits = raw.replace(/\D/g, '');
-    if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return digits;
-    if (digits.length === 10 || digits.length === 11) return '55' + digits;
-    return digits;
-  };
-
   /* Checkout */
   const [processing, setProcessing] = useState(false);
   const [lastOrder,  setLastOrder]  = useState<any>(null);
@@ -276,11 +260,7 @@ export function AdminPDV() {
   }, [selectedEvent, isInCart]);
   const removeFromCart = (photoId: string) =>
     setCart(prev => prev.filter(c => c.photoId !== photoId));
-  const clearAll = () => {
-    setCart([]); setCustomerName(''); setLastOrder(null); setError('');
-    setWaOptIn(false); setWaPhone(''); setWaSaved(false);
-    setLastWaPhone(''); setWaMsgSent(false);
-  };
+  const clearAll       = () => { setCart([]); setCustomerName(''); setLastOrder(null); setError(''); };
   const total          = cart.reduce((s, c) => s + c.price, 0);
 
   /* ── Checkout ── */
@@ -288,11 +268,6 @@ export function AdminPDV() {
     if (!cart.length) return;
     if (!footerSrc) {
       setError('Configure um rodapé antes de finalizar a venda.');
-      return;
-    }
-    // Valida número de WhatsApp se opt-in ativado
-    if (waOptIn && waPhone.replace(/\D/g, '').length < 10) {
-      setError('Informe um número de WhatsApp válido (com DDD) ou desmarque a opção.');
       return;
     }
     setProcessing(true); setError('');
@@ -308,34 +283,7 @@ export function AdminPDV() {
         token,
       );
       setLastOrder(order);
-
-      // Salva contato de WhatsApp se cliente optou
-      if (waOptIn && waPhone.trim()) {
-        const capturedPhone = waPhone.trim();
-        setLastWaPhone(capturedPhone); // preserva para botão de envio na tela de sucesso
-        setWaSaving(true);
-        const photoIds = items.map(i => String(i.photoId));
-        const photoUrls = items.map(i => i.src ?? '');
-        const eventId   = items[0]?.eventId ?? '';
-        const eventName = items[0]?.eventName ?? '';
-        api.saveWhatsappContact(
-          {
-            phone: capturedPhone,
-            customerName: customerName || 'Cliente presencial',
-            orderId: order.id,
-            eventId,
-            eventName,
-            photoIds,
-            photoUrls,
-          },
-          token,
-        ).then(() => setWaSaved(true))
-          .catch(e => console.warn('[PDV] Falha ao salvar WhatsApp:', e?.message))
-          .finally(() => setWaSaving(false));
-      }
-
       setCart([]); setCustomerName('');
-      setWaOptIn(false); setWaPhone('');
     } catch (err: any) {
       setError(err.message ?? 'Erro ao finalizar venda');
     } finally {
@@ -585,68 +533,6 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                 <p className="text-xs mb-6" style={{ color:muted }}>
                   {lastOrder.items?.length} foto{lastOrder.items?.length !== 1 ? 's' : ''} · {lastOrder.customerName}
                 </p>
-
-                {/* Status WhatsApp opt-in */}
-                {(waSaving || waSaved) && (
-                  <div className="flex items-center justify-center gap-2 mb-4 px-3 py-2 rounded-xl text-xs"
-                    style={{ background:'rgba(37,211,102,0.08)', border:'1px solid rgba(37,211,102,0.25)', color:'#25D366' }}>
-                    {waSaving
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Salvando contato WhatsApp…</>
-                      : <><MessageCircle className="w-3.5 h-3.5" /> Contato salvo — envie as fotos abaixo!</>
-                    }
-                  </div>
-                )}
-
-                {/* Botão de envio WhatsApp */}
-                {lastWaPhone && waSaved && (
-                  <div className="mb-5">
-                    <motion.a
-                      href={(() => {
-                        const phone = formatWAPhone(lastWaPhone);
-                        const items: any[] = lastOrder.items ?? [];
-                        const name = lastOrder.customerName ?? 'cliente';
-                        const links = items.map((it: any, idx: number) =>
-                          `\uD83D\uDCF7 Foto ${idx + 1}: ${getPublicPhotoUrl(lastOrder.id, String(it.photoId))}`
-                        ).join('\n');
-                        const msg =
-                          `Olá ${name}! Suas fotos do Tour Palmeiras já estão disponíveis \uD83D\uDE0D\n\n` +
-                          `${links}\n\n` +
-                          `Acesse o link para baixar em alta qualidade. As fotos ficam disponíveis por 30 dias.\n\n` +
-                          `Obrigado pela visita ao Allianz Parque! \uD83D\uDC9A`;
-                        return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-                      })()}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      whileHover={{ scale: waMsgSent ? 1 : 1.02 }}
-                      whileTap={{ scale: 0.97 }}
-                      onClick={() => {
-                        setWaMsgSent(true);
-                        // Marca como enviado no servidor (não bloqueia a UI)
-                        getToken().then(t => {
-                          if (t) api.markWhatsappSent(lastOrder.id, t).catch(() => {});
-                        });
-                      }}
-                      className="flex items-center justify-center gap-2 w-full px-5 py-3.5 rounded-xl text-sm font-bold"
-                      style={{
-                        background: waMsgSent
-                          ? 'rgba(37,211,102,0.12)'
-                          : 'linear-gradient(135deg, #25D366, #128C7E)',
-                        color: waMsgSent ? '#25D366' : '#fff',
-                        border: waMsgSent ? '1px solid rgba(37,211,102,0.35)' : 'none',
-                        textDecoration: 'none',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                      {waMsgSent ? '\u2713 Enviado via WhatsApp' : `Enviar fotos para ${lastWaPhone}`}
-                    </motion.a>
-                    {!waMsgSent && (
-                      <p className="text-[9px] text-center mt-1.5" style={{ color: muted }}>
-                        Abre o WhatsApp com a mensagem pronta — basta clicar em Enviar
-                      </p>
-                    )}
-                  </div>
-                )}
 
                 {/* Preview das fotos com rodapé real */}
                 <div className="space-y-3 mb-6 text-left">
@@ -1203,68 +1089,6 @@ window.addEventListener('load', function() { setTimeout(function() { window.prin
                         style={{ background:inputBg, border:brd, color:text }}
                       />
                     </div>
-                  </div>
-
-                  {/* WhatsApp opt-in */}
-                  <div>
-                    <button
-                      type="button"
-                      onClick={() => setWaOptIn(v => !v)}
-                      className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all"
-                      style={{
-                        background: waOptIn
-                          ? (isDark ? 'rgba(37,211,102,0.10)' : 'rgba(37,211,102,0.08)')
-                          : inputBg,
-                        border: `1px solid ${waOptIn ? 'rgba(37,211,102,0.4)' : border}`,
-                        color: waOptIn ? '#25D366' : muted,
-                      }}
-                    >
-                      <MessageCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span className="flex-1 text-left">
-                        Enviar fotos por WhatsApp
-                      </span>
-                      {/* Toggle pill */}
-                      <span
-                        className="relative inline-block w-8 h-4.5 rounded-full transition-colors flex-shrink-0"
-                        style={{
-                          width: 32, height: 18,
-                          background: waOptIn ? '#25D366' : (isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'),
-                          display: 'inline-flex', alignItems: 'center', padding: '2px',
-                        }}
-                      >
-                        <span style={{
-                          display: 'block', width: 14, height: 14, borderRadius: '50%',
-                          background: '#fff',
-                          transform: waOptIn ? 'translateX(14px)' : 'translateX(0)',
-                          transition: 'transform 0.2s',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                        }} />
-                      </span>
-                    </button>
-
-                    {waOptIn && (
-                      <div className="mt-2">
-                        <div className="relative">
-                          <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color:'#25D366' }} />
-                          <input
-                            type="tel"
-                            value={waPhone}
-                            onChange={e => setWaPhone(e.target.value)}
-                            placeholder="+55 11 99999-9999"
-                            className="w-full pl-8 pr-3 py-2.5 rounded-xl text-xs outline-none"
-                            style={{
-                              background: isDark ? 'rgba(37,211,102,0.06)' : 'rgba(37,211,102,0.04)',
-                              border: `1px solid ${waPhone.replace(/\D/g,'').length >= 10 ? 'rgba(37,211,102,0.45)' : 'rgba(37,211,102,0.25)'}`,
-                              color: text,
-                            }}
-                            autoComplete="tel"
-                          />
-                        </div>
-                        <p className="text-[9px] mt-1 px-1" style={{ color: muted }}>
-                          Número será usado para enviar as fotos após o evento e campanhas futuras.
-                        </p>
-                      </div>
-                    )}
                   </div>
 
                   <div>

@@ -22,7 +22,7 @@
  *   Resultado: latência de rede do N+1 é completamente escondida pelo tempo de
  *   inferência do N — throughput pode dobrar em uploads grandes.
  *
- * ── Estado reativo ─────────────────────────────────────────────────────────────
+ * ── Estado reativo ────��────────────────────────────────────────────────────────
  *   subscribe(fn) → recebe QueueState a cada mudança
  *   useFaceQueue() hook → estado reativo em React
  */
@@ -30,10 +30,6 @@
 import * as faceService from './faceService';
 import { api } from './api';
 import { useState, useEffect } from 'react';
-
-// Pré-carrega SSD em background logo que o módulo é importado.
-// Quando o admin começar a indexar fotos, os modelos já estarão prontos.
-faceService.loadModelsHighQuality().catch(() => {});
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 
@@ -133,21 +129,21 @@ async function _run() {
       _queue.length > 0 ? _prefetch(_queue[0].photoUrl) : Promise.resolve(null);
 
     try {
-      // Carrega SSD + modelos base (no-op se já prontos)
-      await faceService.loadModelsHighQuality();
+      await faceService.loadModels();  // no-op se já carregados
       await _yield();                  // respira antes da inferência pesada
 
       // ── Usa a imagem pré-carregada (ou faz load síncrono se ainda não pronta) ──
       const img = (await nextImgPromise) ?? (await faceService.loadImage(item.photoUrl));
       await _yield();
 
-      // Redimensiona para 1280px: melhor qualidade para SSD (precisa de mais detalhe)
-      const resized = faceService.resizeImage(img, 1280);
+      // Redimensiona imagem para acelerar detecção
+      const resized = faceService.resizeImage(img, 1200);
       await _yield();
 
-      // detectAllFacesHighQuality: SSD (primário) + TinyFace (secundário)
-      // Muito melhor recall em fotos de grupo, ângulos e condições adversas.
-      const descriptors = await faceService.detectAllFacesHighQuality(resized);
+      // detectAllFaces é CPU-bound (~1-3s com 3 passes) — prefetchingNext roda em paralelo.
+      // Usa inputSize 512 (máxima qualidade) com multi-pass automático em faceService.
+      // O prefetch esconde a latência de rede do próximo item durante esse tempo.
+      const descriptors = await faceService.detectAllFaces(resized, { inputSize: 512 });
       await _yield();
 
       if (descriptors.length > 0) {

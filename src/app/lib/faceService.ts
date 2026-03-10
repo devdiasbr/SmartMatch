@@ -28,7 +28,7 @@ const MODEL_URL =
 
 // ── Cache Storage — persiste entre reloads (ao contrário da memória) ──────────
 
-const CACHE_NAME = 'smart-match-face-models-v3';
+const CACHE_NAME = 'smart-match-face-models-v2';
 
 /**
  * Fetch com cache persistente via Cache Storage API.
@@ -63,7 +63,7 @@ async function cachedFetch(
   }
 }
 
-// ── Singleton: carrega modelos base apenas uma vez por sessão ─────────────────
+// ── Singleton: carrega modelos apenas uma vez por sessão ──────────────────────
 
 let _modelsPromise: Promise<void> | null = null;
 
@@ -81,6 +81,7 @@ async function _doLoad(): Promise<void> {
   faceapi.env.monkeyPatch({ fetch: cachedFetch as typeof globalThis.fetch });
 
   // Monkey-patch para corrigir "Illegal constructor" do HTMLCanvasElement
+  // face-api.js tenta criar canvas com `new HTMLCanvasElement()` que não é permitido
   faceapi.env.monkeyPatch({
     Canvas: HTMLCanvasElement as any,
     createCanvasElement: () => document.createElement('canvas'),
@@ -88,63 +89,43 @@ async function _doLoad(): Promise<void> {
   });
 
   await Promise.all([
-    // TinyFaceDetector — 190 KB, usado para preview em tempo real
+    // TinyFaceDetector — 190 KB (vs 6 MB do SsdMobilenetv1), 15-20× mais rápido
     faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-    // faceLandmark68TinyNet — 80 KB, alinhamento de face
+    // faceLandmark68TinyNet — 80 KB (vs 350 KB), mesma qualidade de alinhamento
     faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-    // faceRecognitionNet — ResNet-34 completo (128-dim, qualidade máxima)
+    // faceRecognitionNet — mantemos o ResNet-34 completo (128-dim, melhor qualidade)
     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
   ]);
 }
 
-// ── Modelos de alta qualidade (SsdMobilenetv1 — para indexação de fotos) ──────
-// SsdMobilenetv1 (~5.4 MB) tem MUITO mais recall que TinyFaceDetector:
-//   • detecta rostos em grupos, ângulos, óculos, baixa resolução
-//   • ~15× mais lento, mas só usado durante indexação (admin, não real-time)
-// Carregado lazy — só quando necessário, persistido no Cache Storage.
-
-let _hqModelsPromise: Promise<void> | null = null;
-
-export function loadModelsHighQuality(): Promise<void> {
-  if (!_hqModelsPromise) {
-    _hqModelsPromise = _doLoadHQ();
-  }
-  return _hqModelsPromise;
-}
-
-async function _doLoadHQ(): Promise<void> {
-  // Garante que os modelos base já estão carregados
-  await loadModels();
-  const faceapi = await import('face-api.js');
-  // SsdMobilenetv1 — detector full-accuracy para fotos de eventos
-  await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
-}
-
 // ── Pré-carrega em background assim que o módulo é importado ─────────────────
+// Isso garante que quando o usuário clicar em "buscar por rosto" os modelos
+// já estarão (ou estarão quase) prontos — especialmente rápido quando há cache.
 loadModels().catch(() => {/* silencia erros de pré-carregamento */});
 
 // ── Opções TinyFaceDetector ───────────────────────────────────────────────────
 // inputSize deve ser múltiplo de 32. Valores maiores = mais preciso, mais lento.
 // Para câmera em tempo real: 320 (fast). Para upload de fotos: 512 (melhor recall).
 
-function tinyOpts(inputSize: 320 | 416 | 512 = 320, scoreThreshold = 0.35) {
-  // Retorna a Promise<faceapi> inline para evitar re-importar em cada chamada
-  return import('face-api.js').then(faceapi =>
-    new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold })
-  );
-}
-
 // ── Detecta UM rosto (para selfie do usuário) ─────────────────────────────────
-// Balanceado: tenta 320, 416 e 512 para garantir detecção de qualidade.
+// Multi-pass: tenta 3 tamanhos com threshold progressivamente menor para máximo recall.
 
 export async function detectSingleFace(
   input: HTMLVideoElement | HTMLCanvasElement | HTMLImageElement,
 ): Promise<{ descriptor: Float32Array; box: { x: number; y: number; width: number; height: number } } | null> {
   const faceapi = await import('face-api.js');
 
-  // Tenta 3 tamanhos: 320 (rápido), 416 (balanceado), 512 (máxima qualidade)
-  for (const inputSize of [320, 416, 512] as const) {
-    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold: 0.25 });
+  // Passa 1: 320 rápido, threshold normal — ótimo para selfies próximas
+  // Passa 2: 416 balanceado, threshold menor — selfies com rosto menor
+  // Passa 3: 512 máxima qualidade, threshold ainda menor — condições difíceis
+  const passes: Array<{ inputSize: 320 | 416 | 512; scoreThreshold: number }> = [
+    { inputSize: 320, scoreThreshold: 0.22 },
+    { inputSize: 416, scoreThreshold: 0.18 },
+    { inputSize: 512, scoreThreshold: 0.14 },
+  ];
+
+  for (const { inputSize, scoreThreshold } of passes) {
+    const opts = new faceapi.TinyFaceDetectorOptions({ inputSize, scoreThreshold });
     const result = await faceapi
       .detectSingleFace(input, opts)
       .withFaceLandmarks(true)   // true = usa faceLandmark68TinyNet (mais rápido)
@@ -157,153 +138,65 @@ export async function detectSingleFace(
 }
 
 // ── Detecta TODOS os rostos (para fotos do evento — admin upload) ─────────────
-// Usa inputSize 416 por padrão (bom balanço velocidade/recall).
-// Aceita opções para permitir ajuste por contexto.
+// Multi-pass com inputSize 512 (máxima qualidade) + fallbacks com threshold menor
+// para garantir detecção mesmo em rostos pequenos, distantes ou parcialmente visíveis.
 
 export async function detectAllFaces(
   input: HTMLImageElement | HTMLCanvasElement,
   options: { inputSize?: 320 | 416 | 512; scoreThreshold?: number } = {},
 ): Promise<number[][]> {
   const faceapi = await import('face-api.js');
-  const opts = new faceapi.TinyFaceDetectorOptions({ 
-    inputSize: options.inputSize ?? 416,
-    scoreThreshold: options.scoreThreshold ?? 0.25 
-  });
-  const results = await faceapi
-    .detectAllFaces(input, opts)
-    .withFaceLandmarks(true)     // true = usa faceLandmark68TinyNet
+
+  // Passa 1: inputSize solicitado (padrão 512 para máxima qualidade em fotos de evento)
+  const primarySize   = options.inputSize ?? 512;
+  const primaryThresh = options.scoreThreshold ?? 0.28;
+  let results = await faceapi
+    .detectAllFaces(input, new faceapi.TinyFaceDetectorOptions({ inputSize: primarySize, scoreThreshold: primaryThresh }))
+    .withFaceLandmarks(true)
     .withFaceDescriptors();
+
+  // Passa 2: threshold menor — captura rostos com score ligeiramente baixo
+  if (results.length === 0) {
+    results = await faceapi
+      .detectAllFaces(input, new faceapi.TinyFaceDetectorOptions({ inputSize: 512, scoreThreshold: 0.16 }))
+      .withFaceLandmarks(true)
+      .withFaceDescriptors();
+  }
+
+  // Passa 3: threshold muito baixo + 416 — último recurso para rostos difíceis
+  if (results.length === 0) {
+    results = await faceapi
+      .detectAllFaces(input, new faceapi.TinyFaceDetectorOptions({ inputSize: 416, scoreThreshold: 0.10 }))
+      .withFaceLandmarks(true)
+      .withFaceDescriptors();
+  }
+
   return results.map((r) => Array.from(r.descriptor));
-}
-
-/**
- * detectAllFacesHighQuality — detector duplo para indexação de fotos de evento.
- *
- * Usa SsdMobilenetv1 como detector primário (muito melhor recall em fotos de grupo,
- * ângulos, óculos, iluminação adversa) e TinyFaceDetector como secundário para
- * capturar qualquer rosto que o SSD possa ter perdido.
- *
- * Os descritores são gerados pelo mesmo faceRecognitionNet (ResNet-34 128-dim),
- * portanto são 100% compatíveis com os gerados durante a busca do usuário.
- *
- * REQUER loadModelsHighQuality() antes de chamar.
- */
-export async function detectAllFacesHighQuality(
-  input: HTMLImageElement | HTMLCanvasElement,
-  options: { scoreThreshold?: number } = {},
-): Promise<number[][]> {
-  const faceapi = await import('face-api.js');
-  const minConf = options.scoreThreshold ?? 0.30;
-
-  // ── Passo 1: SsdMobilenetv1 — detector full-accuracy ─────────────────────
-  const ssdOpts = new faceapi.SsdMobilenetv1Options({
-    minConfidence: minConf,
-    maxResults: 100,
-  });
-  const ssdResults = await faceapi
-    .detectAllFaces(input, ssdOpts)
-    .withFaceLandmarks(true)
-    .withFaceDescriptors();
-
-  // ── Passo 2: TinyFaceDetector — rostos que SSD pode ter perdido ───────────
-  const tinyOpts = new faceapi.TinyFaceDetectorOptions({
-    inputSize: 512,
-    scoreThreshold: 0.20,
-  });
-  const tinyResults = await faceapi
-    .detectAllFaces(input, tinyOpts)
-    .withFaceLandmarks(true)
-    .withFaceDescriptors();
-
-  // ── Merge: deduplica por distância euclidiana (mesma face = dist < 0.40) ──
-  const merged: number[][] = ssdResults.map((r) => Array.from(r.descriptor));
-
-  for (const tiny of tinyResults) {
-    const d = Array.from(tiny.descriptor);
-    const isDuplicate = merged.some(
-      (existing) => euclideanDistance(existing, d) < 0.40,
-    );
-    if (!isDuplicate) {
-      merged.push(d);
-    }
-  }
-
-  return merged;
-}
-
-/**
- * detectSingleFaceMultiFrame — captura N frames do vídeo e retorna o descritor
- * médio (L2-normalizado). Reduz ruído de detecção e melhora a precisão do
- * matching ao tirar a selfie do usuário.
- */
-export async function detectSingleFaceMultiFrame(
-  video: HTMLVideoElement,
-  numFrames = 3,
-  delayMs = 150,
-): Promise<{ descriptor: Float32Array; box: { x: number; y: number; width: number; height: number } } | null> {
-  const descriptors: Float32Array[] = [];
-  let lastBox: { x: number; y: number; width: number; height: number } | null = null;
-
-  for (let i = 0; i < numFrames; i++) {
-    if (i > 0) {
-      await new Promise<void>((r) => setTimeout(r, delayMs));
-    }
-    const result = await detectSingleFace(video);
-    if (result) {
-      descriptors.push(result.descriptor);
-      lastBox = result.box;
-    }
-  }
-
-  if (descriptors.length === 0) return null;
-  if (descriptors.length === 1) return { descriptor: descriptors[0], box: lastBox! };
-
-  // Média dos descritores
-  const avg = new Float32Array(128);
-  for (const d of descriptors) {
-    for (let i = 0; i < 128; i++) avg[i] += d[i];
-  }
-  for (let i = 0; i < 128; i++) avg[i] /= descriptors.length;
-
-  // L2-normalização do vetor médio (o faceRecognitionNet já normaliza cada
-  // descritor individualmente; re-normalizar a média mantém a escala correta)
-  let norm = 0;
-  for (let i = 0; i < 128; i++) norm += avg[i] * avg[i];
-  norm = Math.sqrt(norm);
-  if (norm > 0) {
-    for (let i = 0; i < 128; i++) avg[i] /= norm;
-  }
-
-  return { descriptor: avg, box: lastBox! };
 }
 
 // ── Redimensiona imagem para acelerar detecção ────────────────────────────────
 // Mantém aspect ratio e limita dimensão máxima.
 // OTIMIZAÇÃO: Usa menor resolução mas mantém qualidade adequada para face recognition
 
-export function resizeImage(img: HTMLImageElement, maxDim = 1200): HTMLCanvasElement {
+export function resizeImage(img: HTMLImageElement, maxDim = 1600): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   let { width, height } = img;
-  
-  // Ajuste de resolução: 960px é bom balanço entre velocidade e qualidade
-  // Menor que isso prejudica o face recognition (ResNet precisa de detalhes)
-  const effectiveMax = maxDim > 1200 ? 960 : maxDim;
-  
-  if (width > effectiveMax || height > effectiveMax) {
+
+  // 1600px preserva detalhes faciais mesmo em fotos de grupo de alta resolução.
+  // Menor que 1200 prejudica o ResNet-34 (perde textura e landmarks sutis).
+  if (width > maxDim || height > maxDim) {
     if (width > height) {
-      height = (height / width) * effectiveMax;
-      width = effectiveMax;
+      height = Math.round((height / width) * maxDim);
+      width = maxDim;
     } else {
-      width = (width / height) * effectiveMax;
-      height = effectiveMax;
+      width = Math.round((width / height) * maxDim);
+      height = maxDim;
     }
   }
-  
+
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d', { alpha: false })!; // Desabilita alpha para +10% velocidade
-  
-  // REVERTIDO: image smoothing é NECESSÁRIO para qualidade do face recognition
+  const ctx = canvas.getContext('2d', { alpha: false })!;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, 0, width, height);
@@ -387,8 +280,8 @@ export function findMatches(
 export function findRankedMatches(
   query: number[] | Float32Array,
   candidates: PhotoFaces[],
-  strictThreshold = 0.45,
-  relaxedThreshold = 0.52,
+  strictThreshold = 0.50,   // Reduzido de 0.55 → mais preciso no passe strict
+  relaxedThreshold = 0.65,  // Reduzido de 0.70 → melhor recall sem muito ruído
 ): MatchResult[] {
   const q = Array.from(query);
 

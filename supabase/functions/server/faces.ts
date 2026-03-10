@@ -149,8 +149,8 @@ export async function indexFaces(
 export async function searchFaces(
   queryEmbedding: number[],
   eventId: string,
-  threshold = 0.88,
-  maxResults = 50,
+  threshold = 0.62,  // Reduzido de 0.78 → melhor recall para matches em condições variadas
+  maxResults = 100,  // Aumentado de 50 → retorna mais candidatos para o cliente filtrar
 ): Promise<SearchResult[]> {
   console.log(
     `[pgvector searchFaces] evento=${eventId}, threshold=${threshold}, maxResults=${maxResults}`,
@@ -198,14 +198,5 @@ export async function deleteFacesByEvent(eventId: string): Promise<void> {
   const { error } = await sb().from(TABLE).delete().eq("event_id", eventId);
   if (error) {
     console.log(`pgvector deleteFacesByEvent error: ${error.message}`);
-  }
-}
-
-/** Remove TODOS os embeddings (usado antes de reindexar tudo do zero). */
-export async function clearAllEmbeddings(): Promise<void> {
-  // .neq with an impossible condition deletes all rows without needing TRUNCATE
-  const { error } = await sb().from(TABLE).delete().neq("photo_id", "");
-  if (error) {
-    throw new Error(`pgvector clearAllEmbeddings error: ${error.message}`);
   }
 }

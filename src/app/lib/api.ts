@@ -1,13 +1,12 @@
-// API base: relative on Vercel (same domain), override with env var for local dev
-// against the old Supabase function URL.
-const BASE =
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  '/api/make-server-68454e9b';
+import { projectId, publicAnonKey } from '/utils/supabase/info';
+
+const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
 
 // ── Core fetch helpers ────────────────────────────────────────────────────────
 
 /**
- * PUBLIC request — no gateway auth required on Vercel (same-origin).
+ * PUBLIC request — always sends the anon key as Authorization so the Supabase
+ * edge-function gateway accepts the call. No user auth required.
  */
 async function request<T = any>(
   path: string,
@@ -15,6 +14,7 @@ async function request<T = any>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    Authorization: `Bearer ${publicAnonKey}`,
     ...(options.headers as Record<string, string>),
   };
 
@@ -28,8 +28,9 @@ async function request<T = any>(
 }
 
 /**
- * ADMIN request — sends the user's JWT as X-Admin-Token for our adminAuth
- * middleware. No Supabase gateway wrapper needed on Vercel.
+ * ADMIN request — sends anon key as Authorization (for the Supabase gateway)
+ * AND the user's JWT as X-Admin-Token (for our adminAuth middleware).
+ * This permanently fixes the "HTTP 401" caused by the gateway rejecting user JWTs.
  */
 async function adminRequest<T = any>(
   path: string,
@@ -38,7 +39,8 @@ async function adminRequest<T = any>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'X-Admin-Token': token,
+    Authorization: `Bearer ${publicAnonKey}`,   // ← gateway auth
+    'X-Admin-Token': token,                      // ← our middleware auth
     ...(options.headers as Record<string, string>),
   };
 
@@ -81,6 +83,7 @@ const aDel  = <T>(path: string, token: string) =>
 async function adminFormData<T = any>(path: string, body: FormData, token: string): Promise<T> {
   const headers: Record<string, string> = {
     // SEM Content-Type — browser define multipart/form-data + boundary
+    Authorization: `Bearer ${publicAnonKey}`,
     'X-Admin-Token': token,
   };
   console.log(`[API] Enviando FormData para ${BASE}${path}`);
@@ -431,7 +434,7 @@ export const api = {
 
   // ── Sync Storage → KV ───────────────────────────────────────────────────
   syncStorage: (token: string, skipComplete = false) =>
-    aPost<{ stats: { eventsCreated: number; photosImported: number; eventsSkipped: number; photosSkipped: number; elapsedMs: number; errors: string[] } }>(
+    aPost<{ stats: { eventsCreated: number; photosImported: number; errors: string[] } }>(
       `/admin/sync-storage${skipComplete ? '?skipComplete=true' : ''}`,
       {},
       token,
@@ -451,52 +454,6 @@ export const api = {
   diagnoseKv: (token: string) =>
     aGet<{ total: number; events: { id: string; name: string; photoCount: number; photosKey: string; hasList: boolean }[] }>(
       '/admin/diagnose-kv',
-      token,
-    ),
-
-  // ── Reindex ──────────────────────────────────────────────────────────────
-
-  /** Retorna a lista de IDs de fotos de um evento (para reindexação foto a foto) */
-  getEventPhotoIds: (eventId: string, token: string) =>
-    aGet<{ photoIds: string[]; photos: { id: string; url: string | null }[]; total: number }>(
-      `/admin/events/${eventId}/photo-ids`,
-      token,
-    ),
-
-  /** Limpa embeddings pgvector de um evento (ou todos se eventId omitido) */
-  clearEmbeddings: (token: string, eventId?: string) =>
-    aPost<{ success: boolean }>('/admin/clear-embeddings', eventId ? { eventId } : {}, token),
-
-  /** Reindexar uma foto individual no pgvector */
-  reindexPhoto: (eventId: string, photoId: string, token: string) =>
-    aPost<{ success: boolean; notFound?: boolean; noFace?: boolean; faces: number }>(
-      '/admin/reindex-photo',
-      { eventId, photoId },
-      token,
-    ),
-
-  /** Salva contato de WhatsApp do cliente (opt-in PDV → marketing) */
-  saveWhatsappContact: (
-    data: {
-      phone: string;
-      customerName?: string;
-      orderId?: string;
-      eventId?: string;
-      eventName?: string;
-      photoIds?: string[];
-      photoUrls?: string[];
-    },
-    token: string,
-  ) => aPost<{ success: boolean }>('/admin/whatsapp-contacts', data, token),
-
-  /** Marca contato como mensagem enviada (por order_id) */
-  markWhatsappSent: (orderId: string, token: string) =>
-    aPost<{ success: boolean }>('/admin/whatsapp-contacts/mark-sent', { orderId }, token),
-
-  /** Lista contatos de WhatsApp (para campanhas marketing) */
-  getWhatsappContacts: (token: string, eventId?: string) =>
-    aGet<{ contacts: any[]; total: number }>(
-      `/admin/whatsapp-contacts${eventId ? `?eventId=${eventId}` : ''}`,
       token,
     ),
 };

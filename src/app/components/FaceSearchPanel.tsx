@@ -107,13 +107,16 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
 
   const [stage,        setStage]        = useState<Stage>('idle');
   const [loadStep,     setLoadStep]     = useState('');
-  const [processStep,  setProcessStep]  = useState(''); // Novo: feedback durante processamento
+  const [processStep,  setProcessStep]  = useState('');
   const [error,        setError]        = useState('');
   const [isCamBlocked, setIsCamBlocked] = useState(false);
   const [faceDetected, setFaceDetected] = useState(false);
   const [matchedIds,   setMatchedIds]   = useState<string[]>([]);
   const [confidence,   setConfidence]   = useState(0);
   const [previewSrc,   setPreviewSrc]   = useState<string | null>(null);
+  // Guarda o queryDescriptor para permitir "Ampliar busca" sem nova selfie
+  const lastDescriptor = useRef<number[] | null>(null);
+  const [expandedSearch, setExpandedSearch] = useState(false);
 
   const videoRef    = useRef<HTMLVideoElement>(null);
   const canvasRef   = useRef<HTMLCanvasElement>(null);
@@ -144,51 +147,84 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
     }
   }, []);
 
-  /* ── buscar por embedding (compartilhado entre câmera e upload) ────────── */
+  /* ── processar canvas (comum entre câmera e upload) ───────────────────── */
 
-  const _searchByDescriptor = async (queryDescriptor: number[]) => {
-    setProcessStep('Buscando suas fotos…');
-    let matched: string[] = [];
-    let conf = 0;
-
-    try {
-      // threshold 0.88 = cosine similarity ~ L2 0.49 (alta precisão, evita falsos positivos em fotos de grupo)
-      const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor, 0.88, org);
-      matched = matches.map((m) => m.photoId);
-      const best = matches.length > 0 ? matches[0].similarity : 0;
-      conf = Math.max(0, Math.min(100, Math.round(best * 100)));
-    } catch (_pgErr) {
-      // ── Fallback: busca local caso o servidor falhe ───────────────────
-      console.warn('[FaceSearch] pgvector falhou, usando fallback local:', _pgErr);
-      setProcessStep('Comparando rostos (modo offline)…');
-      const { faces: allFaces } = await api.getEventFaces(eventId, org);
-        const ranked = faceService.findRankedMatches(queryDescriptor, allFaces, 0.45, 0.52);
-      matched = ranked.map((m) => m.photoId);
-      const bestDist = ranked.length > 0 ? ranked[0].minDistance : 1;
-      conf = Math.max(0, Math.min(100, Math.round((1 - bestDist / 0.75) * 100)));
-    }
-
-    setMatchedIds(matched);
-    setConfidence(conf);
-    setStage('results');
-  };
-
-  /* ── processar canvas (upload de selfie) ─────────────────────────────── */
-
-  const processCanvas = async (snap: HTMLCanvasElement) => {
+  const processCanvas = async (snap: HTMLCanvasElement, expandThreshold = false) => {
     setStage('processing');
     setProcessStep('Detectando rosto…');
     try {
+      // ── Passo 1: detecta rosto na selfie (local, face-api.js) ─────────────
       const det = await faceService.detectSingleFace(snap);
       if (!det) {
         setError('Nenhum rosto reconhecido. Tente em boa iluminação e olhando diretamente para a câmera.');
         setStage('error');
         return;
       }
-      await _searchByDescriptor(Array.from(det.descriptor));
+      const queryDescriptor = Array.from(det.descriptor);
+      lastDescriptor.current = queryDescriptor;
+
+      // ── Passo 2: busca no pgvector via servidor (ANN O(log n)) ────────────
+      // Threshold padrão: 0.62 (melhor recall). Modo expandido: 0.44 (máximo recall).
+      setProcessStep('Buscando suas fotos…');
+      const primaryThreshold = expandThreshold ? 0.44 : 0.62;
+      let matched: string[] = [];
+      let conf = 0;
+
+      try {
+        const { matches } = await api.searchFacesByEmbedding(eventId, queryDescriptor, primaryThreshold, org);
+        matched = matches.map((m) => m.photoId);
+        // Confiança baseada na melhor similaridade coseno (0..1 → 0..100%)
+        const best = matches.length > 0 ? matches[0].similarity : 0;
+        conf = Math.max(0, Math.min(100, Math.round(best * 100)));
+      } catch (_pgErr) {
+        // ── Fallback: busca local caso o servidor falhe ───────────────────
+        console.warn('[FaceSearch] pgvector falhou, usando fallback local:', _pgErr);
+        setProcessStep('Comparando rostos (modo offline)…');
+        const { faces: allFaces } = await api.getEventFaces(eventId, org);
+        const ranked = faceService.findRankedMatches(queryDescriptor, allFaces);
+        matched = ranked.map((m) => m.photoId);
+        const bestDist = ranked.length > 0 ? ranked[0].minDistance : 1;
+        conf = Math.max(0, Math.min(100, Math.round((1 - bestDist / 0.7) * 100)));
+      }
+
+      setMatchedIds(matched);
+      setConfidence(conf);
+      setExpandedSearch(expandThreshold);
+      setStage('results');
     } catch (err: any) {
       setError(err.message ?? 'Erro ao processar reconhecimento facial.');
       setStage('error');
+    }
+  };
+
+  /* ── ampliar busca com threshold menor (sem nova selfie) ─────────────── */
+
+  const expandSearch = async () => {
+    if (!lastDescriptor.current) return;
+    setStage('processing');
+    setProcessStep('Ampliando busca com maior sensibilidade…');
+    try {
+      const { matches } = await api.searchFacesByEmbedding(eventId, lastDescriptor.current, 0.44, org);
+      const matched = matches.map((m: any) => m.photoId);
+      const best = matches.length > 0 ? matches[0].similarity : 0;
+      const conf = Math.max(0, Math.min(100, Math.round(best * 100)));
+      setMatchedIds(matched);
+      setConfidence(conf);
+      setExpandedSearch(true);
+      setStage('results');
+    } catch (err: any) {
+      // Fallback local com threshold relaxado
+      try {
+        const { faces: allFaces } = await api.getEventFaces(eventId, org);
+        const ranked = faceService.findRankedMatches(lastDescriptor.current, allFaces, 0.62, 0.80);
+        setMatchedIds(ranked.map((m) => m.photoId));
+        setConfidence(ranked.length > 0 ? Math.round((1 - ranked[0].minDistance / 0.8) * 100) : 0);
+        setExpandedSearch(true);
+        setStage('results');
+      } catch {
+        setError('Erro ao ampliar busca. Tente tirar uma nova selfie.');
+        setStage('error');
+      }
     }
   };
 
@@ -310,34 +346,20 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
     e.target.value = '';
   };
 
-  /* ── capturar da câmera (multi-frame para melhor precisão) ──────────────── */
+  /* ── capturar da câmera ────────────────────────────────────────────────── */
 
   const capture = async () => {
     const video = videoRef.current;
     if (!video || !faceDetected) return;
 
-    setStage('processing');
-    setProcessStep('Capturando rosto…');
+    stopCamera();
 
-    try {
-      // 3 frames com 150ms de intervalo → descriptor médio L2-norm
-      // Reduz ruído da câmera e melhora significativamente a qualidade do match
-      const det = await faceService.detectSingleFaceMultiFrame(video, 3, 150);
+    const snap = document.createElement('canvas');
+    snap.width  = video.videoWidth;
+    snap.height = video.videoHeight;
+    snap.getContext('2d')!.drawImage(video, 0, 0);
 
-      stopCamera();
-
-      if (!det) {
-        setError('Nenhum rosto reconhecido. Tente em boa iluminação e olhando diretamente para a câmera.');
-        setStage('error');
-        return;
-      }
-
-      await _searchByDescriptor(Array.from(det.descriptor));
-    } catch (err: any) {
-      stopCamera();
-      setError(err.message ?? 'Erro ao processar reconhecimento facial.');
-      setStage('error');
-    }
+    await processCanvas(snap);
   };
 
   /* ── reset ────────────────────────────────────────────────────────────── */
@@ -749,9 +771,23 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                   Nenhuma foto encontrada
                 </p>
                 <p className="text-sm mb-4" style={{ color: MUTED, lineHeight: 1.7 }}>
-                  Pode ser que você não apareça nas fotos disponíveis, ou que as fotos ainda não tenham sido processadas.
+                  {expandedSearch
+                    ? 'Mesmo com a busca ampliada, nenhuma foto foi localizada. As fotos deste evento podem ainda não ter sido indexadas.'
+                    : 'Pode ser que você não apareça nas fotos disponíveis, ou que as fotos ainda não tenham sido processadas.'}
                 </p>
-                
+
+                {/* Botão "Ampliar busca" — só aparece na primeira tentativa sem resultado */}
+                {!expandedSearch && lastDescriptor.current && (
+                  <motion.button
+                    whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+                    onClick={expandSearch}
+                    className="flex items-center gap-2 px-6 py-3 rounded-2xl text-sm mx-auto mb-3"
+                    style={{ background: d ? 'rgba(134,239,172,0.08)' : 'rgba(22,101,52,0.08)', border: d ? '1px solid rgba(134,239,172,0.2)' : '1px solid rgba(22,101,52,0.2)', color: d ? GREEN : '#166534', fontWeight: 700 }}
+                  >
+                    <Scan className="w-4 h-4" /> Ampliar busca (maior sensibilidade)
+                  </motion.button>
+                )}
+
                 {/* Aviso de reindexação */}
                 <div className="mb-4 p-3 rounded-xl text-left" style={{ background: 'rgba(6,182,212,0.06)', border: '1px solid rgba(6,182,212,0.15)' }}>
                   <p className="text-xs font-bold mb-1.5" style={{ color: '#06b6d4' }}>
