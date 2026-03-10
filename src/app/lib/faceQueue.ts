@@ -22,7 +22,7 @@
  *   Resultado: latência de rede do N+1 é completamente escondida pelo tempo de
  *   inferência do N — throughput pode dobrar em uploads grandes.
  *
- * ── Estado reativo ────��────────────────────────────────────────────────────────
+ * ── Estado reativo ────��───────────────────────────────────────────────────────
  *   subscribe(fn) → recebe QueueState a cada mudança
  *   useFaceQueue() hook → estado reativo em React
  */
@@ -137,7 +137,7 @@ async function _run() {
       await _yield();
 
       // Redimensiona imagem para acelerar detecção
-      const resized = faceService.resizeImage(img, 1200);
+      const resized = faceService.resizeImage(img, 1600);
       await _yield();
 
       // detectAllFaces é CPU-bound (~1-3s com 3 passes) — prefetchingNext roda em paralelo.

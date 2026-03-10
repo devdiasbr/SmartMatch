@@ -21,7 +21,7 @@ export function Root() {
     <div
       className="relative transition-colors duration-300"
       style={{
-        background: isDark ? '#09090F' : '#F8F9FA',
+        background: isDark ? '#09090F' : '#FFFFFF',
         minHeight: '100vh',
         color: isDark ? 'white' : '#09090B',
         fontFamily: "'Plus Jakarta Sans', 'Inter', sans-serif",
@@ -34,7 +34,7 @@ export function Root() {
         style={{
           backgroundImage: isDark
             ? 'radial-gradient(circle, rgba(255,255,255,0.03) 1px, transparent 1px)'
-            : 'radial-gradient(circle, rgba(9,9,11,0.05) 1px, transparent 1px)',
+            : 'none',
           backgroundSize: '28px 28px',
         }}
       />

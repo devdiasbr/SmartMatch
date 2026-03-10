@@ -21,7 +21,7 @@ export function CartDrawer() {
   const borderColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(9,9,11,0.09)';
   const textColor = isDark ? '#ffffff' : '#09090B';
   const mutedColor = isDark ? 'rgba(255,255,255,0.38)' : '#71717A';
-  const itemBg = isDark ? 'rgba(255,255,255,0.03)' : '#F8F9FA';
+  const itemBg = isDark ? 'rgba(255,255,255,0.03)' : '#F5F5F7';
   const green = isDark ? '#86efac' : '#166534';
   const greenBright = isDark ? '#4ade80' : '#15803D';
 

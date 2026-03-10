@@ -88,7 +88,7 @@ export function Header() {
         className="fixed top-0 left-0 right-0 z-50 transition-all duration-300"
         style={{
           background: scrolled
-            ? isDark ? 'rgba(9,9,15,0.94)' : 'rgba(255,255,255,0.96)'
+            ? isDark ? 'rgba(9,9,15,0.94)' : 'rgba(255,255,255,0.97)'
             : 'transparent',
           backdropFilter: scrolled ? 'blur(20px)' : 'none',
           borderBottom: scrolled

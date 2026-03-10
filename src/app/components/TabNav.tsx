@@ -40,8 +40,8 @@ export function TabNav({
   }, []);
 
   /* ─── tokens ─── */
-  const containerBg    = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.9)';
-  const containerBorder= isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
+  const containerBg    = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const containerBorder= isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.10)';
   const activeBg       = isDark ? 'rgba(255,255,255,0.09)' : 'rgba(22,101,52,0.09)';
   const activeColor    = isDark ? '#ffffff'                 : '#166534';
   const inactiveColor  = isDark ? 'rgba(255,255,255,0.42)' : '#71717A';
@@ -80,6 +80,7 @@ export function TabNav({
         background: containerBg,
         border: `1px solid ${containerBorder}`,
         width: fullWidth ? '100%' : undefined,
+        boxShadow: isDark ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
       }}
     >
       {tabs.map((tab, i) => {

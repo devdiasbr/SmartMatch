@@ -441,8 +441,8 @@ function HeroSection() {
 
       {/* Bottom gradient — funde hero com o conteúdo abaixo */}
       <div
-        className="absolute bottom-0 left-0 right-0 h-40 z-20 pointer-events-none"
-        style={{ background: 'linear-gradient(to top, var(--background) 0%, transparent 100%)' }}
+        className="absolute bottom-0 left-0 right-0 h-48 z-20 pointer-events-none"
+        style={{ background: 'linear-gradient(to top, var(--background) 0%, var(--background) 15%, transparent 100%)' }}
       />
     </section>
   );

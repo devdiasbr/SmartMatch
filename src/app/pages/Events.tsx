@@ -226,7 +226,7 @@ export function Events() {
 
   const headingColor = isDark ? '#ffffff' : '#09090B';
   const subtitleColor = isDark ? 'rgba(255,255,255,0.4)' : 'rgba(9,9,11,0.45)';
-  const sectionBg = isDark ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)';
+  const sectionBg = isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF';
   const sectionBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(9,9,11,0.09)';
   const accentGreen = isDark ? '#86efac' : '#166534';
   const inputBg = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
@@ -261,7 +261,7 @@ export function Events() {
           style={{
             background: isDark
               ? 'linear-gradient(to bottom, rgba(8,8,14,0.55) 0%, rgba(8,8,14,0.85) 70%, rgba(8,8,14,1) 100%)'
-              : 'linear-gradient(to bottom, rgba(9,9,11,0.55) 0%, rgba(9,9,11,0.88) 70%, var(--background) 100%)',
+              : 'linear-gradient(to bottom, rgba(9,9,11,0.55) 0%, rgba(9,9,11,0.85) 70%, #FFFFFF 100%)',
           }}
         />
 

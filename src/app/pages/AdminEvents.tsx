@@ -419,7 +419,7 @@ export function AdminEvents() {
     catch (err: any) { closeConfirm(); setErrorMsg(err.message ?? 'Erro desconhecido'); setTimeout(() => setErrorMsg(null), 5000); }
   };
 
-  const bg = isDark ? '#09090F' : '#F8F9FA';
+  const bg = isDark ? '#09090F' : '#FAFBFC';
   const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
   const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
   const mutedText = isDark ? 'rgba(255,255,255,0.4)' : '#71717A';

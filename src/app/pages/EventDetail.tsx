@@ -319,10 +319,10 @@ export function EventDetail() {
   const orgId = new URLSearchParams(window.location.search).get('org') ?? undefined;
 
   /* theme-aware palette */
-  const bg          = isDark ? '#09090F'                  : '#F8F9FA';
+  const bg          = isDark ? '#09090F'                  : '#FAFBFC';
   const heroGrad    = isDark
     ? 'linear-gradient(to top, #09090F 0%, rgba(9,9,15,0.5) 50%, rgba(9,9,15,0.3) 100%)'
-    : 'linear-gradient(to top, #F8F9FA 0%, rgba(248,249,250,0.5) 50%, rgba(248,249,250,0.1) 100%)';
+    : 'linear-gradient(to top, #FAFBFC 0%, rgba(250,251,252,0.5) 50%, rgba(250,251,252,0.1) 100%)';
   const textPrimary = isDark ? '#ffffff'                  : '#09090B';
   const textMuted   = isDark ? 'rgba(255,255,255,0.55)'   : '#71717A';
   const textSubtle  = isDark ? 'rgba(255,255,255,0.35)'   : '#A1A1AA';

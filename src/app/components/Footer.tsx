@@ -9,7 +9,7 @@ export function Footer() {
     <footer
       className="relative transition-colors duration-300"
       style={{
-        background: isDark ? '#05050A' : '#F4F4F5',
+        background: isDark ? '#05050A' : '#FAFBFC',
         borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(9,9,11,0.08)'}`,
       }}
     >
@@ -57,7 +57,7 @@ export function Footer() {
           style={{ borderTop: `1px solid ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(9,9,11,0.07)'}` }}
         >
           <p className="text-xs" style={{ color: isDark ? 'rgba(255,255,255,0.22)' : '#A1A1AA' }}>
-            &copy; 2025 Smart Match. Todos os direitos reservados.
+            &copy; 2026 Smart Match. Todos os direitos reservados.
           </p>
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-full"

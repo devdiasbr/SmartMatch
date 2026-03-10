@@ -465,7 +465,7 @@ export function AdminConfig() {
   const [toast, setToast] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   // ── Colors ──
-  const bg         = isDark ? '#09090F' : '#F8F9FA';
+  const bg         = isDark ? '#09090F' : '#FAFBFC';
   const cardBg     = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
   const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
   const text       = isDark ? '#ffffff' : '#09090B';

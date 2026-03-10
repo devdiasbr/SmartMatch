@@ -75,7 +75,7 @@ function KpiCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay }}
       className="p-5 rounded-2xl flex flex-col gap-4"
-      style={{ background: cardBg, border: `1px solid ${cardBorder}` }}
+      style={{ background: cardBg, border: `1px solid ${cardBorder}`, boxShadow: isDark ? 'none' : '0 1px 3px rgba(0,0,0,0.04)' }}
     >
       <div className="flex items-start justify-between">
         <div
@@ -214,7 +214,7 @@ export function AdminDashboard() {
   }, [token]);
 
   /* Colors */
-  const bg = isDark ? '#09090F' : '#F8F9FA';
+  const bg = isDark ? '#09090F' : '#FAFBFC';
   const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
   const cardBorder = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
   const mutedText = isDark ? 'rgba(255,255,255,0.38)' : '#71717A';
@@ -226,7 +226,16 @@ export function AdminDashboard() {
   const rose = isDark ? '#fda4af' : '#be185d';
 
   /* Real KPI values */
-  const chartData = stats?.daily ?? [];
+  const chartData = useMemo(() => {
+    const raw = stats?.daily ?? [];
+    // Filter out entries with null/undefined day and deduplicate
+    const seen = new Set<string>();
+    return raw.filter((d) => {
+      if (!d.day || seen.has(d.day)) return false;
+      seen.add(d.day);
+      return true;
+    });
+  }, [stats]);
   const totalRevenue = stats?.totalRevenue ?? 0;
   const totalFotos = stats?.totalPhotos ?? 0;
   const totalVendas = stats?.totalOrders ?? 0;
@@ -243,7 +252,14 @@ export function AdminDashboard() {
       map[eventName].fotos += order.items?.length ?? 0;
       map[eventName].vendas += 1;
     }
-    return Object.values(map).slice(0, 7);
+    // Ensure unique nome values to avoid duplicate recharts keys
+    const values = Object.values(map).slice(0, 7);
+    const seen = new Map<string, number>();
+    return values.map((v) => {
+      const count = seen.get(v.nome) ?? 0;
+      seen.set(v.nome, count + 1);
+      return count > 0 ? { ...v, nome: `${v.nome} (${count + 1})` } : v;
+    });
   }, [stats]);
 
   /* Compute top sessions from real orders */
@@ -339,7 +355,7 @@ export function AdminDashboard() {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: isDark ? '#09090F' : '#F8F9FA' }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: isDark ? '#09090F' : '#FAFBFC' }}>
         <div className="w-8 h-8 rounded-full border-2 border-transparent animate-spin" style={{ borderTopColor: isDark ? '#86efac' : '#166534' }} />
       </div>
     );

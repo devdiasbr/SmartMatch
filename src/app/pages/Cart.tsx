@@ -260,7 +260,7 @@ export function Cart() {
   // Card installments
   const [installments, setInstallments] = useState(1);
 
-  const bg = isDark ? '#09090F' : '#F8F9FA';
+  const bg = isDark ? '#09090F' : '#FAFBFC';
   const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
   const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
   const textColor = isDark ? '#ffffff' : '#09090B';

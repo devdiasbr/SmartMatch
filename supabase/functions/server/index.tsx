@@ -1510,7 +1510,7 @@ app.post("/make-server-68454e9b/faces/search", async (c) => {
       return c.json({ error: "eventId e embedding são obrigatórios" }, 400);
     }
 
-    console.log(`[faces/search] Buscando faces para evento ${eventId}, embedding length: ${embedding.length}, threshold: ${threshold ?? 0.78}`);
+    console.log(`[faces/search] Buscando faces para evento ${eventId}, embedding length: ${embedding.length}, threshold: ${threshold ?? 0.62}`);
 
     const searchThreshold = typeof threshold === "number" ? threshold : 0.62;
     const matches = await faces.searchFaces(embedding, eventId, searchThreshold);

@@ -256,7 +256,7 @@ export function AdminPedidos() {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [cancelOrder, setCancelOrder] = useState<OrderRecord | null>(null);
 
-  const bg     = isDark ? '#09090F' : '#F8F9FA';
+  const bg     = isDark ? '#09090F' : '#FAFBFC';
   const card   = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
   const border = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
   const muted  = isDark ? 'rgba(255,255,255,0.4)'  : '#71717A';
