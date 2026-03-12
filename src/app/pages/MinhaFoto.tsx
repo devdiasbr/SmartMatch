@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams } from 'react-router';
 import { Download, Loader2, AlertCircle, CheckCircle2, Camera, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 import QRCode from 'qrcode';
 
 const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;

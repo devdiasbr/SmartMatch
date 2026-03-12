@@ -13,7 +13,7 @@ import { TabNav } from '../components/TabNav';
 import { useAuth } from '../contexts/AuthContext';
 import { api, type EventRecord, type PhotoRecord, type OrderItem } from '../lib/api';
 import { FacePDVSearch } from '../components/FacePDVSearch';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 const fmt = (n: number) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

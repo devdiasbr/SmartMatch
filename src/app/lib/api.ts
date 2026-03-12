@@ -1,4 +1,4 @@
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info';
 
 const BASE = `https://${projectId}.supabase.co/functions/v1/make-server-68454e9b`;
 
@@ -61,17 +61,17 @@ async function adminRequest<T = any>(
 
 // ── Typed shorthand ───────────────────────────────────────────────────────────
 
-const get  = <T>(path: string) => request<T>(path, { method: 'GET' });
-const post = <T>(path: string, body: unknown) =>
+const get  = <T,>(path: string) => request<T>(path, { method: 'GET' });
+const post = <T,>(path: string, body: unknown) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
-const aGet  = <T>(path: string, token: string) =>
+const aGet  = <T,>(path: string, token: string) =>
   adminRequest<T>(path, { method: 'GET' }, token);
-const aPost = <T>(path: string, body: unknown, token: string) =>
+const aPost = <T,>(path: string, body: unknown, token: string) =>
   adminRequest<T>(path, { method: 'POST', body: JSON.stringify(body) }, token);
-const aPut  = <T>(path: string, body: unknown, token: string) =>
+const aPut  = <T,>(path: string, body: unknown, token: string) =>
   adminRequest<T>(path, { method: 'PUT', body: JSON.stringify(body) }, token);
-const aDel  = <T>(path: string, token: string) =>
+const aDel  = <T,>(path: string, token: string) =>
   adminRequest<T>(path, { method: 'DELETE' }, token);
 
 /**

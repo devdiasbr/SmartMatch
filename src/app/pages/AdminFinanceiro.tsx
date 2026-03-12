@@ -37,7 +37,7 @@ import { useTheme } from '../components/ThemeProvider';
 import { TabNav } from '../components/TabNav';
 import { useAuth } from '../contexts/AuthContext';
 import { api, type AdminConfig, type Coupon, type OrderRecord } from '../lib/api';
-import { projectId } from '/utils/supabase/info';
+import { projectId } from '../../../utils/supabase/info';
 
 const fmt = (n: number) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
