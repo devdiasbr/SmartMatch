@@ -140,10 +140,15 @@ async function _run() {
       const resized = faceService.resizeImage(img, 1600);
       await _yield();
 
-      // detectAllFaces é CPU-bound (~1-3s com 3 passes) — prefetchingNext roda em paralelo.
+      // detectAllFacesMultiScale é CPU-bound (~2-5s com multi-escala) — prefetchingNext roda em paralelo.
       // Usa inputSize 512 (máxima qualidade) com multi-pass automático em faceService.
       // O prefetch esconde a latência de rede do próximo item durante esse tempo.
-      const descriptors = await faceService.detectAllFaces(resized, { inputSize: 512 });
+      // Pré-processamento: equalização de histograma para melhorar detecção em luz ruim
+            const enhanced = faceService.enhanceImage(resized, 0.4);
+            await _yield();
+      
+            // Detecção multi-escala com SsdMobilenetv1: imagem inteira + quadrantes (2x zoom)
+            const descriptors = await faceService.detectAllFacesMultiScale(enhanced);
       await _yield();
 
       if (descriptors.length > 0) {

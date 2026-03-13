@@ -166,7 +166,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
       // ── Passo 2: busca no pgvector via servidor (ANN O(log n)) ────────────
       // Threshold padrão: 0.62 (melhor recall). Modo expandido: 0.44 (máximo recall).
       setProcessStep('Buscando suas fotos…');
-      const primaryThreshold = expandThreshold ? 0.44 : 0.62;
+      const primaryThreshold = expandThreshold ? 0.40 : 0.55;
       let matched: string[] = [];
       let conf = 0;
 
@@ -204,7 +204,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
     setStage('processing');
     setProcessStep('Ampliando busca com maior sensibilidade…');
     try {
-      const { matches } = await api.searchFacesByEmbedding(eventId, lastDescriptor.current, 0.44, org);
+      const { matches } = await api.searchFacesByEmbedding(eventId, lastDescriptor.current, 0.40, org);
       const matched = matches.map((m: any) => m.photoId);
       const best = matches.length > 0 ? matches[0].similarity : 0;
       const conf = Math.max(0, Math.min(100, Math.round(best * 100)));

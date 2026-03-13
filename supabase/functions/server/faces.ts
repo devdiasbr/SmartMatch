@@ -149,7 +149,7 @@ export async function indexFaces(
 export async function searchFaces(
   queryEmbedding: number[],
   eventId: string,
-  threshold = 0.62,  // Reduzido de 0.78 → melhor recall para matches em condições variadas
+  threshold = 0.55,  // Ajustado para SsdMobilenetv1 + faceLandmark68Net (embeddings mais precisos) → melhor recall para matches em condições variadas
   maxResults = 100,  // Aumentado de 50 → retorna mais candidatos para o cliente filtrar
 ): Promise<SearchResult[]> {
   console.log(

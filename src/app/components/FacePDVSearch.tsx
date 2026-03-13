@@ -132,7 +132,7 @@ export function FacePDVSearch({ eventId, eventName, isDark, onMatches, onClose }
       let conf = 0;
 
       try {
-        const { matches } = await api.searchFacesByEmbedding(eventId, queryDesc, 0.62);
+        const { matches } = await api.searchFacesByEmbedding(eventId, queryDesc, 0.55);
         matched = matches.map(m => m.photoId);
         const best = matches.length > 0 ? matches[0].similarity : 0;
         conf = Math.max(0, Math.min(100, Math.round(best * 100)));
