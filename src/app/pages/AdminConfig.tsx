@@ -3222,104 +3222,122 @@ export function AdminConfig() {
                             : (isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.15)')}` 
                         }}
                       >
-                        <div className="flex items-center gap-2">
-                          {reindexResult.processed === 0 ? (
-                            <AlertTriangle className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#b45309' }} />
-                          ) : (
-                            <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
-                          )}
-                          <p className="text-sm font-bold" style={{ 
-                            color: reindexResult.processed === 0 
-                              ? (isDark ? '#fbbf24' : '#b45309') 
-                              : (isDark ? '#06b6d4' : '#0891b2'), 
-                            fontFamily: "'Montserrat',sans-serif" 
-                          }}>
-                            {reindexResult.processed === 0 ? 'Nenhuma foto encontrada!' : 'Reindexação concluída!'}
-                          </p>
-                        </div>
+                        {(() => {
+                          const totalFound = reindexResult.processed + (reindexResult.noFace ?? 0) + reindexResult.failed;
+                          const noFaceCount = reindexResult.noFace ?? reindexResult.failed;
+                          const isNoPhotos = totalFound === 0;
 
-                        {reindexResult.processed === 0 ? (
-                          <div className="text-xs space-y-2 leading-relaxed" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
-                            <p><strong>⚠️ Os eventos selecionados não têm fotos no sistema.</strong></p>
-                            <p>Você precisa primeiro:</p>
-                            <ul className="list-disc list-inside space-y-1 ml-2">
-                              <li>Fazer upload de fotos via PDV</li>
-                              <li>Ou rodar a <strong>Sincronização Storage → KV</strong> abaixo (se já tiver fotos no S3)</li>
-                            </ul>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="grid grid-cols-3 gap-2">
-                              {[
-                                { label: 'Indexadas', value: reindexResult.processed, color: isDark ? '#06b6d4' : '#0891b2', bg: isDark ? 'rgba(6,182,212,0.08)' : 'rgba(8,145,178,0.07)', border: isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.18)', title: 'Fotos com face indexada com sucesso' },
-                                { label: 'Faces', value: reindexResult.faces, color: isDark ? '#86efac' : '#16a34a', bg: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,163,74,0.06)', border: isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,163,74,0.18)', title: 'Embeddings inseridos no pgvector' },
-                                { label: 'Sem face', value: reindexResult.noFace ?? reindexResult.failed, color: muted, bg: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: cardBorder, title: 'Fotos sem rosto detectado — normal para fotos de cenário/arquitetura' },
-                              ].map(({ label, value, color, bg, border, title }) => (
-                                <div key={label} className="rounded-lg p-3 text-center" title={title}
-                                  style={{ background: bg, border: `1px solid ${border}` }}>
-                                  <p className="text-xl font-black" style={{ color, fontFamily: "'Montserrat',sans-serif" }}>{value}</p>
-                                  <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
+                          return (
+                            <>
+                              <div className="flex items-center gap-2">
+                                {isNoPhotos ? (
+                                  <AlertTriangle className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#b45309' }} />
+                                ) : reindexResult.processed > 0 ? (
+                                  <CheckCircle2 className="w-4 h-4" style={{ color: isDark ? '#06b6d4' : '#0891b2' }} />
+                                ) : (
+                                  <AlertTriangle className="w-4 h-4" style={{ color: isDark ? '#fbbf24' : '#b45309' }} />
+                                )}
+                                <p className="text-sm font-bold" style={{
+                                  color: isNoPhotos
+                                    ? (isDark ? '#fbbf24' : '#b45309')
+                                    : reindexResult.processed > 0
+                                      ? (isDark ? '#06b6d4' : '#0891b2')
+                                      : (isDark ? '#fbbf24' : '#b45309'),
+                                  fontFamily: "'Montserrat',sans-serif"
+                                }}>
+                                  {isNoPhotos
+                                    ? 'Nenhuma foto encontrada!'
+                                    : reindexResult.processed > 0
+                                      ? 'Reindexação concluída!'
+                                      : `${noFaceCount} foto(s) sem rosto detectado`}
+                                </p>
+                              </div>
+
+                              {isNoPhotos ? (
+                                <div className="text-xs space-y-2 leading-relaxed" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                                  <p><strong>⚠️ Os eventos selecionados não têm fotos no sistema.</strong></p>
+                                  <p>Você precisa primeiro:</p>
+                                  <ul className="list-disc list-inside space-y-1 ml-2">
+                                    <li>Fazer upload de fotos via PDV</li>
+                                    <li>Ou rodar a <strong>Sincronização Storage → KV</strong> abaixo (se já tiver fotos no S3)</li>
+                                  </ul>
                                 </div>
-                              ))}
-                            </div>
+                              ) : (
+                                <>
+                                  <div className="grid grid-cols-3 gap-2">
+                                    {[
+                                      { label: 'Indexadas', value: reindexResult.processed, color: isDark ? '#06b6d4' : '#0891b2', bg: isDark ? 'rgba(6,182,212,0.08)' : 'rgba(8,145,178,0.07)', border: isDark ? 'rgba(6,182,212,0.2)' : 'rgba(8,145,178,0.18)', title: 'Fotos com face indexada com sucesso' },
+                                      { label: 'Faces', value: reindexResult.faces, color: isDark ? '#86efac' : '#16a34a', bg: isDark ? 'rgba(134,239,172,0.08)' : 'rgba(22,163,74,0.06)', border: isDark ? 'rgba(134,239,172,0.2)' : 'rgba(22,163,74,0.18)', title: 'Embeddings inseridos no pgvector' },
+                                      { label: 'Sem face', value: noFaceCount, color: muted, bg: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: cardBorder, title: 'Fotos sem rosto detectado — normal para fotos de cenário/arquitetura' },
+                                    ].map(({ label, value, color, bg, border, title }) => (
+                                      <div key={label} className="rounded-lg p-3 text-center" title={title}
+                                        style={{ background: bg, border: `1px solid ${border}` }}>
+                                        <p className="text-xl font-black" style={{ color, fontFamily: "'Montserrat',sans-serif" }}>{value}</p>
+                                        <p className="text-[10px] mt-0.5 uppercase tracking-wider font-medium" style={{ color: muted }}>{label}</p>
+                                      </div>
+                                    ))}
+                                  </div>
 
-                            {reindexResult.failed > 0 && (
-                              <div className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.2)' : 'rgba(220,38,38,0.15)'}` }}>
-                                <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
-                                <p className="text-xs" style={{ color: isDark ? '#fca5a5' : '#b91c1c' }}>
-                                  <strong>{reindexResult.failed}</strong> erro{reindexResult.failed !== 1 ? 's' : ''} reais ao indexar — verifique o console do servidor.
-                                </p>
-                              </div>
-                            )}
+                                  {reindexResult.failed > 0 && (
+                                    <div className="rounded-lg px-3 py-2 flex items-center gap-2" style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.2)' : 'rgba(220,38,38,0.15)'}` }}>
+                                      <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: isDark ? '#f87171' : '#dc2626' }} />
+                                      <p className="text-xs" style={{ color: isDark ? '#fca5a5' : '#b91c1c' }}>
+                                        <strong>{reindexResult.failed}</strong> erro{reindexResult.failed !== 1 ? 's' : ''} reais ao indexar — verifique o console do servidor.
+                                      </p>
+                                    </div>
+                                  )}
 
-                            {reindexResult.faces > 0 && (
-                              <p className="text-xs" style={{ color: muted }}>
-                                ✅ Faces indexadas no pgvector! Agora você pode usar o reconhecimento facial normalmente.
-                              </p>
-                            )}
+                                  {reindexResult.faces > 0 && (
+                                    <p className="text-xs" style={{ color: muted }}>
+                                      ✅ Faces indexadas no pgvector! Agora você pode usar o reconhecimento facial normalmente.
+                                    </p>
+                                  )}
 
-                            {/* Re-detectar sem rostos */}
-                            {(reindexResult.noFace ?? reindexResult.failed) > 0 && reindexEventId && reindexEventId !== 'ALL' && (
-                              <div className="rounded-xl p-3 space-y-2" style={{ background: isDark ? 'rgba(251,191,36,0.05)' : 'rgba(180,130,0,0.05)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.18)' : 'rgba(180,130,0,0.15)'}` }}>
-                                <p className="text-xs" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
-                                  <strong>{reindexResult.noFace ?? reindexResult.failed}</strong> fotos sem rosto detectado. Deseja tentar novamente com detecção mais sensível (TinyFaceDetector + threshold 0.2)?
-                                </p>
-                                {redetectStatus === 'queued' && redetectCount === 0 && (
-                                  <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>✅ Todas as fotos já têm rostos detectados!</p>
-                                )}
-                                {redetectStatus === 'queued' && redetectCount > 0 && (
-                                  <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>
-                                    ✅ {redetectCount} fotos enfileiradas! Acompanhe o progresso no toast verde na tela. Após concluir, rode a reindexação novamente.
-                                  </p>
-                                )}
-                                {redetectStatus === 'error' && (
-                                  <p className="text-xs" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Erro: {redetectError}</p>
-                                )}
-                                {redetectStatus !== 'queued' && (
-                                  <motion.button
-                                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                                    onClick={redetectNoFace}
-                                    disabled={redetectStatus === 'loading'}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
-                                    style={{
-                                      background: isDark ? 'rgba(251,191,36,0.12)' : 'rgba(180,130,0,0.1)',
-                                      border: `1px solid ${isDark ? 'rgba(251,191,36,0.25)' : 'rgba(180,130,0,0.2)'}`,
-                                      color: isDark ? '#fbbf24' : '#92400e',
-                                      fontWeight: 700,
-                                      cursor: redetectStatus === 'loading' ? 'not-allowed' : 'pointer',
-                                      opacity: redetectStatus === 'loading' ? 0.6 : 1,
-                                    }}
-                                  >
-                                    {redetectStatus === 'loading'
-                                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando…</>
-                                      : <><RefreshCw className="w-3.5 h-3.5" /> Re-detectar sem rostos</>
-                                    }
-                                  </motion.button>
-                                )}
-                              </div>
-                            )}
-                          </>
-                        )}
+                                  {/* Re-detectar sem rostos */}
+                                  {noFaceCount > 0 && reindexEventId && reindexEventId !== 'ALL' && (
+                                    <div className="rounded-xl p-3 space-y-2" style={{ background: isDark ? 'rgba(251,191,36,0.05)' : 'rgba(180,130,0,0.05)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.18)' : 'rgba(180,130,0,0.15)'}` }}>
+                                      <p className="text-xs" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                                        <strong>{noFaceCount}</strong> fotos sem rosto detectado. Detectar faces agora no browser (TinyFaceDetector + threshold 0.2)?
+                                      </p>
+                                      {redetectStatus === 'queued' && redetectCount === 0 && (
+                                        <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>✅ Todas as fotos já têm rostos detectados!</p>
+                                      )}
+                                      {redetectStatus === 'queued' && redetectCount > 0 && (
+                                        <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>
+                                          ✅ {redetectCount} fotos enfileiradas! Acompanhe o progresso no toast verde. Após concluir, rode a reindexação novamente.
+                                        </p>
+                                      )}
+                                      {redetectStatus === 'error' && (
+                                        <p className="text-xs" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Erro: {redetectError}</p>
+                                      )}
+                                      {redetectStatus !== 'queued' && (
+                                        <motion.button
+                                          whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                          onClick={redetectNoFace}
+                                          disabled={redetectStatus === 'loading'}
+                                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+                                          style={{
+                                            background: isDark ? 'rgba(251,191,36,0.12)' : 'rgba(180,130,0,0.1)',
+                                            border: `1px solid ${isDark ? 'rgba(251,191,36,0.25)' : 'rgba(180,130,0,0.2)'}`,
+                                            color: isDark ? '#fbbf24' : '#92400e',
+                                            fontWeight: 700,
+                                            cursor: redetectStatus === 'loading' ? 'not-allowed' : 'pointer',
+                                            opacity: redetectStatus === 'loading' ? 0.6 : 1,
+                                          }}
+                                        >
+                                          {redetectStatus === 'loading'
+                                            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando…</>
+                                            : <><RefreshCw className="w-3.5 h-3.5" /> Re-detectar sem rostos</>
+                                          }
+                                        </motion.button>
+                                      )}
+                                    </div>
+                                  )}
+                                </>
+                              )}
+                            </>
+                          );
+                        })()}
                       </motion.div>
                     )}
 
