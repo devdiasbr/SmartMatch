@@ -323,29 +323,40 @@ export function AdminConfig() {
   const fqState = useFaceQueue();
 
   // Quando faceQueue terminar, re-executar reindexação automaticamente se pendente
-  const autoReindexRef = useRef<{ eventId: string; token: string } | null>(null);
+  const autoReindexRef = useRef<{ eventIds: string[]; token: string } | null>(null);
   const fqWasActive = useRef(false);
   useEffect(() => {
     const wasActive = fqWasActive.current;
     fqWasActive.current = fqState.active;
     if (wasActive && !fqState.active && autoReindexRef.current) {
-      const { eventId, token: t } = autoReindexRef.current;
+      const { eventIds, token: t } = autoReindexRef.current;
       autoReindexRef.current = null;
       // Re-reindexar agora que as faces foram detectadas e salvas no KV
       setReindexStatus('processing');
       setReindexResult(null);
       setReindexPhotoProgress({ current: 0, total: 0 });
       setReindexLiveStats({ processed: 0, faces: 0, noFace: 0, failed: 0 });
-      reindexEventByPhoto(
-        eventId, t,
-        (cur, tot) => setReindexPhotoProgress({ current: cur, total: tot }),
-        ({ processed, faces, noFace, failed }) => setReindexLiveStats({ processed, faces, noFace, failed }),
-      ).then(stats => {
-        setReindexResult({ processed: stats.processed, noFace: stats.noFace, failed: stats.failed, faces: stats.faces });
-        setReindexProgress({ current: 1, total: 1 });
+      setReindexProgress({ current: 0, total: eventIds.length });
+
+      let tp = 0, tf = 0, tn = 0, tfl = 0;
+      (async () => {
+        for (let i = 0; i < eventIds.length; i++) {
+          try {
+            const s = await reindexEventByPhoto(
+              eventIds[i], t,
+              (cur, tot) => setReindexPhotoProgress({ current: cur, total: tot }),
+              ({ processed, faces, noFace, failed }) => setReindexLiveStats({
+                processed: tp + processed, faces: tf + faces, noFace: tn + noFace, failed: tfl + failed,
+              }),
+            );
+            tp += s.processed; tf += s.faces; tn += s.noFace; tfl += s.failed;
+          } catch { tfl++; }
+          setReindexProgress({ current: i + 1, total: eventIds.length });
+        }
+        setReindexResult({ processed: tp, noFace: tn, failed: tfl, faces: tf });
         setReindexStatus('done');
-        showToast('ok', `Reindexação automática: ${stats.faces} faces indexadas!`);
-      }).catch((err: any) => {
+        showToast('ok', `Reindexação automática: ${tf} face(s) indexada(s)!`);
+      })().catch((err: any) => {
         setReindexError(err.message ?? 'Erro na reindexação automática');
         setReindexStatus('error');
       });
@@ -939,47 +950,54 @@ export function AdminConfig() {
     return { processed, faces, noFace, failed, total };
   };
 
+  // ── Helper: enfileira fotos sem rosto de uma lista de eventos ──
+  const enqueueNoFacePhotos = async (eventIds: string[], t: string): Promise<number> => {
+    let total = 0;
+    for (const evId of eventIds) {
+      try {
+        const { faces } = await api.getEventFaces(evId);
+        const withFaceIds = new Set(faces.map((f: { photoId: string }) => f.photoId));
+
+        const allPhotos: PhotoRecord[] = [];
+        let page = 1;
+        while (true) {
+          const { photos, totalPages } = await api.getEventPhotos(evId, page, 100);
+          allPhotos.push(...photos);
+          if (page >= totalPages) break;
+          page++;
+        }
+
+        const noFacePhotos = allPhotos.filter(p => !withFaceIds.has(p.id) && p.url);
+        if (noFacePhotos.length > 0) {
+          faceQueueEnqueue(noFacePhotos.map(p => ({
+            photoId: p.id,
+            eventId: evId,
+            photoUrl: p.url!,
+            token: t,
+          })));
+          total += noFacePhotos.length;
+        }
+      } catch (err) {
+        console.warn(`[redetect] Falha no evento ${evId}:`, err);
+      }
+    }
+    return total;
+  };
+
   // ── Re-detect fotos sem rosto via faceQueue client-side ──
-  const redetectNoFace = async () => {
-    if (!reindexEventId || reindexEventId === 'ALL') return;
-    const t = await getToken(); if (!t) return;
+  const redetectNoFace = async (eventIds?: string[], overrideToken?: string) => {
+    const ids = eventIds ?? (reindexEventId && reindexEventId !== 'ALL' ? [reindexEventId] : []);
+    if (ids.length === 0) return;
+    const t = overrideToken ?? (await getToken());
+    if (!t) return;
 
     setRedetectStatus('loading');
     setRedetectError('');
     setRedetectCount(0);
 
     try {
-      // Busca fotos já com faces indexadas
-      const { faces } = await api.getEventFaces(reindexEventId);
-      const withFaceIds = new Set(faces.map((f: { photoId: string }) => f.photoId));
-
-      // Busca todas as fotos do evento (paginado)
-      const allPhotos: PhotoRecord[] = [];
-      let page = 1;
-      while (true) {
-        const { photos, totalPages } = await api.getEventPhotos(reindexEventId, page, 100);
-        allPhotos.push(...photos);
-        if (page >= totalPages) break;
-        page++;
-      }
-
-      // Filtra apenas fotos sem face que têm URL
-      const noFacePhotos = allPhotos.filter(p => !withFaceIds.has(p.id) && p.url);
-      if (noFacePhotos.length === 0) {
-        setRedetectCount(0);
-        setRedetectStatus('queued');
-        return;
-      }
-
-      // Enfileira para re-detecção client-side com novos thresholds (0.2 SSD + TinyFaceDetector)
-      faceQueueEnqueue(noFacePhotos.map(p => ({
-        photoId: p.id,
-        eventId: reindexEventId,
-        photoUrl: p.url!,
-        token: t,
-      })));
-
-      setRedetectCount(noFacePhotos.length);
+      const count = await enqueueNoFacePhotos(ids, t);
+      setRedetectCount(count);
       setRedetectStatus('queued');
     } catch (err: any) {
       setRedetectError(err.message ?? 'Erro ao re-detectar');
@@ -1023,9 +1041,9 @@ export function AdminConfig() {
 
       // Se há fotos sem rosto, auto-enfileira detecção e agenda re-reindexação
       if (stats.noFace > 0 && reindexEventId && reindexEventId !== 'ALL') {
-        autoReindexRef.current = { eventId: reindexEventId, token: t };
-        await redetectNoFace();
-        // redetectNoFace enfileira na faceQueue → useEffect acima vai re-reindexar ao terminar
+        autoReindexRef.current = { eventIds: [reindexEventId], token: t };
+        await redetectNoFace([reindexEventId], t);
+        // enfileira na faceQueue → useEffect re-reindexar ao terminar
       } else {
         showToast('ok', `Reindexação concluída: ${stats.faces} faces em ${stats.total} fotos`);
       }
@@ -1094,7 +1112,15 @@ export function AdminConfig() {
       setReindexResult({ processed: totalProcessed, noFace: totalNoFace, failed: totalFailed, faces: totalFacesAll });
       setReindexStatus('done');
       setReindexCurrentEvent('');
-      showToast('ok', `Reindexação total concluída: ${totalFacesAll} faces em ${availableEvents.length} eventos`);
+
+      // Se há fotos sem rosto em qualquer evento, auto-enfileira e agenda re-reindexação
+      if (totalNoFace > 0) {
+        const allIds = availableEvents.map(e => e.id);
+        autoReindexRef.current = { eventIds: allIds, token: t };
+        await redetectNoFace(allIds, t);
+      } else {
+        showToast('ok', `Reindexação total concluída: ${totalFacesAll} faces em ${availableEvents.length} eventos`);
+      }
     } catch (err: any) {
       setReindexError(err.message ?? 'Erro desconhecido');
       setReindexStatus('error');
@@ -1200,10 +1226,23 @@ export function AdminConfig() {
       setReindexResult({ processed: totalProcessed, noFace: 0, failed: totalFailed, faces: totalFaces });
       setReindexCurrentEvent('');
       setFlowResults(prev => ({ ...prev, reindex: { processed: totalProcessed, faces: totalFaces } }));
-      
-      // Já indexamos no pgvector diretamente, então não precisa do step 3!
-      setFlowStatus('done');
-      showToast('ok', `✅ Fluxo completo: ${totalFaces} faces indexadas no pgvector em ${events.length} eventos!`);
+
+      // Se algum evento tem fotos sem rosto, auto-enfileira detecção e re-reindexação
+      const totalNoFaceFlow = events.length * 1; // precisa contar — soma no loop abaixo
+      // (totalFailed aqui não é noFace — precisamos verificar)
+      // Enfileira para todos os eventos — enqueueNoFacePhotos filtra internamente
+      const allEvIds = events.map((e: any) => e.id);
+      const enqueuedCount = await enqueueNoFacePhotos(allEvIds, t);
+      if (enqueuedCount > 0) {
+        setRedetectStatus('queued');
+        setRedetectCount(enqueuedCount);
+        autoReindexRef.current = { eventIds: allEvIds, token: t };
+        setFlowStatus('done');
+        // showToast será disparado pelo useEffect após re-reindexação
+      } else {
+        setFlowStatus('done');
+        showToast('ok', `✅ Fluxo completo: ${totalFaces} faces indexadas no pgvector em ${events.length} eventos!`);
+      }
       
     } catch (err: any) {
       console.error('Erro no fluxo completo:', err);
