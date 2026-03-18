@@ -115,6 +115,8 @@ export interface EventRecord {
   price: number;
   dayOfWeek: string;
   sessionType?: string;
+  coverPath?: string;
+  coverUrl?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -266,6 +268,15 @@ export const api = {
   deleteEvent: (id: string, token: string) =>
     aDel<{ success: boolean }>(`/events/${id}`, token),
 
+  uploadEventCover: (
+    id: string,
+    data: { base64: string; mimeType: string },
+    token: string,
+  ) => aPost<{ coverUrl: string | null; coverPath: string }>(`/admin/events/${id}/cover`, data, token),
+
+  deleteEventCover: (id: string, token: string) =>
+    aDel<{ success: boolean }>(`/admin/events/${id}/cover`, token),
+
   // ── Photos (public) ──────────────────────────────────────────────────────
 
   getEventPhotos: (eventId: string, page = 1, limit = 20, org?: string) =>
@@ -358,6 +369,11 @@ export const api = {
 
   deleteBrandingBackground: (index: number, token: string) =>
     aDel<{ success: boolean }>(`/admin/branding/backgrounds/${index}`, token),
+
+  syncBrandingFromStorage: (token: string) =>
+    aPost<{ success: boolean; found: { logo: boolean; favicon: boolean; backgrounds: number; ctaBg: boolean; scannerImage: boolean; footerImage: boolean } }>(
+      '/admin/branding/sync-from-storage', {}, token,
+    ),
 
   // ── Admin Config ─────────────────────────────────────────────────────────
 
@@ -456,4 +472,34 @@ export const api = {
       '/admin/diagnose-kv',
       token,
     ),
+
+  // ── Reindex helpers ──────────────────────────────────────────────────────
+
+  /** Retorna a lista de IDs de fotos de um evento (para reindexação foto a foto) */
+  getEventPhotoIds: (eventId: string, token: string) =>
+    aGet<{ photoIds: string[]; total: number }>(`/admin/events/${eventId}/photo-ids`, token),
+
+  /** Reindexia uma única foto no pgvector a partir dos descritores salvos no KV */
+  reindexPhoto: (eventId: string, photoId: string, token: string) =>
+    aPost<{ success: boolean; notFound: boolean; noFace: boolean; faces: number; fileName?: string; error?: string }>(
+      '/admin/reindex-photo',
+      { eventId, photoId },
+      token,
+    ),
+
+  /**
+   * Verificação de rostos com Claude Vision (server-side).
+   * Confirma quais fotos do evento mostram a mesma pessoa da selfie.
+   * Degrada graciosamente se ANTHROPIC_API_KEY não estiver configurado.
+   */
+  verifyFacesWithClaude: (
+    selfieBase64: string,
+    selfieMimeType: string,
+    photos: Array<{ id: string; url: string }>,
+  ) =>
+    post<{
+      results: Array<{ id: string; verified: boolean; confidence: number }>;
+      unavailable?: boolean;
+      error?: string;
+    }>('/ai/verify-faces', { selfieBase64, selfieMimeType, photos }),
 };

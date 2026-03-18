@@ -1,4 +1,5 @@
-import { api, type BrandingConfig } from '../lib/api';
+import { api, type PhotoRecord, type BrandingConfig } from '../lib/api';
+import { enqueue as faceQueueEnqueue } from '../lib/faceQueue';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -358,10 +359,17 @@ export function AdminConfig() {
   const [reindexResult, setReindexResult] = useState<{ processed: number; noFace: number; failed: number; faces: number } | null>(null);
   const [reindexError, setReindexError] = useState('');
   const [availableEvents, setAvailableEvents] = useState<Array<{ id: string; name: string; photoCount: number }>>([]);
+  const [eventsLoadError, setEventsLoadError] = useState('');
+  const [eventsLoading, setEventsLoading] = useState(false);
   const [reindexCurrentEvent, setReindexCurrentEvent] = useState<string>(''); // Nome do evento atual
   const [reindexEventIndex, setReindexEventIndex] = useState(0); // Índice do evento atual (para TODOS)
   const [reindexLiveStats, setReindexLiveStats] = useState({ processed: 0, faces: 0, noFace: 0, failed: 0 }); // Acumulado em tempo real
   const [reindexPhotoProgress, setReindexPhotoProgress] = useState({ current: 0, total: 0 }); // Progresso foto a foto
+
+  // ── Re-detect no-face photos state ──
+  const [redetectStatus, setRedetectStatus] = useState<'idle' | 'loading' | 'queued' | 'error'>('idle');
+  const [redetectCount, setRedetectCount] = useState(0);
+  const [redetectError, setRedetectError] = useState('');
 
   // ── Storage Sync state ──
   type SyncStatus = 'idle' | 'running' | 'done' | 'error';
@@ -398,6 +406,8 @@ export function AdminConfig() {
   const [pageTitle, setPageTitle] = useState('');
   const [marcaDirty, setMarcaDirty] = useState(false);
   const [savingMarca, setSavingMarca] = useState(false);
+  const [syncingBranding, setSyncingBranding] = useState(false);
+  const [syncBrandingResult, setSyncBrandingResult] = useState<{ logo: boolean; favicon: boolean; backgrounds: number; ctaBg: boolean } | null>(null);
 
   // Watermark fields
   const [watermarkText, setWatermarkText] = useState('');
@@ -542,6 +552,23 @@ export function AdminConfig() {
       loadEventsForReindex();
     }
   }, [activeTab, token]);
+
+  // ── Sync Branding from Storage ──
+  const syncBrandingFromStorage = async () => {
+    const t = await getToken(); if (!t) return;
+    setSyncingBranding(true);
+    setSyncBrandingResult(null);
+    try {
+      const res = await api.syncBrandingFromStorage(t);
+      setSyncBrandingResult(res.found);
+      await loadBranding(); // recarrega para mostrar as imagens
+      showToast('ok', `Branding sincronizado: ${res.found.backgrounds} background(s)${res.found.logo ? ', logo' : ''}${res.found.favicon ? ', favicon' : ''}`);
+    } catch (err: any) {
+      showToast('err', err.message ?? 'Erro ao sincronizar branding');
+    } finally {
+      setSyncingBranding(false);
+    }
+  };
 
   // ── Save Marca ──
   const saveMarca = async () => {
@@ -785,9 +812,10 @@ export function AdminConfig() {
   // ── Load events for reindex ──
   const loadEventsForReindex = async () => {
     const t = await getToken(); if (!t) return;
+    setEventsLoading(true);
+    setEventsLoadError('');
     try {
       const { events } = await api.getAdminEvents(t);
-      // Mostra todos os eventos, mesmo sem fotos (para permitir reindexação)
       setAvailableEvents(events.map(e => ({
         id: e.id,
         name: e.name,
@@ -795,6 +823,9 @@ export function AdminConfig() {
       })));
     } catch (err: any) {
       console.error('Erro ao carregar eventos:', err);
+      setEventsLoadError(err.message ?? 'Falha ao carregar eventos');
+    } finally {
+      setEventsLoading(false);
     }
   };
 
@@ -877,6 +908,54 @@ export function AdminConfig() {
     return { processed, faces, noFace, failed, total };
   };
 
+  // ── Re-detect fotos sem rosto via faceQueue client-side ──
+  const redetectNoFace = async () => {
+    if (!reindexEventId || reindexEventId === 'ALL') return;
+    const t = await getToken(); if (!t) return;
+
+    setRedetectStatus('loading');
+    setRedetectError('');
+    setRedetectCount(0);
+
+    try {
+      // Busca fotos já com faces indexadas
+      const { faces } = await api.getEventFaces(reindexEventId);
+      const withFaceIds = new Set(faces.map((f: { photoId: string }) => f.photoId));
+
+      // Busca todas as fotos do evento (paginado)
+      const allPhotos: PhotoRecord[] = [];
+      let page = 1;
+      while (true) {
+        const { photos, totalPages } = await api.getEventPhotos(reindexEventId, page, 100);
+        allPhotos.push(...photos);
+        if (page >= totalPages) break;
+        page++;
+      }
+
+      // Filtra apenas fotos sem face que têm URL
+      const noFacePhotos = allPhotos.filter(p => !withFaceIds.has(p.id) && p.url);
+      if (noFacePhotos.length === 0) {
+        setRedetectCount(0);
+        setRedetectStatus('queued');
+        return;
+      }
+
+      // Enfileira para re-detecção client-side com novos thresholds (0.2 SSD + TinyFaceDetector)
+      faceQueueEnqueue(noFacePhotos.map(p => ({
+        photoId: p.id,
+        eventId: reindexEventId,
+        photoUrl: p.url!,
+        token: t,
+      })));
+
+      setRedetectCount(noFacePhotos.length);
+      setRedetectStatus('queued');
+    } catch (err: any) {
+      setRedetectError(err.message ?? 'Erro ao re-detectar');
+      setRedetectStatus('error');
+    }
+  };
+
   // ── Reindex faces for an event (server-side via pgvector) ──
   const startReindex = async () => {
     if (!reindexEventId) {
@@ -891,6 +970,8 @@ export function AdminConfig() {
     setReindexProgress({ current: 0, total: 0 });
     setReindexPhotoProgress({ current: 0, total: 0 });
     setReindexLiveStats({ processed: 0, faces: 0, noFace: 0, failed: 0 });
+    setRedetectStatus('idle');
+    setRedetectCount(0);
 
     const event = availableEvents.find(e => e.id === reindexEventId);
     setReindexCurrentEvent(event?.name ?? reindexEventId);
@@ -1032,7 +1113,6 @@ export function AdminConfig() {
       setReindexStatus('processing');
       
       // Pega eventos atualizados
-      const t = await getToken(); if (!t) return;
       const eventsRes = await api.getAdminEvents(t);
       const events = eventsRes.events;
       
@@ -1111,7 +1191,13 @@ export function AdminConfig() {
         showToast('ok', `Sincronizado: ${res.stats.eventsCreated} evento(s), ${res.stats.photosImported} foto(s)`);
       }
     } catch (err: any) {
-      setSyncError(err.message ?? 'Erro desconhecido');
+      const msg = err.message ?? 'Erro desconhecido';
+      const isNetworkError = msg === 'Failed to fetch' || msg.includes('fetch');
+      setSyncError(
+        isNetworkError
+          ? 'Falha de conexão com a Edge Function. Causas comuns: (1) função não deployada — rode "supabase functions deploy server"; (2) timeout — com muitas fotos a sincronização pode ultrapassar 60s; (3) projeto Supabase pausado.'
+          : msg
+      );
       setSyncStatus('error');
     } finally {
       setTimeout(() => setSyncProgress(''), 3000);
@@ -1236,6 +1322,41 @@ export function AdminConfig() {
                     </div>
                   </div>
                 </SectionCard>
+
+                {/* Sync Branding from Storage */}
+                <div className="rounded-2xl p-4 flex items-center gap-4 flex-wrap"
+                  style={{ background: isDark ? 'rgba(99,102,241,0.07)' : 'rgba(79,70,229,0.05)', border: `1px solid ${isDark ? 'rgba(99,102,241,0.2)' : 'rgba(79,70,229,0.15)'}` }}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold" style={{ color: isDark ? '#a5b4fc' : '#4338ca' }}>Sincronizar Branding do Storage</p>
+                    <p className="text-xs mt-0.5" style={{ color: muted }}>
+                      Use se as imagens existem no Storage mas não aparecem aqui. Detecta logo, favicon e backgrounds automaticamente.
+                    </p>
+                    {syncBrandingResult && (
+                      <p className="text-xs mt-1" style={{ color: isDark ? '#86efac' : '#166534' }}>
+                        ✅ Encontrado: {syncBrandingResult.backgrounds} background(s){syncBrandingResult.logo ? ' · logo' : ''}{syncBrandingResult.favicon ? ' · favicon' : ''}{syncBrandingResult.ctaBg ? ' · cta' : ''}
+                      </p>
+                    )}
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                    onClick={syncBrandingFromStorage}
+                    disabled={syncingBranding}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm flex-shrink-0"
+                    style={{
+                      background: isDark ? 'rgba(99,102,241,0.15)' : 'rgba(79,70,229,0.1)',
+                      border: `1px solid ${isDark ? 'rgba(99,102,241,0.3)' : 'rgba(79,70,229,0.25)'}`,
+                      color: isDark ? '#a5b4fc' : '#4338ca',
+                      fontWeight: 700,
+                      opacity: syncingBranding ? 0.6 : 1,
+                      cursor: syncingBranding ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {syncingBranding
+                      ? <><Loader2 className="w-4 h-4 animate-spin" /> Sincronizando…</>
+                      : <><RefreshCw className="w-4 h-4" /> Sincronizar do Storage</>
+                    }
+                  </motion.button>
+                </div>
 
                 {/* Logotipo */}
                 <SectionCard icon={ImageIcon} title="Logotipo" subtitle="PNG ou SVG com fundo transparente • max 2 MB"
@@ -2873,26 +2994,50 @@ export function AdminConfig() {
 
                     {/* Select evento */}
                     <div className="space-y-2">
-                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: muted }}>
-                        Selecione um evento
-                      </label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: muted }}>
+                          Selecione um evento
+                        </label>
+                        {(eventsLoadError || (!eventsLoading && availableEvents.length === 0)) && (
+                          <button
+                            onClick={loadEventsForReindex}
+                            disabled={eventsLoading}
+                            className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg"
+                            style={{ background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}`, color: muted }}
+                          >
+                            <RefreshCw className={`w-3 h-3 ${eventsLoading ? 'animate-spin' : ''}`} />
+                            {eventsLoading ? 'Carregando…' : 'Tentar novamente'}
+                          </button>
+                        )}
+                      </div>
+
+                      {eventsLoadError && (
+                        <p className="text-xs px-3 py-2 rounded-lg" style={{ background: isDark ? 'rgba(239,68,68,0.07)' : 'rgba(220,38,38,0.05)', border: `1px solid ${isDark ? 'rgba(239,68,68,0.2)' : 'rgba(220,38,38,0.15)'}`, color: isDark ? '#f87171' : '#dc2626' }}>
+                          Falha ao carregar eventos: {eventsLoadError}
+                        </p>
+                      )}
+
                       <select
                         value={reindexEventId}
                         onChange={(e) => setReindexEventId(e.target.value)}
-                        disabled={reindexStatus === 'processing'}
+                        disabled={reindexStatus === 'processing' || eventsLoading}
                         className="w-full px-4 py-2.5 rounded-xl text-sm transition-all [&>option]:bg-[#08080E] [&>option]:text-white"
                         style={{
                           background: inputBg,
                           border: `1px solid ${inputBrd}`,
                           color: text,
-                          cursor: reindexStatus === 'processing' ? 'not-allowed' : 'pointer',
-                          opacity: reindexStatus === 'processing' ? 0.6 : 1,
+                          cursor: (reindexStatus === 'processing' || eventsLoading) ? 'not-allowed' : 'pointer',
+                          opacity: (reindexStatus === 'processing' || eventsLoading) ? 0.6 : 1,
                         }}
                       >
-                        <option value="">-- Escolha um evento --</option>
-                        <option value="ALL" style={{ fontWeight: 'bold' }}>
-                          🔥 TODOS OS EVENTOS ({availableEvents.length} eventos)
+                        <option value="">
+                          {eventsLoading ? 'Carregando eventos…' : availableEvents.length === 0 ? '— Nenhum evento carregado —' : '-- Escolha um evento --'}
                         </option>
+                        {availableEvents.length > 0 && (
+                          <option value="ALL" style={{ fontWeight: 'bold' }}>
+                            🔥 TODOS OS EVENTOS ({availableEvents.length} eventos)
+                          </option>
+                        )}
                         {availableEvents.map(evt => (
                           <option key={evt.id} value={evt.id}>
                             {evt.name} ({evt.photoCount} fotos)
@@ -3131,6 +3276,47 @@ export function AdminConfig() {
                               <p className="text-xs" style={{ color: muted }}>
                                 ✅ Faces indexadas no pgvector! Agora você pode usar o reconhecimento facial normalmente.
                               </p>
+                            )}
+
+                            {/* Re-detectar sem rostos */}
+                            {(reindexResult.noFace ?? reindexResult.failed) > 0 && reindexEventId && reindexEventId !== 'ALL' && (
+                              <div className="rounded-xl p-3 space-y-2" style={{ background: isDark ? 'rgba(251,191,36,0.05)' : 'rgba(180,130,0,0.05)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.18)' : 'rgba(180,130,0,0.15)'}` }}>
+                                <p className="text-xs" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                                  <strong>{reindexResult.noFace ?? reindexResult.failed}</strong> fotos sem rosto detectado. Deseja tentar novamente com detecção mais sensível (TinyFaceDetector + threshold 0.2)?
+                                </p>
+                                {redetectStatus === 'queued' && redetectCount === 0 && (
+                                  <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>✅ Todas as fotos já têm rostos detectados!</p>
+                                )}
+                                {redetectStatus === 'queued' && redetectCount > 0 && (
+                                  <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>
+                                    ✅ {redetectCount} fotos enfileiradas! Acompanhe o progresso no toast verde na tela. Após concluir, rode a reindexação novamente.
+                                  </p>
+                                )}
+                                {redetectStatus === 'error' && (
+                                  <p className="text-xs" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Erro: {redetectError}</p>
+                                )}
+                                {redetectStatus !== 'queued' && (
+                                  <motion.button
+                                    whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                    onClick={redetectNoFace}
+                                    disabled={redetectStatus === 'loading'}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+                                    style={{
+                                      background: isDark ? 'rgba(251,191,36,0.12)' : 'rgba(180,130,0,0.1)',
+                                      border: `1px solid ${isDark ? 'rgba(251,191,36,0.25)' : 'rgba(180,130,0,0.2)'}`,
+                                      color: isDark ? '#fbbf24' : '#92400e',
+                                      fontWeight: 700,
+                                      cursor: redetectStatus === 'loading' ? 'not-allowed' : 'pointer',
+                                      opacity: redetectStatus === 'loading' ? 0.6 : 1,
+                                    }}
+                                  >
+                                    {redetectStatus === 'loading'
+                                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando…</>
+                                      : <><RefreshCw className="w-3.5 h-3.5" /> Re-detectar sem rostos</>
+                                    }
+                                  </motion.button>
+                                )}
+                              </div>
                             )}
                           </>
                         )}

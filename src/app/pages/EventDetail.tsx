@@ -3,6 +3,8 @@ import { useParams, Link } from 'react-router';
 import {
   ArrowLeft,
   Camera,
+  Calendar,
+  MapPin,
   Image as ImageIcon,
   Users,
   Download,
@@ -319,10 +321,10 @@ export function EventDetail() {
   const orgId = new URLSearchParams(window.location.search).get('org') ?? undefined;
 
   /* theme-aware palette */
-  const bg          = isDark ? '#09090F'                  : '#FAFBFC';
+  const bg          = isDark ? '#09090F'                  : '#F8F8FB';
   const heroGrad    = isDark
     ? 'linear-gradient(to top, #09090F 0%, rgba(9,9,15,0.5) 50%, rgba(9,9,15,0.3) 100%)'
-    : 'linear-gradient(to top, #FAFBFC 0%, rgba(250,251,252,0.5) 50%, rgba(250,251,252,0.1) 100%)';
+    : 'linear-gradient(to top, #F8F8FB 0%, rgba(248,248,251,0.5) 50%, rgba(248,248,251,0.1) 100%)';
   const textPrimary = isDark ? '#ffffff'                  : '#09090B';
   const textMuted   = isDark ? 'rgba(255,255,255,0.55)'   : '#71717A';
   const textSubtle  = isDark ? 'rgba(255,255,255,0.35)'   : '#A1A1AA';
@@ -506,9 +508,10 @@ export function EventDetail() {
   const eventId = id ?? 'maratona-sp-2024';
 
   // Compute hero in render phase so branding updates are reflected without re-fetching
-  const heroUrl = (apiEvent && branding.backgroundUrls.length > 0)
-    ? branding.backgroundUrls[0]
-    : event.hero;
+  // Prefer event-specific cover, then branding background, then static fallback
+  const heroUrl = (apiEvent as any)?.coverUrl
+    ?? (branding.backgroundUrls.length > 0 ? branding.backgroundUrls[0] : null)
+    ?? event.hero;
 
   const handleAddAllPhotos = () => {
     photos.forEach((photo) => {
@@ -534,7 +537,7 @@ export function EventDetail() {
   return (
     <div className="min-h-screen" style={{ background: bg }}>
       {/* Event Hero */}
-      <section className="relative h-72 md:h-96 overflow-hidden">
+      <section className="relative overflow-hidden" style={{ paddingTop: '4rem', paddingBottom: '1.5rem', minHeight: 220, maxHeight: 320 }}>
         {apiEvent && branding.backgroundUrls.length > 1 ? (
           <AnimatedBackground
             urls={branding.backgroundUrls}
@@ -548,19 +551,25 @@ export function EventDetail() {
         <div className="absolute inset-0" style={{ background: heroGrad }} />
         <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 20% 80%, ${event.tagColor}08 0%, transparent 60%)` }} />
         <div className="absolute inset-0 flex flex-col justify-end p-6 md:p-12 max-w-7xl mx-auto w-full">
-          <Link to="/eventos" className="absolute top-24 left-6 md:left-12 flex items-center gap-2 text-sm transition-opacity hover:opacity-70" style={{ color: 'rgba(255,255,255,0.7)' }}>
+          <Link to="/eventos" className="absolute top-24 left-6 md:left-12 flex items-center gap-2 text-sm px-3 py-1.5 rounded-xl transition-opacity hover:opacity-70" style={{ color: 'rgba(255,255,255,0.7)' }}>
             <ArrowLeft className="w-4 h-4" /> Eventos
           </Link>
           <span className="self-start px-3 py-1 rounded-full text-[11px] tracking-widest mb-3" style={{ background: `${event.tagColor}20`, border: `1px solid ${event.tagColor}40`, color: event.tagColor, fontWeight: 700 }}>
             {event.tag}
           </span>
-          <h1 style={{ fontFamily: "'Fraunces', serif", fontSize: 'clamp(1.8rem, 4vw, 3rem)', fontWeight: 900, color: '#ffffff', lineHeight: 1.15 }}>
+          <h1 style={{ fontFamily: "'Montserrat', sans-serif", fontSize: 'clamp(1.8rem, 4vw, 3rem)', fontWeight: 900, color: '#ffffff', lineHeight: 1.15 }}>
             {event.title}
           </h1>
           <div className="flex flex-wrap items-center gap-4 mt-4">
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📅 {event.date}</span>
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📍 {event.location}</span>
-            <span className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>📸 {totalPhotos || photos.length} fotos disponíveis</span>
+            <span className="flex items-center gap-1.5 text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              <Calendar className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} /> {event.date}
+            </span>
+            <span className="flex items-center gap-1.5 text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              <MapPin className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} /> {event.location}
+            </span>
+            <span className="flex items-center gap-1.5 text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              <ImageIcon className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.5)' }} /> {totalPhotos || photos.length} fotos disponíveis
+            </span>
           </div>
         </div>
       </section>
@@ -568,24 +577,59 @@ export function EventDetail() {
       {/* Content */}
       <section className="max-w-7xl mx-auto px-4 md:px-6 py-10">
         {/* Stats bar */}
-        <div className="flex flex-wrap gap-6 mb-8 pb-8" style={{ borderBottom: `1px solid ${divider}` }}>
-          {[
-            { value: totalPhotos || photos.length, label: 'Fotos', color: statAccent1 },
-            { value: `R$ ${photos.length > 0 ? photos[0].price : event.price}`, label: 'por foto', color: statAccent2 },
-            { value: '98.7%', label: 'precisão facial', color: statAccent1 },
-          ].map(({ value, label, color }, i) => (
-            <div key={i} className={i > 0 ? 'flex items-center gap-6' : ''}>
-              {i > 0 && <div className="w-px h-10 self-center" style={{ background: divider }} />}
-              <div>
-                <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.6rem', fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
-                <div className="text-xs mt-0.5" style={{ color: textSubtle }}>{label}</div>
+        <div className="rounded-2xl px-6 py-4 flex flex-wrap items-center gap-6 mb-8"
+          style={{
+            background: isDark ? '#111118' : '#FFFFFF',
+            border: `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(9,9,11,0.09)'}`,
+          }}
+        >
+          {/* Photos stat */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(134,239,172,0.1)' }}>
+              <ImageIcon className="w-4 h-4" style={{ color: statAccent1 }} />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: textSubtle }}>Fotos</div>
+              <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.4rem', fontWeight: 900, color: statAccent1, lineHeight: 1 }}>
+                {totalPhotos || photos.length}
               </div>
             </div>
-          ))}
+          </div>
+
+          {/* Price stat */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(134,239,172,0.1)' }}>
+              <ShoppingCart className="w-4 h-4" style={{ color: statAccent1 }} />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: textSubtle }}>Por foto</div>
+              <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.4rem', fontWeight: 900, color: statAccent1, lineHeight: 1 }}>
+                R$ {photos.length > 0 ? photos[0].price : event.price}
+              </div>
+            </div>
+          </div>
+
+          {/* Precision stat */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(134,239,172,0.1)' }}>
+              <Scan className="w-4 h-4" style={{ color: statAccent1 }} />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-widest font-semibold" style={{ color: textSubtle }}>Precisão IA</div>
+              <div style={{ fontFamily: "'Montserrat', sans-serif", fontSize: '1.4rem', fontWeight: 900, color: statAccent1, lineHeight: 1 }}>
+                98.7%
+              </div>
+            </div>
+          </div>
+
+          {/* Adicionar todas button */}
           <div className="ml-auto flex items-center">
             {photos.length > 0 && (
               <motion.button whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }} onClick={handleAddAllPhotos} className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm"
-                style={{ background: 'rgba(22,101,52,0.85)', border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 700 }}>
+                style={{ background: 'linear-gradient(135deg, rgba(22,101,52,0.9), rgba(15,70,36,0.95))', border: '1px solid rgba(134,239,172,0.2)', color: '#fff', fontWeight: 700, boxShadow: '0 4px 14px rgba(22,101,52,0.3)' }}>
                 <ShoppingCart className="w-4 h-4" /> Adicionar todas
               </motion.button>
             )}

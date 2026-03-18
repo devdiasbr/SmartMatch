@@ -385,6 +385,10 @@ export function AdminEvents() {
   const [viewerDateInput, setViewerDateInput] = useState('');
   const [viewerTimeInput, setViewerTimeInput] = useState('');
 
+  // Viewer — cover image
+  const [coverUploading, setCoverUploading] = useState(false);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
     setTimeout(() => setSuccessMsg(null), 4000);
@@ -1576,6 +1580,95 @@ export function AdminEvents() {
                         );
                       })()}
                     </div>
+                  </div>
+
+                  {/* Cover image */}
+                  <div className="px-5 py-3 border-t" style={{ borderColor: cardBorder }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[11px] flex-shrink-0" style={{ color: mutedText, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Capa do evento:</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {/* Preview */}
+                      <div
+                        className="w-20 h-14 rounded-lg flex-shrink-0 overflow-hidden flex items-center justify-center"
+                        style={{ background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)', border: `1px solid ${cardBorder}` }}
+                      >
+                        {selectedEvent.coverUrl ? (
+                          <img src={selectedEvent.coverUrl} alt="capa" className="w-full h-full object-cover" />
+                        ) : (
+                          <ImageIcon className="w-5 h-5" style={{ color: mutedText }} />
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        <button
+                          disabled={coverUploading}
+                          onClick={() => coverInputRef.current?.click()}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold"
+                          style={{ background: isDark ? 'rgba(134,239,172,0.12)' : 'rgba(22,101,52,0.1)', color: green, border: `1px solid ${isDark ? 'rgba(134,239,172,0.3)' : 'rgba(22,101,52,0.25)'}`, opacity: coverUploading ? 0.6 : 1 }}
+                        >
+                          {coverUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                          {selectedEvent.coverUrl ? 'Alterar capa' : 'Enviar capa'}
+                        </button>
+                        {selectedEvent.coverUrl && (
+                          <button
+                            disabled={coverUploading}
+                            onClick={async () => {
+                              const token = await getToken();
+                              if (!token || !selectedEvent) return;
+                              setCoverUploading(true);
+                              try {
+                                await api.deleteEventCover(selectedEvent.id, token);
+                                const updated = { ...selectedEvent, coverUrl: undefined, coverPath: undefined };
+                                setSelectedEvent(updated);
+                                setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? updated : ev));
+                                showSuccess('Capa removida!');
+                              } catch (err: any) {
+                                setErrorMsg(`Erro ao remover capa: ${err.message}`);
+                                setTimeout(() => setErrorMsg(null), 4000);
+                              } finally {
+                                setCoverUploading(false);
+                              }
+                            }}
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold"
+                            style={{ background: isDark ? 'rgba(252,165,165,0.08)' : 'rgba(220,38,38,0.06)', color: isDark ? '#fca5a5' : '#dc2626', border: `1px solid ${isDark ? 'rgba(252,165,165,0.2)' : 'rgba(220,38,38,0.15)'}`, opacity: coverUploading ? 0.6 : 1 }}
+                          >
+                            <Trash2 className="w-3 h-3" /> Remover
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!file || !selectedEvent) return;
+                        const token = await getToken();
+                        if (!token) return;
+                        setCoverUploading(true);
+                        try {
+                          const { blob } = await compressToBlob(file, 1200, 300);
+                          const base64 = await new Promise<string>((resolve) => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve((reader.result as string).split(',')[1]);
+                            reader.readAsDataURL(blob);
+                          });
+                          const res = await api.uploadEventCover(selectedEvent.id, { base64, mimeType: 'image/jpeg' }, token);
+                          const updated = { ...selectedEvent, coverUrl: res.coverUrl ?? undefined, coverPath: res.coverPath };
+                          setSelectedEvent(updated);
+                          setEvents(prev => prev.map(ev => ev.id === selectedEvent.id ? updated : ev));
+                          showSuccess('Capa atualizada!');
+                        } catch (err: any) {
+                          setErrorMsg(`Erro ao enviar capa: ${err.message}`);
+                          setTimeout(() => setErrorMsg(null), 4000);
+                        } finally {
+                          setCoverUploading(false);
+                        }
+                      }}
+                    />
                   </div>
 
                   {/* Actions bar */}

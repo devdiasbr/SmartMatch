@@ -260,8 +260,8 @@ export function Cart() {
   // Card installments
   const [installments, setInstallments] = useState(1);
 
-  const bg = isDark ? '#09090F' : '#FAFBFC';
-  const cardBg = isDark ? 'rgba(255,255,255,0.03)' : '#FFFFFF';
+  const bg = isDark ? '#09090F' : '#F8F8FB';
+  const cardBg = isDark ? '#111118' : '#FFFFFF';
   const borderColor = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(9,9,11,0.09)';
   const textColor = isDark ? '#ffffff' : '#09090B';
   const mutedColor = isDark ? 'rgba(255,255,255,0.38)' : '#71717A';
@@ -533,9 +533,10 @@ export function Cart() {
                 whileTap={{ scale: 0.97 }}
                 className="mt-8 flex items-center gap-2 px-6 py-3 rounded-2xl text-sm"
                 style={{
-                  background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #166534, #15803d)',
+                  background: 'linear-gradient(135deg, #166534, #15803d)',
                   color: '#fff',
                   fontWeight: 700,
+                  boxShadow: '0 4px 12px rgba(22,101,52,0.35)',
                 }}
               >
                 <ImageIcon className="w-4 h-4" />
@@ -970,11 +971,12 @@ export function Cart() {
                         disabled={checkingOut || pixState === 'loading'}
                         className="w-full py-4 rounded-2xl text-sm flex items-center justify-center gap-2 mt-2 disabled:opacity-60"
                         style={{
-                          background: isDark ? 'linear-gradient(135deg, rgba(22,101,52,0.95), rgba(21,128,61,0.9))' : 'linear-gradient(135deg, #166534, #15803d)',
+                          background: 'linear-gradient(135deg, #166534, #15803d)',
                           color: '#fff',
                           fontWeight: 800,
                           fontFamily: "'Montserrat', sans-serif",
                           letterSpacing: '-0.01em',
+                          boxShadow: '0 4px 16px rgba(22,101,52,0.35)',
                         }}
                       >
                         {checkingOut || pixState === 'loading' ? (

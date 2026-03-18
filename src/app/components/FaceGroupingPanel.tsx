@@ -10,10 +10,11 @@
  * ─ Algoritmo mantém average-linkage (greedy 0.55 / merge 0.60) da v4.
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Users, ShoppingCart, CheckCircle2, ChevronDown, ChevronUp,
   RefreshCw, User, AlertCircle, Camera, ImageOff,
+  ChevronLeft, ChevronRight, X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
@@ -100,10 +101,31 @@ function euclidean(a: number[], b: number[]): number {
   return Math.sqrt(s);
 }
 
-function avgLinkageDist(descsA: number[][], descsB: number[][]): number {
-  let total = 0; let count = 0;
-  for (const da of descsA) for (const db of descsB) { total += euclidean(da, db); count++; }
-  return count > 0 ? total / count : Infinity;
+/**
+ * Distância complete-linkage entre dois clusters (máximo de todos os pares).
+ * Garante que TODOS os descritores dos dois clusters estejam dentro do limiar
+ * antes de fundir — impede o "chaining" que fusiona pessoas diferentes.
+ */
+function completeLinkageDist(descsA: number[][], descsB: number[][]): number {
+  let maxDist = 0;
+  for (const da of descsA) for (const db of descsB) {
+    const d = euclidean(da, db);
+    if (d > maxDist) maxDist = d;
+  }
+  return maxDist;
+}
+
+/**
+ * Distância mínima (single-linkage) de um descritor a qualquer descritor do cluster.
+ * Usada na etapa greedy para evitar deriva do centróide.
+ */
+function minDistToCluster(desc: number[], clusterDescs: number[][]): number {
+  let min = Infinity;
+  for (const d of clusterDescs) {
+    const dist = euclidean(desc, d);
+    if (dist < min) min = dist;
+  }
+  return min;
 }
 
 function mergeClusters(clusters: FaceCluster[], rawDescs: number[][][], i: number, j: number) {
@@ -118,14 +140,12 @@ function mergeClusters(clusters: FaceCluster[], rawDescs: number[][][], i: numbe
 
 /**
  * Pós-processamento: remove fotos duplicadas entre clusters.
- * Cada foto é mantida SOMENTE no cluster cujo centroide está mais próximo
- * da média dos descritores faciais dessa foto.
+ * Cada foto é mantida SOMENTE no cluster cujo centroide está mais próximo.
  */
 function deduplicateAcrossClusters(
   clusters: FaceCluster[],
   faces: { photoId: string; descriptors: number[][] }[],
 ) {
-  // mapa photoId → índices de clusters onde aparece
   const photoToIdxs = new Map<string, number[]>();
   for (let i = 0; i < clusters.length; i++) {
     for (const pid of clusters[i].photoIds) {
@@ -135,15 +155,13 @@ function deduplicateAcrossClusters(
     }
   }
 
-  // mapa photoId → descritores originais
   const photoDescs = new Map<string, number[][]>();
   for (const { photoId, descriptors } of faces) photoDescs.set(photoId, descriptors);
 
   for (const [pid, idxs] of photoToIdxs) {
-    if (idxs.length <= 1) continue; // sem conflito
+    if (idxs.length <= 1) continue;
 
     const descs = photoDescs.get(pid) ?? [];
-
     let bestIdx = idxs[0];
     let bestAvg = Infinity;
 
@@ -154,7 +172,6 @@ function deduplicateAcrossClusters(
       if (avg < bestAvg) { bestAvg = avg; bestIdx = ci; }
     }
 
-    // remove foto de todos os clusters menos o melhor
     for (const ci of idxs) {
       if (ci !== bestIdx) {
         clusters[ci].photoIds = clusters[ci].photoIds.filter(id => id !== pid);
@@ -168,21 +185,34 @@ function deduplicateAcrossClusters(
 function clusterFaces(
   faces: { photoId: string; descriptors: number[][] }[],
   photoMap: Map<string, GroupPhoto>,
-  greedyThreshold = 0.58,  // Ajustado de 0.55 para 0.58 (um pouco mais permissivo)
-  mergeThreshold  = 0.63,  // Ajustado de 0.60 para 0.63 (permite mais merge)
+  /**
+   * Threshold de single-linkage para a etapa greedy.
+   * Distância euclidiana máxima do novo descritor ao descritor MAIS PRÓXIMO
+   * do cluster.  Single-linkage é mais sensível para capturar mesma pessoa
+   * em variações de ângulo/luz sem derivar o centróide.
+   * ResNet-34 face-api.js: mesma pessoa d < 0.55; pessoas diferentes d > 0.60.
+   */
+  greedyThreshold = 0.48,
+  /**
+   * Threshold de complete-linkage para o merge.
+   * Dois clusters só se fundem se TODOS os pares de descritores estiverem
+   * abaixo deste limiar — impede "chaining" entre pessoas diferentes.
+   * Valor conservador: precisamos ter certeza de que é a mesma pessoa.
+   */
+  mergeThreshold  = 0.54,
 ): FaceCluster[] {
   const clusters: FaceCluster[] = [];
   const rawDescs: number[][][] = [];
 
-  /* Passo 1: greedy */
+  /* Passo 1: greedy com single-linkage (min dist ao descritor mais próximo) */
   for (const { photoId, descriptors } of faces) {
     for (const descriptor of descriptors) {
-      let bestIdx = -1; let bestDist = Infinity;
+      let bestIdx = -1; let bestMinDist = Infinity;
       for (let i = 0; i < clusters.length; i++) {
-        const d = euclidean(descriptor, clusters[i].centroid);
-        if (d < bestDist) { bestDist = d; bestIdx = i; }
+        const d = minDistToCluster(descriptor, rawDescs[i]);
+        if (d < bestMinDist) { bestMinDist = d; bestIdx = i; }
       }
-      if (bestIdx >= 0 && bestDist < greedyThreshold) {
+      if (bestIdx >= 0 && bestMinDist < greedyThreshold) {
         const c = clusters[bestIdx];
         if (!c.photoIds.includes(photoId)) c.photoIds.push(photoId);
         const n = c.descriptorCount;
@@ -196,18 +226,18 @@ function clusterFaces(
     }
   }
 
-  /* Passo 2: merge average-linkage */
+  /* Passo 2: merge com complete-linkage (max de todos os pares) */
   let merged = true;
   while (merged) {
     merged = false;
-    let bestI = -1; let bestJ = -1; let bestAvg = Infinity;
+    let bestI = -1; let bestJ = -1; let bestMax = Infinity;
     for (let i = 0; i < clusters.length; i++) {
       for (let j = i + 1; j < clusters.length; j++) {
-        const avg = avgLinkageDist(rawDescs[i], rawDescs[j]);
-        if (avg < bestAvg) { bestAvg = avg; bestI = i; bestJ = j; }
+        const maxDist = completeLinkageDist(rawDescs[i], rawDescs[j]);
+        if (maxDist < bestMax) { bestMax = maxDist; bestI = i; bestJ = j; }
       }
     }
-    if (bestI >= 0 && bestAvg < mergeThreshold) { mergeClusters(clusters, rawDescs, bestI, bestJ); merged = true; }
+    if (bestI >= 0 && bestMax < mergeThreshold) { mergeClusters(clusters, rawDescs, bestI, bestJ); merged = true; }
   }
 
   /* Passo 3: desduplicar fotos entre clusters */
@@ -216,6 +246,133 @@ function clusterFaces(
   return clusters
     .filter(c => c.photoIds.length >= 1)
     .sort((a, b) => b.photoIds.length - a.photoIds.length);
+}
+
+/* ── PhotoCarouselModal ─────────────────────────────────────────────────── */
+
+function PhotoCarouselModal({ photos, initialIndex, eventId, eventName, onClose }: {
+  photos: GroupPhoto[]; initialIndex: number;
+  eventId: string; eventName: string;
+  onClose: () => void;
+}) {
+  const { addItem, isInCart, openDrawer } = useCart();
+  const c = useColors();
+  const [idx, setIdx] = useState(initialIndex);
+
+  const photo = photos[idx];
+  const inCart = isInCart(photo.id, eventId);
+
+  const prev = useCallback(() => setIdx(i => Math.max(0, i - 1)), []);
+  const next = useCallback(() => setIdx(i => Math.min(photos.length - 1, i + 1)), [photos.length]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') prev();
+      else if (e.key === 'ArrowRight') next();
+      else if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [prev, next, onClose]);
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.88)', backdropFilter: 'blur(6px)' }}
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ scale: 0.92, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.92, opacity: 0 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+          className="relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col"
+          style={{ background: c.cardBg, border: `1px solid ${c.cardBorder}`, maxHeight: '90vh' }}
+          onClick={e => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: `1px solid ${c.cardBorder}` }}>
+            <span className="text-sm font-bold" style={{ color: c.heading }}>
+              {idx + 1} <span style={{ color: c.muted }}>/ {photos.length}</span>
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: c.accentBg, color: c.accentText, border: `1px solid ${c.accentBorder}`, fontWeight: 700 }}>
+                R$ {photo.price}
+              </span>
+              <button onClick={onClose} className="p-1.5 rounded-lg" style={{ background: c.controlBg, border: `1px solid ${c.controlBorder}`, color: c.controlText }}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Image area */}
+          <div className="relative flex-1 overflow-hidden" style={{ minHeight: 320, background: '#000' }}>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.img
+                key={idx}
+                src={photo.src}
+                alt={photo.tag}
+                initial={{ opacity: 0, x: 40 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -40 }}
+                transition={{ duration: 0.2 }}
+                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', maxHeight: '60vh' }}
+              />
+            </AnimatePresence>
+
+            {/* Side arrows */}
+            {idx > 0 && (
+              <button onClick={prev}
+                className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-xl"
+                style={{ background: 'rgba(0,0,0,0.6)', border: `1px solid rgba(255,255,255,0.15)`, color: '#fff' }}>
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+            )}
+            {idx < photos.length - 1 && (
+              <button onClick={next}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-xl"
+                style={{ background: 'rgba(0,0,0,0.6)', border: `1px solid rgba(255,255,255,0.15)`, color: '#fff' }}>
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          {/* Thumbnails */}
+          <div className="px-4 py-3" style={{ borderTop: `1px solid ${c.cardBorder}` }}>
+            <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+              {photos.map((p, i) => (
+                <button key={String(p.id)} onClick={() => setIdx(i)}
+                  className="flex-shrink-0 overflow-hidden rounded-lg"
+                  style={{
+                    width: 52, height: 36,
+                    border: `2px solid ${i === idx ? c.accentBorder2 : c.stripBorder}`,
+                    opacity: i === idx ? 1 : 0.55,
+                    transition: 'all 0.15s',
+                  }}>
+                  <img src={p.src} alt={p.tag} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Buy button */}
+          <div className="px-5 pb-4">
+            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+              onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
+              className="w-full py-3 rounded-xl text-sm flex items-center justify-center gap-2"
+              style={{
+                background: inCart ? c.inCartBadgeBg : c.buyBg,
+                border: `1px solid ${inCart ? c.accentBorder3 : c.accentBorder}`,
+                color: inCart ? c.accentText : '#fff', fontWeight: 700,
+              }}>
+              {inCart ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
+              {inCart ? 'No carrinho' : 'Adicionar ao carrinho'}
+            </motion.button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
 }
 
 /* ── PersonCard ──────────────────────────────────────────────────────────── */
@@ -227,11 +384,13 @@ function PersonCard({ cluster, index, photoMap, eventId, eventName }: {
   const { addItem, isInCart, openDrawer } = useCart();
   const c = useColors();
   const [expanded, setExpanded] = useState(false);
+  const [modalIdx, setModalIdx] = useState<number | null>(null);
+
+  const MAX_PREVIEW = 6;
 
   const clusterPhotos = cluster.photoIds.map(id => photoMap.get(id)).filter(Boolean) as GroupPhoto[];
   const totalPrice = clusterPhotos.reduce((s, p) => s + p.price, 0);
   const allInCart = clusterPhotos.every(p => isInCart(p.id, eventId));
-  const MAX_PREVIEW = 6;
 
   const handleBuyAll = () => {
     clusterPhotos.forEach(p => { if (!isInCart(p.id, eventId)) addItem({ photoId: p.id, src: p.src, tag: p.tag, eventName, eventId, price: p.price }); });
@@ -294,6 +453,17 @@ function PersonCard({ cluster, index, photoMap, eventId, eventName }: {
         </div>
       </div>
 
+      {/* Modal carrossel */}
+      {modalIdx !== null && (
+        <PhotoCarouselModal
+          photos={clusterPhotos}
+          initialIndex={modalIdx}
+          eventId={eventId}
+          eventName={eventName}
+          onClose={() => setModalIdx(null)}
+        />
+      )}
+
       {/* Photo strip */}
       {clusterPhotos.length > 0 && (
         <div className="px-5 pb-4">
@@ -301,24 +471,24 @@ function PersonCard({ cluster, index, photoMap, eventId, eventName }: {
             {!expanded ? (
               <motion.div key="collapsed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-                {clusterPhotos.slice(0, MAX_PREVIEW).map(photo => {
+                {clusterPhotos.slice(0, MAX_PREVIEW).map((photo, i) => {
                   const inCart = isInCart(photo.id, eventId);
                   return (
                     <div key={String(photo.id)} className="relative group overflow-hidden rounded-xl flex-shrink-0"
+                      onClick={() => setModalIdx(i)}
                       style={{ width: 72, height: 48, border: `1px solid ${inCart ? c.accentBorder2 : c.stripBorder}`, cursor: 'pointer' }}>
                       <img src={photo.src} alt={photo.tag} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-110 transition-transform duration-300" />
                       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: c.ovlBg }} />
-                      <button onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
-                        className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                         <div className="p-1.5 rounded-lg" style={{ background: inCart ? c.buyInCartBg : 'rgba(22,101,52,0.85)', border: `1px solid ${inCart ? c.accentBorder2 : c.accentBorder}` }}>
-                          {inCart ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: c.accentText }} /> : <ShoppingCart className="w-3.5 h-3.5 text-white" />}
+                          {inCart ? <CheckCircle2 className="w-3.5 h-3.5" style={{ color: c.accentText }} /> : <ChevronRight className="w-3.5 h-3.5 text-white" />}
                         </div>
-                      </button>
+                      </div>
                     </div>
                   );
                 })}
                 {clusterPhotos.length > MAX_PREVIEW && (
-                  <button onClick={() => setExpanded(true)} className="flex-shrink-0 rounded-xl flex items-center justify-center"
+                  <button onClick={() => setModalIdx(MAX_PREVIEW)} className="flex-shrink-0 rounded-xl flex items-center justify-center"
                     style={{ width: 72, height: 48, background: c.controlBg, border: `1px solid ${c.controlBorder}`, color: c.muted, fontSize: '0.75rem', fontWeight: 700 }}>
                     +{clusterPhotos.length - MAX_PREVIEW}
                   </button>
@@ -331,16 +501,16 @@ function PersonCard({ cluster, index, photoMap, eventId, eventName }: {
                   const inCart = isInCart(photo.id, eventId);
                   return (
                     <motion.div key={String(photo.id)} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.03 }}
+                      onClick={() => setModalIdx(i)}
                       className="relative group overflow-hidden rounded-xl"
                       style={{ aspectRatio: '3/2', border: `1px solid ${inCart ? c.accentBorder2 : c.stripBorder}`, cursor: 'pointer' }}>
                       <img src={photo.src} alt={photo.tag} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-105 transition-transform duration-300" />
                       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)' }} />
                       <div className="absolute inset-x-0 bottom-0 p-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
                         <span className="text-[10px] font-bold" style={{ color: c.accentText }}>R$ {photo.price}</span>
-                        <button onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
-                          className="p-1 rounded-lg" style={{ background: inCart ? c.buyInCartBg : 'rgba(22,101,52,0.85)', border: `1px solid ${inCart ? c.accentBorder2 : c.accentBorder}` }}>
-                          {inCart ? <CheckCircle2 className="w-3 h-3" style={{ color: c.accentText }} /> : <ShoppingCart className="w-3 h-3 text-white" />}
-                        </button>
+                        <div className="p-1 rounded-lg" style={{ background: inCart ? c.buyInCartBg : 'rgba(22,101,52,0.85)', border: `1px solid ${inCart ? c.accentBorder2 : c.accentBorder}` }}>
+                          {inCart ? <CheckCircle2 className="w-3 h-3" style={{ color: c.accentText }} /> : <ChevronRight className="w-3 h-3 text-white" />}
+                        </div>
                       </div>
                     </motion.div>
                   );
@@ -361,6 +531,7 @@ function UnidentifiedCard({ photos, eventId, eventName }: { photos: GroupPhoto[]
   const c = useColors();
   const [expanded, setExpanded] = useState(false);
   const [showCount, setShowCount] = useState(12);
+  const [modalIdx, setModalIdx] = useState<number | null>(null);
   if (photos.length === 0) return null;
 
   const displayPhotos = expanded ? photos.slice(0, showCount) : [];
@@ -392,21 +563,34 @@ function UnidentifiedCard({ photos, eventId, eventName }: { photos: GroupPhoto[]
           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
       </div>
+
+      {/* Modal carrossel */}
+      {modalIdx !== null && (
+        <PhotoCarouselModal
+          photos={photos}
+          initialIndex={modalIdx}
+          eventId={eventId}
+          eventName={eventName}
+          onClose={() => setModalIdx(null)}
+        />
+      )}
+
       <AnimatePresence>
         {expanded && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
             className="px-5 pb-5">
             <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))' }}>
-              {displayPhotos.map(photo => {
+              {displayPhotos.map((photo, i) => {
                 const inCart = isInCart(photo.id, eventId);
                 return (
                   <div key={String(photo.id)} className="relative group overflow-hidden rounded-xl"
+                    onClick={() => setModalIdx(photos.indexOf(photo))}
                     style={{ aspectRatio: '3/2', border: `1px solid ${inCart ? c.accentBorder2 : c.stripBorder}`, cursor: 'pointer' }}>
                     <img src={photo.src} alt={photo.tag} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover' }} className="group-hover:scale-105 transition-transform duration-300" />
                     <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)' }} />
                     <div className="absolute inset-x-0 bottom-0 p-2 flex items-center justify-between opacity-0 group-hover:opacity-100 transition-opacity">
                       <span className="text-[10px] font-bold" style={{ color: c.accentText }}>R$ {photo.price}</span>
-                      <button onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
+                      <button onClick={e => { e.stopPropagation(); if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
                         className="p-1 rounded-lg" style={{ background: inCart ? c.buyInCartBg : 'rgba(22,101,52,0.85)', border: `1px solid ${inCart ? c.accentBorder2 : c.accentBorder}` }}>
                         {inCart ? <CheckCircle2 className="w-3 h-3" style={{ color: c.accentText }} /> : <ShoppingCart className="w-3 h-3 text-white" />}
                       </button>

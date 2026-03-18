@@ -7,6 +7,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Camera, Scan, ShoppingCart, CheckCircle2, AlertCircle,
   Loader2, X, RefreshCw, Zap, Lock, Users, ImageIcon, Upload,
+  ChevronLeft, ChevronRight, Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence, useMotionValue, useTransform, animate } from 'motion/react';
 import * as faceService from '../lib/faceService';
@@ -88,6 +89,126 @@ function ScanRect() {
   );
 }
 
+/* ── PhotoCarouselModal ─────────────────────────────────────────────────── */
+
+function PhotoCarouselModal({
+  photos, initialIndex, eventId, eventName, onClose,
+}: {
+  photos: FacePhoto[]; initialIndex: number;
+  eventId: string; eventName: string; onClose: () => void;
+}) {
+  const { addItem, isInCart, openDrawer } = useCart();
+  const { theme } = useTheme();
+  const d = theme === 'dark';
+  const [idx, setIdx] = useState(initialIndex);
+
+  const prev = useCallback(() => setIdx(i => (i - 1 + photos.length) % photos.length), [photos.length]);
+  const next = useCallback(() => setIdx(i => (i + 1) % photos.length), [photos.length]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') prev();
+      else if (e.key === 'ArrowRight') next();
+      else if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [prev, next, onClose]);
+
+  const photo = photos[idx];
+  const inCart = isInCart(photo.id, eventId);
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.92)', backdropFilter: 'blur(12px)' }}
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ scale: 0.93, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.93, opacity: 0 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          onClick={e => e.stopPropagation()}
+          className="relative flex flex-col"
+          style={{ width: '100%', maxWidth: 720, maxHeight: '90vh', background: d ? '#0d0d12' : '#fff', borderRadius: 20, overflow: 'hidden', border: d ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(9,9,11,0.12)' }}
+        >
+          {/* close */}
+          <button onClick={onClose} className="absolute top-3 right-3 z-10 p-1.5 rounded-xl"
+            style={{ background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
+            <X className="w-4 h-4" />
+          </button>
+
+          {/* counter */}
+          <div className="absolute top-3 left-3 z-10 px-2.5 py-1 rounded-full text-xs"
+            style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', fontWeight: 700 }}>
+            {idx + 1} / {photos.length}
+          </div>
+
+          {/* main image */}
+          <div className="relative flex-1 flex items-center justify-center" style={{ minHeight: 0, overflow: 'hidden' }}>
+            <AnimatePresence mode="wait">
+              <motion.img
+                key={idx}
+                src={photo.src}
+                alt={photo.tag}
+                initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -30 }}
+                transition={{ duration: 0.18 }}
+                style={{ maxWidth: '100%', maxHeight: '60vh', objectFit: 'contain', display: 'block' }}
+              />
+            </AnimatePresence>
+
+            {/* prev / next */}
+            {photos.length > 1 && (
+              <>
+                <button onClick={prev} className="absolute left-2 p-2 rounded-xl"
+                  style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <button onClick={next} className="absolute right-2 p-2 rounded-xl"
+                  style={{ background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff' }}>
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* thumbnail strip */}
+          {photos.length > 1 && (
+            <div className="flex gap-1.5 overflow-x-auto px-4 py-2" style={{ scrollbarWidth: 'none' }}>
+              {photos.map((p, i) => (
+                <button key={String(p.id)} onClick={() => setIdx(i)}
+                  className="flex-shrink-0 overflow-hidden rounded-lg transition-all"
+                  style={{
+                    width: 52, height: 36, border: i === idx ? '2px solid #86efac' : '2px solid transparent',
+                    opacity: i === idx ? 1 : 0.5, transition: 'all 0.15s',
+                  }}>
+                  <img src={p.src} alt={p.tag} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* buy button */}
+          <div className="px-5 pb-4 pt-1">
+            <motion.button whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+              onClick={() => { if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price }); openDrawer(); }}
+              className="w-full py-3 rounded-xl text-sm flex items-center justify-center gap-2"
+              style={{
+                background: inCart ? 'rgba(134,239,172,0.12)' : 'linear-gradient(135deg,rgba(22,101,52,0.95),rgba(21,128,61,0.9))',
+                border: `1px solid ${inCart ? 'rgba(134,239,172,0.4)' : 'rgba(134,239,172,0.25)'}`,
+                color: inCart ? '#86efac' : '#fff', fontWeight: 700,
+              }}>
+              {inCart ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
+              {inCart ? 'No carrinho' : `Adicionar ao carrinho · R$ ${photo.price}`}
+            </motion.button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
 /* ── componente ─────────────────────────────────────────────────────────── */
 
 export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
@@ -117,6 +238,15 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
   // Guarda o queryDescriptor para permitir "Ampliar busca" sem nova selfie
   const lastDescriptor = useRef<number[] | null>(null);
   const [expandedSearch, setExpandedSearch] = useState(false);
+  const [modalIdx, setModalIdx] = useState<number | null>(null);
+  const [resultsPage, setResultsPage] = useState(1);
+  const RESULTS_PER_PAGE = 12;
+
+  // ── Claude verification state ──
+  type ClaudeStatus = 'idle' | 'verifying' | 'done' | 'failed';
+  const [claudeStatus, setClaudeStatus] = useState<ClaudeStatus>('idle');
+  const [claudeMap, setClaudeMap] = useState<Map<string, { verified: boolean; confidence: number }>>(new Map());
+  const selfieRef = useRef<{ base64: string; mimeType: string } | null>(null);
 
   const videoRef    = useRef<HTMLVideoElement>(null);
   const canvasRef   = useRef<HTMLCanvasElement>(null);
@@ -164,9 +294,10 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
       lastDescriptor.current = queryDescriptor;
 
       // ── Passo 2: busca no pgvector via servidor (ANN O(log n)) ────────────
-      // Threshold padrão: 0.62 (melhor recall). Modo expandido: 0.44 (máximo recall).
+      // Threshold primário: 0.82 (cos_sim) ≈ euclidean 0.60 — limiar padrão do face-api.js ResNet-34 para mesma pessoa.
+      // Modo expandido: 0.72 (cos_sim) ≈ euclidean 0.75 — mais recall, mais falsos positivos.
       setProcessStep('Buscando suas fotos…');
-      const primaryThreshold = expandThreshold ? 0.40 : 0.55;
+      const primaryThreshold = expandThreshold ? 0.72 : 0.82;
       let matched: string[] = [];
       let conf = 0;
 
@@ -190,7 +321,12 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
       setMatchedIds(matched);
       setConfidence(conf);
       setExpandedSearch(expandThreshold);
+      setResultsPage(1);
       setStage('results');
+      if (matched.length > 0 && previewSrc) {
+        const photoList = photos.filter(p => matched.includes(String(p.id)));
+        runClaudeVerification(photoList, previewSrc);
+      }
     } catch (err: any) {
       setError(err.message ?? 'Erro ao processar reconhecimento facial.');
       setStage('error');
@@ -204,7 +340,7 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
     setStage('processing');
     setProcessStep('Ampliando busca com maior sensibilidade…');
     try {
-      const { matches } = await api.searchFacesByEmbedding(eventId, lastDescriptor.current, 0.40, org);
+      const { matches } = await api.searchFacesByEmbedding(eventId, lastDescriptor.current, 0.72, org);
       const matched = matches.map((m: any) => m.photoId);
       const best = matches.length > 0 ? matches[0].similarity : 0;
       const conf = Math.max(0, Math.min(100, Math.round(best * 100)));
@@ -212,15 +348,24 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
       setConfidence(conf);
       setExpandedSearch(true);
       setStage('results');
+      if (matched.length > 0 && previewSrc) {
+        const photoList = photos.filter(p => matched.includes(String(p.id)));
+        runClaudeVerification(photoList, previewSrc);
+      }
     } catch (err: any) {
       // Fallback local com threshold relaxado
       try {
         const { faces: allFaces } = await api.getEventFaces(eventId, org);
-        const ranked = faceService.findRankedMatches(lastDescriptor.current, allFaces, 0.62, 0.80);
-        setMatchedIds(ranked.map((m) => m.photoId));
+        const ranked = faceService.findRankedMatches(lastDescriptor.current, allFaces, 0.55, 0.65);
+        const rankedMatched = ranked.map((m) => m.photoId);
+        setMatchedIds(rankedMatched);
         setConfidence(ranked.length > 0 ? Math.round((1 - ranked[0].minDistance / 0.8) * 100) : 0);
         setExpandedSearch(true);
         setStage('results');
+        if (rankedMatched.length > 0 && previewSrc) {
+          const photoList = photos.filter(p => rankedMatched.includes(String(p.id)));
+          runClaudeVerification(photoList, previewSrc);
+        }
       } catch {
         setError('Erro ao ampliar busca. Tente tirar uma nova selfie.');
         setStage('error');
@@ -373,12 +518,85 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
     setConfidence(0);
     setPreviewSrc(null);
     setIsCamBlocked(false);
+    setClaudeStatus('idle');
+    setClaudeMap(new Map());
+    setResultsPage(1);
+    selfieRef.current = null;
   };
 
   /* ── dados de resultado ───────────────────────────────────────────────── */
 
   const matchedPhotos = photos.filter((p) => matchedIds.includes(String(p.id)));
+  // Quando Claude termina, coloca fotos verificadas primeiro
+  const sortedPhotos = claudeStatus === 'done' && claudeMap.size > 0
+    ? [...matchedPhotos].sort((a, b) => {
+        const va = claudeMap.get(String(a.id))?.verified ? 1 : 0;
+        const vb = claudeMap.get(String(b.id))?.verified ? 1 : 0;
+        return vb - va;
+      })
+    : matchedPhotos;
+  const totalResultPages = Math.ceil(sortedPhotos.length / RESULTS_PER_PAGE);
+  const displayPhotos = sortedPhotos.slice((resultsPage - 1) * RESULTS_PER_PAGE, resultsPage * RESULTS_PER_PAGE);
 
+  /* ── Claude verification ───────────────────────────────────────────────── */
+
+  /**
+   * Comprime a selfie para max 640px antes de enviar ao servidor,
+   * evitando payloads excessivos.
+   */
+  function compressSelfieForClaude(dataUrl: string): Promise<{ base64: string; mimeType: string }> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 640;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const compressed = canvas.toDataURL('image/jpeg', 0.82);
+        resolve({
+          base64: compressed.replace(/^data:[^;]+;base64,/, ''),
+          mimeType: 'image/jpeg',
+        });
+      };
+      img.onerror = () => {
+        // fallback: use original
+        resolve({
+          base64: dataUrl.replace(/^data:[^;]+;base64,/, ''),
+          mimeType: dataUrl.match(/^data:([^;]+);base64,/)?.[1] ?? 'image/jpeg',
+        });
+      };
+      img.src = dataUrl;
+    });
+  }
+
+  const runClaudeVerification = async (matchedPhotoList: FacePhoto[], selfieDataUrl: string) => {
+    if (matchedPhotoList.length === 0) return;
+    setClaudeStatus('verifying');
+    setClaudeMap(new Map());
+    try {
+      const { base64, mimeType } = selfieRef.current
+        ? selfieRef.current
+        : await compressSelfieForClaude(selfieDataUrl);
+      selfieRef.current = { base64, mimeType };
+
+      const CHUNK = 12;
+      const allResults: Array<{ id: string; verified: boolean; confidence: number }> = [];
+      for (let i = 0; i < matchedPhotoList.length; i += CHUNK) {
+        const chunk = matchedPhotoList.slice(i, i + CHUNK).map(p => ({ id: String(p.id), url: p.src }));
+        const res = await api.verifyFacesWithClaude(base64, mimeType, chunk);
+        if (res.unavailable) { setClaudeStatus('idle'); return; } // chave não configurada
+        allResults.push(...(res.results ?? []));
+      }
+      setClaudeMap(new Map(allResults.map(r => [r.id, { verified: r.verified, confidence: r.confidence }])));
+      setClaudeStatus('done');
+    } catch (e: any) {
+      console.warn('[Claude] Verificação falhou:', e?.message);
+      setClaudeStatus('failed');
+    }
+  };
   /* ── render ───────────────────────────────────────────────────────────── */
 
   return (
@@ -673,11 +891,31 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                       <Zap className="w-3.5 h-3.5" />
                       {matchedPhotos.length} {matchedPhotos.length === 1 ? 'foto encontrada' : 'fotos encontradas'}
                     </div>
-                    {confidence > 0 && (
-                      <p className="text-xs" style={{ color: MUTED }}>
-                        {confidence}% de confiança · reconhecimento facial IA
-                      </p>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {confidence > 0 && (
+                        <p className="text-xs" style={{ color: MUTED }}>
+                          {confidence}% de confiança · reconhecimento facial IA
+                        </p>
+                      )}
+                      {/* Claude status badge */}
+                      {claudeStatus === 'verifying' && (
+                        <motion.div
+                          animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 1.2, repeat: Infinity }}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px]"
+                          style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)', color: '#a78bfa' }}>
+                          <Sparkles className="w-3 h-3" /> Verificando com Claude…
+                        </motion.div>
+                      )}
+                      {claudeStatus === 'done' && claudeMap.size > 0 && (() => {
+                        const verified = [...claudeMap.values()].filter(r => r.verified).length;
+                        return (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px]"
+                            style={{ background: 'rgba(139,92,246,0.1)', border: '1px solid rgba(139,92,246,0.25)', color: '#a78bfa', fontWeight: 700 }}>
+                            <Sparkles className="w-3 h-3" /> {verified} confirmada{verified !== 1 ? 's' : ''} pelo Claude
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </>
                 ) : (
                   <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm"
@@ -717,9 +955,19 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
               </div>
             </div>
 
-            {matchedPhotos.length > 0 ? (
+            {modalIdx !== null && (
+              <PhotoCarouselModal
+                photos={displayPhotos}
+                initialIndex={modalIdx}
+                eventId={eventId}
+                eventName={eventName}
+                onClose={() => setModalIdx(null)}
+              />
+            )}
+
+            {displayPhotos.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {matchedPhotos.map((photo, i) => {
+                {displayPhotos.map((photo, i) => {
                   const inCart = isInCart(photo.id, eventId);
                   return (
                     <motion.div
@@ -727,15 +975,40 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                       initial={{ opacity: 0, scale: 0.9 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: i * 0.06 }}
+                      onClick={() => setModalIdx(i)}
                       className="relative group overflow-hidden"
                       style={{ borderRadius: 14, aspectRatio: '3/2', border: inCart ? `1px solid ${d ? 'rgba(134,239,172,0.35)' : 'rgba(22,101,52,0.35)'}` : `1px solid ${BORD}`, cursor: 'pointer' }}
                     >
-                      <img src={photo.src} alt={photo.tag} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-400" style={{ filter: 'brightness(0.85)' }} />
+                      {(() => {
+                        const gResult = claudeMap.get(String(photo.id));
+                        const dimmed = claudeStatus === 'done' && gResult && !gResult.verified;
+                        return (
+                          <img src={photo.src} alt={photo.tag}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-400"
+                            style={{ filter: dimmed ? 'brightness(0.55)' : 'brightness(0.85)', transition: 'filter 0.4s' }}
+                          />
+                        );
+                      })()}
 
-                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded text-[9px]"
-                        style={{ background: 'rgba(134,239,172,0.1)', border: '1px solid rgba(134,239,172,0.25)', color: GREEN, fontWeight: 800, backdropFilter: 'blur(6px)' }}>
-                        IA MATCH
-                      </div>
+                      {(() => {
+                        const gResult = claudeMap.get(String(photo.id));
+                        const isVerified = gResult?.verified;
+                        const isClaudeDone = claudeStatus === 'done';
+                        return (
+                          <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded text-[9px]"
+                            style={{
+                              background: isVerified ? 'rgba(139,92,246,0.18)' : 'rgba(134,239,172,0.1)',
+                              border: `1px solid ${isVerified ? 'rgba(139,92,246,0.4)' : 'rgba(134,239,172,0.25)'}`,
+                              color: isVerified ? '#c084fc' : GREEN,
+                              fontWeight: 800, backdropFilter: 'blur(6px)',
+                              opacity: isClaudeDone && gResult && !isVerified ? 0.6 : 1,
+                            }}>
+                            {isVerified
+                              ? <><Sparkles className="w-2.5 h-2.5" /> CLAUDE ✓</>
+                              : 'IA MATCH'}
+                          </div>
+                        );
+                      })()}
 
                       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
                         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.2) 60%, transparent 100%)' }} />
@@ -746,7 +1019,8 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                         </span>
                         <motion.button
                           whileTap={{ scale: 0.92 }}
-                          onClick={() => {
+                          onClick={e => {
+                            e.stopPropagation();
                             if (!inCart) addItem({ photoId: photo.id, src: photo.src, tag: photo.tag, eventName, eventId, price: photo.price });
                             openDrawer();
                           }}
@@ -760,7 +1034,44 @@ export function FaceSearchPanel({ photos, eventId, eventName, org }: Props) {
                   );
                 })}
               </div>
-            ) : (
+            ) : null}
+
+            {/* ── Pagination ── */}
+            {totalResultPages > 1 && (
+              <div className="flex items-center justify-center gap-1.5 mt-8 flex-wrap">
+                <button
+                  onClick={() => setResultsPage(p => Math.max(1, p - 1))}
+                  disabled={resultsPage <= 1}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-all"
+                  style={{ background: resultsPage > 1 ? CARD : 'transparent', border: `1px solid ${resultsPage > 1 ? BORD : 'transparent'}`, color: resultsPage > 1 ? TEXT : MUTED, opacity: resultsPage <= 1 ? 0.3 : 1, cursor: resultsPage <= 1 ? 'not-allowed' : 'pointer' }}
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                {Array.from({ length: totalResultPages }, (_, i) => i + 1).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setResultsPage(p)}
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-sm transition-all"
+                    style={{
+                      background: p === resultsPage ? (d ? 'rgba(134,239,172,0.15)' : 'rgba(22,101,52,0.12)') : CARD,
+                      border: `1px solid ${p === resultsPage ? (d ? 'rgba(134,239,172,0.4)' : 'rgba(22,101,52,0.35)') : BORD}`,
+                      color: p === resultsPage ? (d ? GREEN : '#166534') : TEXT,
+                      fontWeight: p === resultsPage ? 800 : 500,
+                    }}
+                  >{p}</button>
+                ))}
+                <button
+                  onClick={() => setResultsPage(p => Math.min(totalResultPages, p + 1))}
+                  disabled={resultsPage >= totalResultPages}
+                  className="w-9 h-9 rounded-xl flex items-center justify-center transition-all"
+                  style={{ background: resultsPage < totalResultPages ? CARD : 'transparent', border: `1px solid ${resultsPage < totalResultPages ? BORD : 'transparent'}`, color: resultsPage < totalResultPages ? TEXT : MUTED, opacity: resultsPage >= totalResultPages ? 0.3 : 1, cursor: resultsPage >= totalResultPages ? 'not-allowed' : 'pointer' }}
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {displayPhotos.length === 0 && sortedPhotos.length === 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
                 className="text-center py-14 px-6 rounded-2xl"

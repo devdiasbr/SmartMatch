@@ -82,6 +82,9 @@ async function _doLoad(): Promise<void> {
     faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+    // TinyFaceDetector: mais leve, detecta rostos menores que o SSD
+    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+    faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
   ]);
 }
 
@@ -135,12 +138,8 @@ export async function detectAllFaces(
       .withFaceDescriptors();
   }
 
-  if (results.length === 0) {
-    results = await faceapi
-      .detectAllFaces(input, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.12 }))
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-  }
+  // Nota: fallback de minConfidence 0.12 removido — gera descritores de baixa
+  // qualidade que causam falsos positivos no matching.
 
   return results.map((r) => Array.from(r.descriptor));
 }
@@ -204,13 +203,33 @@ export async function detectAllFacesMultiScale(
     offsetX: number,
     offsetY: number,
   ): Promise<FaceResult[]> {
-    const opts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.3 });
-    const results = await faceapi
-      .detectAllFaces(canvas, opts)
+    // Pass 1: SSD com threshold reduzido para capturar mais rostos
+    const ssdOpts = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.2 });
+    const ssdResults = await faceapi
+      .detectAllFaces(canvas, ssdOpts)
       .withFaceLandmarks()
       .withFaceDescriptors();
 
-    return results.map((r) => ({
+    if (ssdResults.length > 0) {
+      return ssdResults.map((r) => ({
+        descriptor: Array.from(r.descriptor),
+        box: {
+          x: r.detection.box.x + offsetX,
+          y: r.detection.box.y + offsetY,
+          width: r.detection.box.width,
+          height: r.detection.box.height,
+        },
+      }));
+    }
+
+    // Pass 2: TinyFaceDetector como fallback — melhor para rostos pequenos/distantes
+    const tinyOpts = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.3 });
+    const tinyResults = await faceapi
+      .detectAllFaces(canvas, tinyOpts)
+      .withFaceLandmarks(true) // true = usa faceLandmark68TinyNet
+      .withFaceDescriptors();
+
+    return tinyResults.map((r) => ({
       descriptor: Array.from(r.descriptor),
       box: {
         x: r.detection.box.x + offsetX,
@@ -379,7 +398,7 @@ export function findRankedMatches(
   query: number[] | Float32Array,
   candidates: PhotoFaces[],
   strictThreshold = 0.45,
-  relaxedThreshold = 0.58,
+  relaxedThreshold = 0.55,
 ): MatchResult[] {
   const q = Array.from(query);
 

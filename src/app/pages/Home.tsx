@@ -405,7 +405,7 @@ function HeroSection() {
           style={{
             background: 'rgba(255,255,255,0.04)',
             border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 20,
+            borderRadius: 16,
             overflow: 'hidden',
           }}
         >
@@ -526,8 +526,8 @@ function HowItWorks() {
     },
   ];
 
-  const cardBg = isDark ? 'rgba(255,255,255,0.02)' : '#FFFFFF';
-  const cardBorder = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(9,9,11,0.09)';
+  const cardBg = isDark ? 'rgba(255,255,255,0.025)' : '#FFFFFF';
+  const cardBorder = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(9,9,11,0.09)';
   const headingColor = isDark ? '#ffffff' : '#09090B';
   const textColor = isDark ? 'rgba(255,255,255,0.45)' : '#71717A';
   const watermarkColor = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(9,9,11,0.04)';
@@ -766,8 +766,10 @@ function CtaBanner() {
 
 /* ─── Page ─── */
 export function Home() {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   return (
-    <main>
+    <main style={{ background: isDark ? '#09090F' : '#F8F8FB' }}>
       <HeroSection />
       <MarqueeStrip />
       <HowItWorks />
