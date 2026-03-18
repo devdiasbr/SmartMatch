@@ -1,5 +1,5 @@
 import { api, type PhotoRecord, type BrandingConfig } from '../lib/api';
-import { enqueue as faceQueueEnqueue } from '../lib/faceQueue';
+import { enqueue as faceQueueEnqueue, useFaceQueue } from '../lib/faceQueue';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -320,6 +320,37 @@ export function AdminConfig() {
   const navigate = useNavigate();
   const { user, token, isAdmin, loading: authLoading, getToken } = useAuth();
   const { refreshBranding } = useBranding();
+  const fqState = useFaceQueue();
+
+  // Quando faceQueue terminar, re-executar reindexação automaticamente se pendente
+  const autoReindexRef = useRef<{ eventId: string; token: string } | null>(null);
+  const fqWasActive = useRef(false);
+  useEffect(() => {
+    const wasActive = fqWasActive.current;
+    fqWasActive.current = fqState.active;
+    if (wasActive && !fqState.active && autoReindexRef.current) {
+      const { eventId, token: t } = autoReindexRef.current;
+      autoReindexRef.current = null;
+      // Re-reindexar agora que as faces foram detectadas e salvas no KV
+      setReindexStatus('processing');
+      setReindexResult(null);
+      setReindexPhotoProgress({ current: 0, total: 0 });
+      setReindexLiveStats({ processed: 0, faces: 0, noFace: 0, failed: 0 });
+      reindexEventByPhoto(
+        eventId, t,
+        (cur, tot) => setReindexPhotoProgress({ current: cur, total: tot }),
+        ({ processed, faces, noFace, failed }) => setReindexLiveStats({ processed, faces, noFace, failed }),
+      ).then(stats => {
+        setReindexResult({ processed: stats.processed, noFace: stats.noFace, failed: stats.failed, faces: stats.faces });
+        setReindexProgress({ current: 1, total: 1 });
+        setReindexStatus('done');
+        showToast('ok', `Reindexação automática: ${stats.faces} faces indexadas!`);
+      }).catch((err: any) => {
+        setReindexError(err.message ?? 'Erro na reindexação automática');
+        setReindexStatus('error');
+      });
+    }
+  }, [fqState.active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [activeTab, setActiveTab] = useState<ConfigTab>('marca');
 
@@ -989,7 +1020,15 @@ export function AdminConfig() {
       setReindexResult(finalResult);
       setReindexProgress({ current: 1, total: 1 });
       setReindexStatus('done');
-      showToast('ok', `Reindexação concluída: ${stats.faces} faces em ${stats.total} fotos`);
+
+      // Se há fotos sem rosto, auto-enfileira detecção e agenda re-reindexação
+      if (stats.noFace > 0 && reindexEventId && reindexEventId !== 'ALL') {
+        autoReindexRef.current = { eventId: reindexEventId, token: t };
+        await redetectNoFace();
+        // redetectNoFace enfileira na faceQueue → useEffect acima vai re-reindexar ao terminar
+      } else {
+        showToast('ok', `Reindexação concluída: ${stats.faces} faces em ${stats.total} fotos`);
+      }
     } catch (err: any) {
       setReindexError(err.message ?? 'Erro desconhecido');
       setReindexStatus('error');
@@ -3293,43 +3332,43 @@ export function AdminConfig() {
                                     </p>
                                   )}
 
-                                  {/* Re-detectar sem rostos */}
+                                  {/* Status da detecção automática */}
                                   {noFaceCount > 0 && reindexEventId && reindexEventId !== 'ALL' && (
                                     <div className="rounded-xl p-3 space-y-2" style={{ background: isDark ? 'rgba(251,191,36,0.05)' : 'rgba(180,130,0,0.05)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.18)' : 'rgba(180,130,0,0.15)'}` }}>
-                                      <p className="text-xs" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
-                                        <strong>{noFaceCount}</strong> fotos sem rosto detectado. Detectar faces agora no browser (TinyFaceDetector + threshold 0.2)?
-                                      </p>
-                                      {redetectStatus === 'queued' && redetectCount === 0 && (
-                                        <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>✅ Todas as fotos já têm rostos detectados!</p>
+                                      {redetectStatus === 'loading' && (
+                                        <p className="text-xs flex items-center gap-1.5" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          Enfileirando {noFaceCount} fotos para detecção…
+                                        </p>
                                       )}
-                                      {redetectStatus === 'queued' && redetectCount > 0 && (
+                                      {redetectStatus === 'queued' && fqState.active && (
+                                        <p className="text-xs flex items-center gap-1.5" style={{ color: isDark ? '#86efac' : '#166534' }}>
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          Detectando faces no browser ({fqState.done}/{fqState.total})… reindexação automática ao concluir.
+                                        </p>
+                                      )}
+                                      {redetectStatus === 'queued' && !fqState.active && (
                                         <p className="text-xs" style={{ color: isDark ? '#86efac' : '#166534' }}>
-                                          ✅ {redetectCount} fotos enfileiradas! Acompanhe o progresso no toast verde. Após concluir, rode a reindexação novamente.
+                                          ✅ Detecção concluída! Reindexando automaticamente…
                                         </p>
                                       )}
                                       {redetectStatus === 'error' && (
-                                        <p className="text-xs" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Erro: {redetectError}</p>
+                                        <div className="space-y-1.5">
+                                          <p className="text-xs" style={{ color: isDark ? '#f87171' : '#dc2626' }}>Erro: {redetectError}</p>
+                                          <motion.button
+                                            whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                                            onClick={redetectNoFace}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
+                                            style={{ background: isDark ? 'rgba(251,191,36,0.12)' : 'rgba(180,130,0,0.1)', border: `1px solid ${isDark ? 'rgba(251,191,36,0.25)' : 'rgba(180,130,0,0.2)'}`, color: isDark ? '#fbbf24' : '#92400e', fontWeight: 700 }}
+                                          >
+                                            <RefreshCw className="w-3.5 h-3.5" /> Tentar novamente
+                                          </motion.button>
+                                        </div>
                                       )}
-                                      {redetectStatus !== 'queued' && (
-                                        <motion.button
-                                          whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
-                                          onClick={redetectNoFace}
-                                          disabled={redetectStatus === 'loading'}
-                                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs"
-                                          style={{
-                                            background: isDark ? 'rgba(251,191,36,0.12)' : 'rgba(180,130,0,0.1)',
-                                            border: `1px solid ${isDark ? 'rgba(251,191,36,0.25)' : 'rgba(180,130,0,0.2)'}`,
-                                            color: isDark ? '#fbbf24' : '#92400e',
-                                            fontWeight: 700,
-                                            cursor: redetectStatus === 'loading' ? 'not-allowed' : 'pointer',
-                                            opacity: redetectStatus === 'loading' ? 0.6 : 1,
-                                          }}
-                                        >
-                                          {redetectStatus === 'loading'
-                                            ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Carregando…</>
-                                            : <><RefreshCw className="w-3.5 h-3.5" /> Re-detectar sem rostos</>
-                                          }
-                                        </motion.button>
+                                      {redetectStatus === 'idle' && (
+                                        <p className="text-xs" style={{ color: isDark ? '#fbbf24' : '#92400e' }}>
+                                          <strong>{noFaceCount}</strong> fotos sem rosto — detecção automática iniciada.
+                                        </p>
                                       )}
                                     </div>
                                   )}
